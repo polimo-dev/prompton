@@ -1,0 +1,27 @@
+# Elixir / Mix
+_build/
+deps/
+*.ez
+*.beam
+erl_crash.dump
+.elixir_ls/
+.lexical/
+
+# Phoenix
+app/priv/static/assets/
+app/assets/node_modules/
+app/priv/plts/
+# env / secrets
+.env
+.env.*
+!.env.example
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+# OMC / claude runtime state
+.omc/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+sdk/elixir/doc/

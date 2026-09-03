@@ -1,0 +1,7 @@
+_build/
+deps/
+.env*
+!.env.example
+priv/static/assets/
+assets/node_modules/
+erl_crash.dump

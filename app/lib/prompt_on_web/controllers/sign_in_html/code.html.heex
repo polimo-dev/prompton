@@ -1,0 +1,56 @@
+<.auth_page id="sign-in-card" flash={@flash}>
+  <h2 class="auth-h2">Enter your code</h2>
+  <p class="auth-info">
+    Enter the code we sent to <strong id="sign-in-pending-email">{@email}</strong>. It expires in 5 minutes.
+  </p>
+
+  <p :if={@error} id="sign-in-code-error" class="auth-error-banner" role="alert">{@error}</p>
+
+  <.form for={%{}} id="sign-in-code-form" action={~p"/sign-in/verify"} method="post">
+    <div class="auth-field">
+      <label class="auth-label" for="sign-in-code">6-digit code</label>
+      <input
+        id="sign-in-code"
+        type="text"
+        name="code"
+        class={["auth-input", "auth-code-input", @error && "auth-input-error"]}
+        inputmode="numeric"
+        pattern="[0-9]{6}"
+        maxlength="6"
+        autocomplete="one-time-code"
+        autofocus
+        data-autosubmit="6"
+        required
+      />
+    </div>
+    <button id="sign-in-verify" type="submit" class="auth-submit">Sign in</button>
+  </.form>
+
+  <div class="auth-actions">
+    <.form for={%{}} id="sign-in-resend-form" action={~p"/sign-in/resend"} method="post">
+      <button id="sign-in-resend" type="submit" class="auth-link-button">Resend code</button>
+    </.form>
+    <.form for={%{}} id="sign-in-reset-form" action={~p"/sign-in/reset"} method="post">
+      <button id="sign-in-reset" type="submit" class="auth-link-button">
+        Use a different email
+      </button>
+    </.form>
+  </div>
+</.auth_page>
+<script>
+  // Once all six digits are typed (or pasted), submit right away without pressing the button
+  // (user instruction 2026-09-03).
+  (function () {
+    var input = document.getElementById("sign-in-code");
+    if (!input || !input.form) return;
+    var submitted = false;
+    input.addEventListener("input", function () {
+      var digits = input.value.replace(/\D/g, "");
+      if (digits.length === 6 && !submitted) {
+        submitted = true;
+        input.value = digits;
+        input.form.requestSubmit();
+      }
+    });
+  })();
+</script>

@@ -1,0 +1,439 @@
+/* PromptOn — dark-only design system.
+   The source of truth for the values is `design/DESIGN-resend.md` (tokens, typography, components,
+   do/don't). How those tokens map onto this codebase's variable names is set by
+   `design/resend-brief.md` — the variable **names** are referenced by dozens of inline styles, so
+   they stay as they are and only the **values** follow that document. Black canvas, translucent
+   white hairlines, white primary buttons, no shadows; blue survives only as `--link`. */
+
+@import "tailwindcss" source(none);
+@source "../../deps/ash_authentication_phoenix";
+@import "phoenix-colocated/prompton/colocated.css";
+@source "../css";
+@source "../js";
+@source "../../lib/prompt_on_web";
+/* Required for Tailwind to automatically pick up changes in colocated CSS files in dev */
+@source "../../_build/dev/phoenix-colocated/prompton/*/";
+
+/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
+   The heroicons installation itself is managed by your mix.exs */
+@plugin "../vendor/heroicons";
+
+/* daisyUI Tailwind Plugin. */
+@plugin "daisyui/packages/bundle/daisyui" {
+  themes: false;
+}
+
+/* The only theme. The app is dark-only by design, so there is no light/system toggle.
+   daisyUI colors are the same values as the `:root` tokens below — primary is white (on: black),
+   status colors are the spec's bright values. */
+@plugin "daisyui/packages/bundle/daisyui-theme" {
+  name: "promptdark";
+  default: true;
+  prefersdark: true;
+  color-scheme: "dark";
+  --color-base-100: #0a0a0c;
+  --color-base-200: #06060a;
+  --color-base-300: #000000;
+  --color-base-content: #fcfdff;
+  --color-primary: #fcfdff;
+  --color-primary-content: #000000;
+  --color-secondary: #101012;
+  --color-secondary-content: #fcfdff;
+  --color-accent: #fcfdff;
+  --color-accent-content: #000000;
+  --color-neutral: #101012;
+  --color-neutral-content: #fcfdff;
+  --color-info: #3b9eff;
+  --color-info-content: #000000;
+  --color-success: #11ff99;
+  --color-success-content: #000000;
+  --color-warning: #ffc53d;
+  --color-warning-content: #000000;
+  --color-error: #ff2047;
+  --color-error-content: #fcfdff;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* The app is dark-only — `dark:` utilities are always on, regardless of the OS setting.
+   (ash_authentication_phoenix's `/sign-out` confirmation page uses default classes such as
+   `dark:bg-gray-900`.) */
+@custom-variant dark (&);
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* ===========================================================================
+   design/DESIGN-resend.md `colors` / `rounded` → :root variables
+   (design/resend-brief.md §Token mapping)
+   =========================================================================== */
+:root {
+  --bg-0: #000000;   /* colors.canvas — true black. No near-black */
+  --bg-1: #06060a;   /* colors.surface-deep — code wells, sidebar */
+  --bg-2: #0a0a0c;   /* colors.surface-card — cards, inputs, rows */
+  --bg-3: #101012;   /* colors.surface-elevated — hover, ghost buttons, featured */
+  --bg-4: #16161a;   /* active / pressed (one step above elevated) */
+
+  --line: rgba(255,255,255,0.06);      /* colors.hairline — row separators, soft card edges */
+  --line-2: rgba(255,255,255,0.14);    /* colors.hairline-strong — card/input/code borders */
+  --line-3: rgba(255,255,255,0.28);    /* focus / selection edge */
+  --divider-soft: rgba(255,255,255,0.04);
+
+  --tx-0: #fcfdff;                     /* colors.ink */
+  --tx-body: rgba(252,253,255,0.86);   /* colors.body — long-form text */
+  --tx-1: rgba(252,253,255,0.70);      /* colors.charcoal — secondary */
+  --tx-2: #a1a4a5;                     /* colors.mute — secondary labels, disabled */
+  --tx-3: #888e90;                     /* colors.ash — tertiary */
+  --tx-4: #464a4d;                     /* colors.stone — disabled foreground */
+
+  --accent: #fcfdff;                   /* white is the accent — primary buttons, active states */
+  --accent-on: #000000;
+  --accent-h: #f1f7fe;                 /* colors.surface-light — pressed primary */
+  --accent-soft: rgba(252,253,255,0.08);
+  --accent-line: rgba(252,253,255,0.24);
+  --link: #3b9eff;                     /* colors.link — inline links only */
+
+  --ok: #11ff99;    /* status colors only as text, dots, 1px lines, 10–18% tints — no fills */
+  --warn: #ffc53d;
+  --err: #ff2047;
+  --ok-glow: rgba(34,255,153,0.18);
+  --warn-glow: rgba(255,89,0,0.22);
+  --err-glow: rgba(255,32,71,0.34);
+  --blue-glow: rgba(0,117,255,0.34);
+  --star: #ffc53d;                     /* star rating (reserved for Evals) — accent-yellow */
+  --violet: #8b7cf6;                   /* AI/eval badges only */
+  --violet-fg: #a99cf8;
+
+  --r-xs: 4px; --r-sm: 6px; --r: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 9999px;
+
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg-0);
+  color: var(--tx-0);
+  font-family: var(--font-ui);
+  font-feature-settings: normal;   /* Inter is used without OpenType features (spec) */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: rgba(252,253,255,0.18); }
+
+/* scrollbars */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.07); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); background-clip: padding-box; }
+
+/* Code is Geist Mono, no ligatures (spec code-md). */
+.font-mono { font-family: var(--font-mono); font-variant-ligatures: none; }
+code, kbd, pre, samp { font-family: var(--font-mono); font-variant-ligatures: none; }
+
+/* Keyboard focus — a single translucent white outline, no ring color */
+:focus-visible { outline: 2px solid rgba(252,253,255,0.35); outline-offset: 2px; }
+
+/* surfaces */
+.panel { background: var(--bg-1); }
+.card2 { background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-lg); }
+.hair { border: 1px solid var(--line); }
+.hair-b { border-bottom: 1px solid var(--line); }
+.hair-t { border-top: 1px solid var(--line); }
+.hair-r { border-right: 1px solid var(--line); }
+.hair-l { border-left: 1px solid var(--line); }
+
+.tx0 { color: var(--tx-0); } .tx1 { color: var(--tx-1); } .tx2 { color: var(--tx-2); } .tx3 { color: var(--tx-3); }
+
+/* Section label (resend-docs sidebar rule) — the name is historical but the typeface is Inter:
+   11px 600 uppercase 0.06em. */
+.mono-label { font-family: var(--font-ui); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tx-2); }
+
+/* Input focus — no ring, the border turns ink-colored (spec text-input) */
+.ring-acc:focus, .ring-acc:focus-within { outline: none; box-shadow: none; border-color: var(--tx-0) !important; }
+
+/* generic transitions — color, border and background only, 150ms */
+.tr { transition: background-color .15s ease, color .15s ease, border-color .15s ease, opacity .15s ease; }
+
+/* nav item — resend-docs: 13.5px, active is elevated background + ink */
+.navitem { color: var(--tx-1); border-radius: var(--r-sm); position: relative; text-decoration: none;
+  display: flex; align-items: center; gap: 10px; padding: 7px 9px; font-size: 13.5px; }
+.navitem:hover { background: var(--bg-3); color: var(--tx-0); }
+.navitem.active { background: var(--bg-3); color: var(--tx-0); }
+.navitem > span:last-child { white-space: nowrap; }
+
+/* ===========================================================================
+   App shell — sidebar (236px, bg-1, hairline on the right) + body panel.
+   Like resend-docs, the body sits inside a **rounded 16px panel** (bg-0, 1px line-2), inset 24px
+   from the window edges and the sidebar. The panel clips overflow, so a screen's (`DS.screen`)
+   scroll area stays inside the corners.
+   =========================================================================== */
+:root { --sidebar-w: 236px; --panel-inset: 24px; }
+html.sidebar-collapsed { --sidebar-w: 60px; }
+
+.app-shell { display: flex; height: 100%; background: var(--bg-0); }
+.app-main { flex: 1; min-width: 0; min-height: 0; display: flex; padding: var(--panel-inset); }
+.app-panel { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden;
+  background: var(--bg-0); border: 1px solid var(--line-2); border-radius: var(--r-xl); }
+
+@media (max-width: 900px) {
+  :root { --panel-inset: 12px; }
+}
+
+.sidebar { width: var(--sidebar-w); flex-shrink: 0; display: flex; flex-direction: column; height: 100%;
+  transition: width .15s ease; }
+
+/* Top row = current organization + collapse toggle. In the rail the two stack vertically
+   (they cannot sit side by side within 60px). */
+.sidebar-org { padding: 12px 10px 8px; display: flex; align-items: center; gap: 6px; }
+
+.sidebar-nav { padding: 2px 10px; display: flex; flex-direction: column; gap: 1px; flex: 1; overflow-y: auto; }
+.sidebar-subnav { position: relative; padding-left: 0; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-user > summary { padding: 10px; display: flex; align-items: center; gap: 9px; cursor: pointer;
+  border-radius: var(--r-sm); margin: 6px; }
+.sidebar-user > summary:hover, .sidebar-user[open] > summary { background: var(--bg-3); }
+
+.sidebar-toggle { width: 26px; height: 26px; flex-shrink: 0; padding: 0; display: flex;
+  align-items: center; justify-content: center; background: transparent; border: none;
+  border-radius: var(--r-sm); cursor: pointer; color: var(--tx-2); font-family: inherit; }
+.sidebar-toggle:hover { background: var(--bg-3); color: var(--tx-0); }
+.sidebar-toggle-icon { transform: rotate(180deg); transition: transform .15s ease; }
+
+/* Collapsed: labels disappear and the remaining icons are centered. The sidebar markup uses many
+   inline styles that came from the mockup, so the hide/align rules need !important. */
+html.sidebar-collapsed .sidebar-label,
+html.sidebar-collapsed .sidebar-full { display: none !important; }
+
+html.sidebar-collapsed .sidebar-org { flex-direction: column; gap: 4px; padding: 10px 0 6px; }
+html.sidebar-collapsed .sidebar-nav { padding-left: 6px; padding-right: 6px; }
+html.sidebar-collapsed .sidebar-subnav { padding-left: 0; }
+html.sidebar-collapsed .sidebar-switch { padding-left: 0 !important; padding-right: 0 !important; }
+html.sidebar-collapsed .navitem { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }
+html.sidebar-collapsed .dsswitch { flex: none !important; }
+html.sidebar-collapsed .dsswitch > summary { justify-content: center; padding-left: 0; padding-right: 0; }
+html.sidebar-collapsed .sidebar-user > summary { justify-content: center; padding-left: 0; padding-right: 0; }
+html.sidebar-collapsed .sidebar-toggle-icon { transform: none; }
+
+/* Dropdowns are unreadable inside the 60px rail — pull them out of the rail and float them at a
+   fixed width. (The rail holds only a few icons, so releasing the nav's scroll container cannot
+   overflow.) */
+html.sidebar-collapsed .sidebar-nav { overflow: visible; }
+html.sidebar-collapsed .dsswitch > .fadeup,
+html.sidebar-collapsed .sidebar-user > .fadeup { left: 6px !important; right: auto !important; width: 208px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebar-toggle-icon { transition: none; }
+}
+
+/* editor textarea — code typeface (spec code-md 13px / 1.6) */
+.ed { background: transparent; color: var(--tx-0); border: none; outline: none; resize: none; width: 100%;
+      font-family: var(--font-mono); font-variant-ligatures: none; font-size: 13px; line-height: 1.6; }
+.ed::placeholder { color: var(--tx-3); }
+
+/* Arena composer — code well recipe (bg-1, line-2, 12px). When focus enters it (:focus-within)
+   the border hardens to ink (this lives here because the rule cannot be an inline style). */
+.arena-composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 10px;
+  background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  transition: border-color .15s ease; }
+.arena-composer:focus-within { border-color: var(--tx-0); }
+
+/* skeleton shimmer */
+@keyframes shimmer { 0% { background-position: -480px 0; } 100% { background-position: 480px 0; } }
+.shimmer { background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.07) 37%, rgba(255,255,255,0.03) 63%); background-size: 960px 100%; animation: shimmer 1.4s infinite linear; border-radius: var(--r-xs); }
+
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.pulse { animation: pulse-dot 1.1s ease-in-out infinite; }
+
+@keyframes fadeup { from { transform: translateY(7px); } to { transform: none; } }
+.fadeup { animation: fadeup .3s cubic-bezier(.2,.7,.3,1); }
+
+@keyframes slidein { from { transform: translateX(10px); } to { transform: none; } }
+.slidein { animation: slidein .26s cubic-bezier(.2,.7,.3,1); }
+
+@keyframes blink { 50% { opacity: 0; } }
+.caret { display:inline-block; width:7px; height:14px; background: var(--tx-0); vertical-align:-2px; margin-left:1px; animation: blink 1s step-end infinite; border-radius:1px; }
+
+/* daisyUI tweaks */
+.btn { font-weight: 500; text-transform: none; min-height: 0; height: auto; }
+.badge { font-weight: 500; }
+.range::-webkit-slider-thumb { background: var(--tx-0); }
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--tx-0); }
+
+.grad-fade-b { -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+
+/* Segmented control — square segments without a pill on the card surface, no shadow */
+.seg { background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r); padding: 2px; display:flex; gap:2px; }
+.seg button, .seg a, .seg label { font-size: 13px; font-weight: 500; color: var(--tx-2); padding: 4px 10px; border-radius: var(--r-sm);
+  transition: background-color .15s ease, color .15s ease; }
+.seg button:hover, .seg a:hover, .seg label:hover { color: var(--tx-0); }
+.seg button.on, .seg a.on, .seg label.on { background: var(--bg-3); color: var(--tx-0); box-shadow: none; }
+
+/* Chip — a size between the spec's code-tab and badge-pill (6px) */
+.chip { display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:2px 8px; border-radius: var(--r-sm); background: var(--bg-3); border:1px solid var(--line-2); color: var(--tx-1); }
+
+/* ===========================================================================
+   Control recipes (design/resend-brief.md §Controls)
+   =========================================================================== */
+
+/* Btn — per-variant hover. Primary is black text on a white background, 8px radius, 36px. */
+.dsbtn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500;
+  border-radius: var(--r); cursor: pointer; border: 1px solid transparent; white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease, opacity .15s ease;
+  font-family: var(--font-ui); text-decoration: none; line-height: 1.43; }
+.dsbtn:disabled, .dsbtn[disabled], .dsbtn.is-disabled { opacity: .45; cursor: not-allowed; }
+
+.dsbtn-primary { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
+.dsbtn-primary:not([disabled]):hover, .dsbtn-primary:not([disabled]):active { background: var(--accent-h); border-color: var(--accent-h); }
+/* accent_soft — the former blue soft button. Now a soft ghost: 8% white tint + 24% line. */
+.dsbtn-accent_soft { background: var(--accent-soft); color: var(--tx-0); border-color: var(--accent-line); }
+.dsbtn-accent_soft:not([disabled]):hover { border-color: var(--line-3); }
+/* solid = spec button-ghost (elevated surface + strong hairline) */
+.dsbtn-solid { background: var(--bg-3); color: var(--tx-0); border-color: var(--line-2); }
+.dsbtn-solid:not([disabled]):hover { background: var(--bg-4); border-color: var(--line-3); }
+/* outline = spec button-outline (canvas background + strong hairline) */
+.dsbtn-outline { background: var(--bg-0); color: var(--tx-0); border-color: var(--line-2); }
+.dsbtn-outline:not([disabled]):hover { background: var(--bg-3); border-color: var(--line-3); }
+/* ghost = text only, elevated surface on hover */
+.dsbtn-ghost { background: transparent; color: var(--tx-1); border-color: transparent; }
+.dsbtn-ghost:not([disabled]):hover { background: var(--bg-3); color: var(--tx-0); }
+.dsbtn-ghost.is-active { background: var(--bg-3); color: var(--tx-0); }
+/* danger = outline + err text. No fill. */
+.dsbtn-danger { background: var(--bg-0); color: var(--err); border-color: var(--line-2); }
+.dsbtn-danger:not([disabled]):hover { border-color: var(--err); }
+
+.dsbtn-sm { font-size: 13px; padding: 4px 10px; height: 30px; }
+.dsbtn-md { font-size: 14px; padding: 8px 16px; height: 36px; }
+.dsbtn-lg { font-size: 15px; padding: 10px 18px; height: 40px; }
+
+/* IconBtn — 28–32px square, ghost recipe, 6px */
+.dsiconbtn { display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-sm);
+  border: none; cursor: pointer; flex-shrink: 0; background: transparent; color: var(--tx-1);
+  transition: background-color .15s ease, color .15s ease; text-decoration: none; }
+.dsiconbtn:hover, .dsiconbtn.is-active { background: var(--bg-3); color: var(--tx-0); }
+
+/* Table Row hover */
+.dsrow-click { cursor: pointer; }
+.dsrow-click:not(.is-selected):not(.has-tone):hover { background: var(--bg-3); }
+
+/* Menu items (organization, project and account popups) — same recipe as sidebar items */
+.dsmenu-item { width: 100%; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: var(--r-sm);
+  background: transparent; border: none; cursor: pointer; color: var(--tx-0); text-decoration: none; font-family: inherit; }
+.dsmenu-item:hover { background: var(--bg-3); }
+.dsmenu-item.is-current { background: var(--bg-3); }
+.dsmenu-item.is-current:hover { background: var(--bg-4); }
+
+/* Popup menu surface — card recipe (no shadow) */
+.dsmenu { background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-lg); padding: 5px; }
+
+/* Screen tabs (patch links) — underline tabs: mute text, active is ink with a selection-edge
+   underline */
+.dstab { display: flex; align-items: center; gap: 6px; padding: 9px 11px; background: transparent; border: none;
+  border-bottom: 1px solid transparent; cursor: pointer; color: var(--tx-2); font-size: 14px; font-weight: 400;
+  margin-bottom: -1px; text-decoration: none; }
+.dstab:hover { color: var(--tx-1); }
+.dstab.is-active { border-bottom-color: var(--line-3); color: var(--tx-0); font-weight: 500; }
+
+/* Organization row and project switcher (details/summary) — sidebar item recipe (no border,
+   elevated on hover) */
+.dsswitch > summary { list-style: none; }
+.dsswitch > summary::-webkit-details-marker { display: none; }
+.dsswitch > summary { width: 100%; display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-sm); cursor: pointer;
+  color: var(--tx-0); transition: background-color .15s ease; }
+.dsswitch > summary:hover, .dsswitch[open] > summary { background: var(--bg-3); }
+
+/* Stars */
+.dsstar { background: none; border: none; padding: 1px; display: flex; cursor: pointer; color: var(--tx-3); }
+.dsstars:hover .dsstar { color: var(--star); }
+.dsstar.is-on { color: var(--star); }
+.dsstar:hover ~ .dsstar { color: var(--tx-3) !important; }
+
+/* Collapsible (details/summary) */
+.dscollapse > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+  cursor: pointer; color: var(--tx-0); }
+.dscollapse > summary::-webkit-details-marker { display: none; }
+.dscollapse > summary .dscollapse-open { display: none; }
+.dscollapse[open] > summary .dscollapse-open { display: inline-flex; }
+.dscollapse[open] > summary .dscollapse-closed { display: none; }
+
+/* Toast — card recipe, no shadow */
+.dstoast { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-radius: var(--r-lg);
+  background: var(--bg-2); border: 1px solid var(--line-2); color: var(--tx-0); font-size: 14px; cursor: pointer; }
+
+/* details without a marker (user menu etc.) */
+details.dsplain > summary { list-style: none; }
+details.dsplain > summary::-webkit-details-marker { display: none; }
+
+/* ===========================================================================
+   Sign-in (`PromptOnWeb.SignInHTML` + `PromptOnWeb.AuthComponents`) — black canvas, wordmark in
+   the top-left corner, a centered 400px card, 40px inputs, a single white primary button. The code
+   field (`.auth-code-input`) is large Geist Mono.
+   =========================================================================== */
+.auth-root { min-height: 100dvh; display: grid; place-items: center; padding: 72px 24px 48px; background: var(--bg-0); }
+.auth-brand { position: fixed; top: 20px; left: 28px; z-index: 1; }
+.auth-wordmark { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; color: var(--tx-0); text-decoration: none; }
+.auth-card { width: 100%; max-width: 400px; background: var(--bg-2); border: 1px solid var(--line-2);
+  border-radius: var(--r-lg); padding: 28px; }
+.auth-strategy { width: 100%; }
+.auth-h2 { margin: 0 0 18px; font-size: 20px; font-weight: 500; line-height: 1.3; letter-spacing: -0.3px; color: var(--tx-0); }
+.auth-field { margin: 0 0 12px; }
+.auth-label { display: block; font-size: 13px; font-weight: 500; color: var(--tx-1); margin-bottom: 6px; }
+.auth-input { display: block; width: 100%; height: 40px; padding: 10px 14px; font-family: var(--font-ui); font-size: 14px;
+  color: var(--tx-0); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r);
+  outline: none; transition: border-color .15s ease; }
+.auth-input::placeholder { color: var(--tx-3); }
+.auth-input:focus { border-color: var(--tx-0); box-shadow: none; }
+.auth-input-error { border-color: var(--err); }
+.auth-input-error:focus { border-color: var(--err); }
+.auth-error-list { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--err); }
+.auth-error-banner { margin: 0 0 14px; padding: 9px 12px; font-size: 13px; color: var(--err);
+  background: rgba(255,32,71,0.10); border: 1px solid rgba(255,32,71,0.30); border-radius: var(--r); }
+.auth-submit { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 36px; margin: 18px 0 4px;
+  padding: 8px 16px; font-family: var(--font-ui); font-size: 14px; font-weight: 500; color: var(--accent-on);
+  background: var(--accent); border: 1px solid var(--accent); border-radius: var(--r); cursor: pointer;
+  transition: background-color .15s ease; }
+.auth-submit:hover, .auth-submit:active { background: var(--accent-h); border-color: var(--accent-h); }
+.auth-submit:disabled { opacity: .45; cursor: not-allowed; }
+.auth-interstitial { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.auth-toggler { color: var(--link); text-decoration: none; }
+.auth-toggler:hover { text-decoration: underline; }
+.auth-remember { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 13px; color: var(--tx-1); }
+.auth-checkbox { width: 14px; height: 14px; accent-color: var(--tx-0); }
+.auth-hr { position: relative; margin: 14px 0; }
+.auth-hr-line { position: absolute; inset: 0; display: flex; align-items: center; }
+.auth-hr-rule { width: 100%; border-top: 1px solid var(--line); }
+.auth-hr-text-outer { position: relative; display: flex; justify-content: center; font-size: 12px; }
+.auth-hr-text { padding: 0 8px; background: var(--bg-2); color: var(--tx-3); }
+.auth-info { font-size: 13px; color: var(--tx-2); margin-bottom: 14px; line-height: 1.5; }
+.auth-oauth { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 36px; margin: 8px 0;
+  font-size: 14px; font-weight: 500; color: var(--tx-0); background: var(--bg-3); border: 1px solid var(--line-2);
+  border-radius: var(--r); text-decoration: none; }
+.auth-oauth:hover { border-color: var(--line-3); }
+.auth-flash { position: fixed; top: 20px; right: 20px; z-index: 50; max-width: 380px; padding: 10px 14px; font-size: 13px;
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-lg); color: var(--tx-0); }
+.auth-flash-info { color: var(--ok); }
+.auth-flash-error { color: var(--err); }
+/* 6-digit code field — monospace, large, letter-spaced so the digit positions read. */
+.auth-code-input { height: 52px; font-family: var(--font-mono); font-size: 24px; font-weight: 500;
+  letter-spacing: 0.35em; text-align: center; font-variant-ligatures: none; }
+/* The two actions below the code field (Resend code, Use a different email) — POST buttons that
+   look like links */
+.auth-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.auth-link-button { margin: 0; padding: 0; border: 0; background: none; font-family: var(--font-ui);
+  font-size: 13px; color: var(--link); cursor: pointer; }
+.auth-link-button:hover { text-decoration: underline; }

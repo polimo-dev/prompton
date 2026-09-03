@@ -1,0 +1,27 @@
+<.auth_page id="sign-in-card" flash={@flash}>
+  <h2 class="auth-h2">Sign in to PromptOn</h2>
+  <p class="auth-info">
+    Enter your email and we'll send you a 6-digit code. No password — a new address becomes an account on its first sign-in.
+  </p>
+
+  <.form for={%{}} id="sign-in-form" action={~p"/sign-in"} method="post">
+    <div class="auth-field">
+      <label class="auth-label" for="sign-in-email">Email</label>
+      <input
+        id="sign-in-email"
+        type="email"
+        name="email"
+        value={@email}
+        class={["auth-input", @error && "auth-input-error"]}
+        placeholder="you@example.com"
+        autocomplete="email"
+        autofocus
+        required
+      />
+      <ul :if={@error} class="auth-error-list">
+        <li>{@error}</li>
+      </ul>
+    </div>
+    <button id="sign-in-send" type="submit" class="auth-submit">Send code</button>
+  </.form>
+</.auth_page>

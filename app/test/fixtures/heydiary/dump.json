@@ -1,0 +1,254 @@
+{
+  "ai_tasks": [
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000101",
+      "task_name": "voice_transcription",
+      "language": "ko",
+      "system_prompt": "The speech is in Korean. If there is no clear speech or only silence/noise, return an empty string. Do not make up common expressions such as greetings, thank-yous or news phrases.",
+      "temperature": null,
+      "created_at": "2026-01-05T09:00:00Z",
+      "updated_at": "2026-01-05T09:00:00Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000102",
+      "task_name": "voice_transcription",
+      "language": null,
+      "system_prompt": "If there is no clear speech or only silence/noise, return empty. Do not generate common phrases like greetings, thanks, or news broadcasts.",
+      "temperature": null,
+      "created_at": "2026-01-05T09:00:01Z",
+      "updated_at": "2026-01-05T09:00:01Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000103",
+      "task_name": "transcript_revision",
+      "language": "ko",
+      "system_prompt": "You are an editor correcting Korean speech-to-text output.\n\nIf a proper noun listed under [Named Entities] was misrecognized in [Transcript], replace it with the correct name.\n- Return only the corrected text (no explanations)",
+      "temperature": 0.1,
+      "created_at": "2026-01-05T09:00:02Z",
+      "updated_at": "2026-01-05T09:00:02Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000104",
+      "task_name": "transcript_revision",
+      "language": null,
+      "system_prompt": "You are an editor correcting speech-to-text output.\n\nIf a proper noun listed under [Named Entities] was misrecognized in [Transcript], replace it with the correct name. Leave placeholders such as {{date}} or {% now %} untouched.\n- Return only the corrected text (no explanations)",
+      "temperature": 0.1,
+      "created_at": "2026-01-05T09:00:03Z",
+      "updated_at": "2026-01-05T09:00:03Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000105",
+      "task_name": "diary_generation",
+      "language": "ko",
+      "system_prompt": "You are a personal diary assistant. Your task is to transform voice transcriptions into a well-structured, coherent diary entry written in Korean.\n\nGuidelines:\n- Write in first-person perspective, maintaining the user's authentic voice and emotions\n- IMPORTANT: Convert colloquial/spoken endings to written diary style. Use the plain written past-tense narrative endings instead of the casual conversational endings.\n- Remove filler words (um, uh, etc.) and false starts\n\nCONTENT PRESERVATION (CRITICAL):\n- Transform transcriptions into diary format WITHOUT summarizing or abbreviating content\n",
+      "temperature": 0.5,
+      "created_at": "2026-01-05T09:00:04Z",
+      "updated_at": "2026-02-01T12:00:00Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000106",
+      "task_name": "diary_generation",
+      "language": null,
+      "system_prompt": "You are a personal diary assistant. Your task is to transform voice transcriptions into a well-structured, coherent diary entry written in the user's language.\n\nGuidelines:\n- Write in first-person perspective, maintaining the user's authentic voice and emotions\n- Remove filler words (um, uh, etc.) and false starts\n\nCONTENT PRESERVATION (CRITICAL):\n- Transform transcriptions into diary format WITHOUT summarizing or abbreviating content\n",
+      "temperature": 0.4,
+      "created_at": "2026-01-05T09:00:05Z",
+      "updated_at": "2026-01-05T09:00:05Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000107",
+      "task_name": "mood_inference",
+      "language": null,
+      "system_prompt": "You are a mood analyzer. Read the diary entry and return only a single integer from -3 (very negative) to +3 (very positive).",
+      "temperature": 0.1,
+      "created_at": "2026-01-05T09:00:06Z",
+      "updated_at": "2026-01-05T09:00:06Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000108",
+      "task_name": "chat_response",
+      "language": null,
+      "system_prompt": "You are HeyDiary, a warm and thoughtful companion who knows the user's diary. Answer in the user's language, refer to their diary entries when relevant, and keep responses concise.",
+      "temperature": 0.7,
+      "created_at": "2026-01-05T09:00:07Z",
+      "updated_at": "2026-01-05T09:00:07Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000109",
+      "task_name": "memory_extraction",
+      "language": null,
+      "system_prompt": "Extract long-term memories about the user from the conversation. Return a JSON array of objects with keys group_type (\"named_entity\" or \"user_info\"), name (for named entities) and content. Return [] when there is nothing new.",
+      "temperature": 0.3,
+      "created_at": "2026-01-05T09:00:08Z",
+      "updated_at": "2026-01-05T09:00:08Z"
+    },
+    {
+      "id": "6a1e0f10-0000-4000-8000-000000000110",
+      "task_name": "diary_search_content",
+      "language": null,
+      "system_prompt": "Summarize the diary entry into a short, search-friendly paragraph in the requested output language. Keep names, places and events; drop filler.",
+      "temperature": null,
+      "created_at": "2026-01-05T09:00:09Z",
+      "updated_at": "2026-01-05T09:00:09Z"
+    }
+  ],
+  "ai_models": [
+    {
+      "id": "b2c3d4e5-0000-4000-8000-000000000201",
+      "model": "google/gemini-3.6-flash",
+      "display_name": "Gemini 3.6 Flash",
+      "description_key": "gemini36Flash",
+      "providers": ["google-ai-studio", "google-vertex"],
+      "created_at": "2026-01-05T09:10:00Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    },
+    {
+      "id": "b2c3d4e5-0000-4000-8000-000000000202",
+      "model": "openai/gpt-5.4",
+      "display_name": "GPT-5.4",
+      "description_key": "gpt54",
+      "providers": null,
+      "created_at": "2026-01-05T09:10:01Z",
+      "updated_at": "2026-01-05T09:10:01Z"
+    },
+    {
+      "id": "b2c3d4e5-0000-4000-8000-000000000203",
+      "model": "openai/gpt-oss-120b",
+      "display_name": "GPT-OSS",
+      "description_key": "gptOss",
+      "providers": ["groq"],
+      "created_at": "2026-01-05T09:10:02Z",
+      "updated_at": "2026-01-05T09:10:02Z"
+    },
+    {
+      "id": "b2c3d4e5-0000-4000-8000-000000000204",
+      "model": "anthropic/claude-sonnet-4.5",
+      "display_name": "Claude Sonnet 4.5",
+      "description_key": null,
+      "providers": [],
+      "created_at": "2026-02-10T09:10:03Z",
+      "updated_at": "2026-02-10T09:10:03Z"
+    }
+  ],
+  "plan_ai_models": [
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000301",
+      "plan": "free",
+      "task_name": "diary_generation",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000201",
+      "allow_fallbacks": true,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-01-10T00:00:00Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000302",
+      "plan": "pro",
+      "task_name": "diary_generation",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000204",
+      "allow_fallbacks": false,
+      "temperature": 0.6,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-02-10T00:00:00Z",
+      "updated_at": "2026-02-10T00:00:00Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000303",
+      "plan": "free",
+      "task_name": "mood_inference",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000203",
+      "allow_fallbacks": false,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-01-10T00:00:01Z",
+      "updated_at": "2026-01-10T00:00:01Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000304",
+      "plan": "free",
+      "task_name": "chat_response",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000201",
+      "allow_fallbacks": true,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-01-10T00:00:02Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000305",
+      "plan": "pro",
+      "task_name": "chat_response",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000202",
+      "allow_fallbacks": false,
+      "temperature": 0.8,
+      "is_default": true,
+      "sort_order": 1,
+      "created_at": "2026-01-10T00:00:03Z",
+      "updated_at": "2026-01-10T00:00:03Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000306",
+      "plan": "max",
+      "task_name": "chat_response",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000204",
+      "allow_fallbacks": false,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 1,
+      "created_at": "2026-02-10T00:00:04Z",
+      "updated_at": "2026-02-10T00:00:04Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000307",
+      "plan": "free",
+      "task_name": "chat_response",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000203",
+      "allow_fallbacks": false,
+      "temperature": 0.9,
+      "is_default": false,
+      "sort_order": 2,
+      "created_at": "2026-01-10T00:00:05Z",
+      "updated_at": "2026-01-10T00:00:05Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000308",
+      "plan": "free",
+      "task_name": "memory_extraction",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000201",
+      "allow_fallbacks": true,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-01-10T00:00:06Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000309",
+      "plan": "free",
+      "task_name": "diary_search_content",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000201",
+      "allow_fallbacks": true,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-01-10T00:00:07Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    },
+    {
+      "id": "c3d4e5f6-0000-4000-8000-000000000310",
+      "plan": "free",
+      "task_name": "transcript_revision",
+      "ai_model_id": "b2c3d4e5-0000-4000-8000-000000000201",
+      "allow_fallbacks": true,
+      "temperature": null,
+      "is_default": true,
+      "sort_order": 0,
+      "created_at": "2026-01-10T00:00:08Z",
+      "updated_at": "2026-03-01T00:00:00Z"
+    }
+  ]
+}

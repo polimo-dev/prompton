@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="promptdark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title default="PromptOn" suffix=" · PromptOn" phx-no-format>{assigns[:page_title]}</.live_title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
+    <script>
+      // Sidebar collapse is a per-device chrome preference (not subject to the URL state
+      // discipline), so it lives in localStorage. The class has to be added **before** first paint
+      // so the expanded sidebar does not flash and then collapse. Toggling and saving belong to the
+      // colocated hook in Layouts (.SidebarToggle).
+      try {
+        if (window.localStorage.getItem("pon:sidebar") === "collapsed") {
+          document.documentElement.classList.add("sidebar-collapsed");
+        }
+      } catch (_e) { /* localStorage blocked — expanded default */ }
+    </script>
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
+    </script>
+  </head>
+  <body>
+    {@inner_content}
+  </body>
+</html>
