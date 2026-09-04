@@ -263,8 +263,8 @@ defmodule PromptOnWeb.OrgHomeLive do
   Name → slug suggestion. Only produces values that satisfy the Project `slug` constraint
   (`^[a-z0-9][a-z0-9-]{0,62}$`).
 
-      iex> PromptOnWeb.OrgHomeLive.slugify("Hey Diary!")
-      "hey-diary"
+      iex> PromptOnWeb.OrgHomeLive.slugify("Acme Helpdesk!")
+      "acme-helpdesk"
 
       iex> PromptOnWeb.OrgHomeLive.slugify(nil)
       ""
@@ -410,10 +410,10 @@ defmodule PromptOnWeb.OrgHomeLive do
             phx-submit="create_project"
           >
             <SC.form_label text="name" />
-            <DS.ds_input field={@new_form[:name]} placeholder="HeyDiary" />
+            <DS.ds_input field={@new_form[:name]} placeholder="Helpdesk" />
             <SC.field_error field={@new_form[:name]} />
             <SC.form_label text="key (slug)" style="margin-top:14px;" />
-            <DS.ds_input field={@new_form[:slug]} mono placeholder="heydiary" />
+            <DS.ds_input field={@new_form[:slug]} mono placeholder="helpdesk" />
             <SC.field_error field={@new_form[:slug]} />
             <div style="font-size:12.5px;color:var(--tx-2);margin-top:7px;line-height:1.55;">
               The key is used as-is in URLs and SDK config — it can't be changed after creation.

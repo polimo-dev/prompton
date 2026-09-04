@@ -65,7 +65,7 @@ defmodule PromptOnWeb.IntegrationComponents do
   placeholder matching the type.
 
       iex> PromptOnWeb.IntegrationComponents.curl_snippet(%{
-      ...>   host: "https://app.example.com", use_case_key: "diary", kind: :chat,
+      ...>   host: "https://app.example.com", use_case_key: "support_reply", kind: :chat,
       ...>   environment: "production", prompts: ["default"], variables: []
       ...> }) =~ "https://app.example.com/api/v1/resolve"
       true
@@ -148,9 +148,9 @@ defmodule PromptOnWeb.IntegrationComponents do
   key, prompt names and variable table.
 
       iex> PromptOnWeb.IntegrationComponents.ai_prompt(%{
-      ...>   host: "https://app.example.com", use_case_key: "diary", kind: :chat,
+      ...>   host: "https://app.example.com", use_case_key: "support_reply", kind: :chat,
       ...>   environment: "production", prompts: ["default", "ko"], variables: []
-      ...> }) =~ ~s|"use_case": "diary"|
+      ...> }) =~ ~s|"use_case": "support_reply"|
       true
   """
   @spec ai_prompt(spec()) :: String.t()
@@ -203,8 +203,8 @@ defmodule PromptOnWeb.IntegrationComponents do
     {"use_case": "#{spec.use_case_key}", "kind": "#{spec.kind}",
      "deployment": {"id": "…", "revision": 12},
     #{resolve_prompt_line(spec)}
-     "model_id": "…", "model": "anthropic/claude-sonnet-4", "provider": "openrouter",
-     "effective_params": {"temperature": 0.4},
+     "model_id": "…", "model": "openai/gpt-4o-mini", "provider": "openrouter",
+     "effective_params": {"temperature": 0.3},
      "effective_provider_options": {"allow_fallbacks": false},
     #{resolve_pin_lines(spec.kind)}
      "warnings": [], "etag": "sha256-…"}
@@ -265,14 +265,14 @@ defmodule PromptOnWeb.IntegrationComponents do
        "use_case": "#{spec.use_case_key}",
        "deployment_id": "…", "deployment_revision": 12,
     #{log_pin_line(spec)}
-       "kind": "#{spec.kind}", "model": "anthropic/claude-sonnet-4", "provider": "openrouter",
-       "params": {"temperature": 0.4},
+       "kind": "#{spec.kind}", "model": "openai/gpt-4o-mini", "provider": "openrouter",
+       "params": {"temperature": 0.3},
        "input": {"variables": {}, "messages": [{"role": "system", "content": "…"}]},
        "output": {"content": "…"},
        "status": "ok", "finish_reason": "stop", "stop_kind": "stop",
-       "usage": {"input_tokens": 1830, "output_tokens": 412, "cost_usd": 0.00312},
-       "latency_ms": 4180, "started_at": "2026-09-01T09:12:03.123Z",
-       "trace_id": "job:88213", "end_user_ref": "u_…", "metadata": {}}
+       "usage": {"input_tokens": 512, "output_tokens": 96, "cost_usd": 0.000134},
+       "latency_ms": 940, "started_at": "2026-09-01T09:12:03.123Z",
+       "trace_id": "ticket:88213", "end_user_ref": "cust_8f31", "metadata": {"ticket_id": 88213}}
     ]}
     ```
 

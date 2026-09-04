@@ -1,7 +1,7 @@
 defmodule PromptOn.Prompts.UseCase do
   @moduledoc """
   A use case = "one LLM call site" of the app (plan.md §5.5, the place of HeyDiary's `ai_tasks`).
-  `key` (`diary_generation`) is the SDK contract, so it is stored without normalization via
+  `key` (`support_reply`) is the SDK contract, so it is stored without normalization via
   `@raw_string`.
 
   - `kind` is `:chat` (a message array template) | `:text` (a single string, the Groq STT `prompt`)
@@ -120,7 +120,7 @@ defmodule PromptOn.Prompts.UseCase do
     uuid_v7_primary_key :id
 
     attribute :key, :string do
-      description "Name the SDK uses (`diary_generation`). Lowercase letters, digits, underscores."
+      description "Name the SDK uses (`support_reply`). Lowercase letters, digits, underscores."
       allow_nil? false
       public? true
       constraints @raw_string ++ [match: ~r/^[a-z][a-z0-9_]*$/]

@@ -1486,7 +1486,7 @@ defmodule PromptOnWeb.DS do
   the only such function. With a palette per screen, the same project would show up blue in the
   sidebar and orange on the card.
 
-      iex> PromptOnWeb.DS.project_color("heydiary") =~ "#"
+      iex> PromptOnWeb.DS.project_color("helpdesk") =~ "#"
       true
 
       iex> PromptOnWeb.DS.project_color("acme") == PromptOnWeb.DS.project_color("acme")

@@ -331,7 +331,7 @@ defmodule PromptOnWeb.UseCasesLive do
             <DS.ds_input
               id="use-case-key"
               field={@form[:key]}
-              placeholder="diary_summary"
+              placeholder="support_reply"
               mono
               phx-debounce="200"
               autocomplete="off"

@@ -87,7 +87,7 @@ Search the codebase for provider SDKs and for raw HTTP to provider hosts: `opena
 
 | collect | becomes |
 |---|---|
-| a stable snake_case name for the call site (`diary_generation`) | use case `key` (cannot change later) |
+| a stable snake_case name for the call site (`support_reply`) | use case `key` (cannot change later) |
 | chat messages vs a single string vs an embedding call | `kind`: `chat` \| `text` \| `embedding` |
 | every value interpolated into the prompt (f-strings, template placeholders, string concatenation) | `input_schema` variables and `{{ name }}` placeholders |
 | language/tone/tenant variants of the same prompt | prompt names (`default`, `ko`, …) |
@@ -212,47 +212,49 @@ Provisioning talks to the server, so it does not depend on the worktree — but 
 **One PromptOn project per deployable app**: one runtime key, one snapshot. Services that ship and scale independently get separate projects; services that make up one app share a project and are told apart by use case key.
 
 ```sh
-prompton projects create heydiary --name HeyDiary --timezone Asia/Seoul --idempotent
-prompton use --project heydiary
+prompton projects create helpdesk --name Helpdesk --timezone Etc/UTC --idempotent
+prompton use --project helpdesk
 
 # use case: kind + declared variables (from the placeholders you found)
 cat > schema.json <<'EOF'
-[{"name": "transcriptions", "type": "list", "required": true,
-  "description": "Today's voice notes, oldest first"}]
+[{"name": "question", "type": "string", "required": true,
+  "description": "The customer's message"},
+ {"name": "plan", "type": "string", "required": false,
+  "description": "free or pro"}]
 EOF
-prompton use-cases create diary_generation --kind chat --name 'Diary generation' \
+prompton use-cases create support_reply --kind chat --name 'Support reply' \
   --input-schema-file schema.json --default-params '{"temperature":0.5}' --idempotent
 
 # version 1 = the app's prompt, verbatim, with placeholders as {{ variable }} (Liquid)
 cat > messages.json <<'EOF'
-[{"role": "system", "content": "You write diaries."},
- {"role": "user", "content": "{% for t in transcriptions %}{{ t }}\n{% endfor %}"}]
+[{"role": "system", "content": "You are a friendly support agent for Acme. Answer in two or three sentences; if you are not sure, say so and offer to escalate."},
+ {"role": "user", "content": "{{ question }}"}]
 EOF
-prompton prompts commit diary_generation default --file messages.json \
+prompton prompts commit support_reply default --file messages.json \
   --message "migrated from the app's hardcoded prompt"
 
 # a second name only if the app already branched (e.g. by language)
-prompton prompts open diary_generation ko --description Korean --idempotent
-prompton prompts commit diary_generation ko --file messages.ko.json
+prompton prompts open support_reply ko --description Korean --idempotent
+prompton prompts commit support_reply ko --file messages.ko.json
 
 # register the model with the provider the app actually calls, BEFORE deploying:
 # `prompton deploy` registers an unknown model as provider `openrouter`, which is wrong
 # for an app that calls OpenAI or Anthropic directly. `deploy` has no --provider flag.
-#   prompton models register gpt-4o --provider openai
+#   prompton models register gpt-4o-mini --provider openai
 #   prompton models register claude-sonnet-4-5-20250929 --provider anthropic
 # (this example app really does call OpenRouter, so its default is already right)
 
 # the app's current model and params, unchanged
-prompton deploy diary_generation --environment production \
-  --model anthropic/claude-sonnet-4 --params '{"temperature":0.4}'
-prompton deploy diary_generation --environment staging \
-  --model anthropic/claude-sonnet-4 --params '{"temperature":0.4}'
+prompton deploy support_reply --environment production \
+  --model openai/gpt-4o-mini --params '{"temperature":0.3}'
+prompton deploy support_reply --environment staging \
+  --model openai/gpt-4o-mini --params '{"temperature":0.3}'
 
 # one runtime key per project; the secret is printed once
-PTN_KEY=$(prompton api-keys issue --name 'HeyDiary server' --quiet)
+PTN_KEY=$(prompton api-keys issue --name 'Helpdesk server' --quiet)
 ```
 
-**The model string is the app's, byte for byte.** `model_id` is the exact string the app already passes to its provider client — `gpt-4o` for the OpenAI SDK, `claude-sonnet-4-5-20250929` for the Anthropic SDK, `anthropic/claude-sonnet-4` only when the app really calls OpenRouter. Do not reformat it to match the examples on this page: the app reads it back out of the snapshot and sends it to the provider unchanged, so a "normalised" id is a 404 on every call, at runtime, after the migration looks finished. The provider is a property of the **catalog entry**, not of the deployment: `prompton models register <model-id> --provider openrouter|openai|anthropic|google|groq` sets it, and registering first is the only way to keep an app that calls a provider directly from being pointed at OpenRouter.
+**The model string is the app's, byte for byte.** `model_id` is the exact string the app already passes to its provider client — `gpt-4o-mini` for the OpenAI SDK, `claude-sonnet-4-5-20250929` for the Anthropic SDK, `openai/gpt-4o-mini` only when the app really calls OpenRouter. Do not reformat it to match the examples on this page: the app reads it back out of the snapshot and sends it to the provider unchanged, so a "normalised" id is a 404 on every call, at runtime, after the migration looks finished. The provider is a property of the **catalog entry**, not of the deployment: `prompton models register <model-id> --provider openrouter|openai|anthropic|google|groq` sets it, and registering first is the only way to keep an app that calls a provider directly from being pointed at OpenRouter.
 
 Template rules: engine `liquid` (default) or `raw`; allowed tags `for` `if` `unless` `assign` `break` `continue`, allowed filters `size` `join` `default`, no whitespace-control markers (`{%-`, `-%}`); anything else (e.g. `{% include %}`) is rejected at commit with 400. `detected_variables` in the commit response is the list to mirror in `input_schema`. `kind: text` commits `--file` as a text template; `kind: embedding` has no prompts. A `chat`/`text` use case is born with a prompt named `default`; if `default` exists it must be pinned.
 
@@ -260,7 +262,7 @@ Prove the pin resolves before touching code:
 
 ```sh
 curl -sS -H "Authorization: Bearer $PTN_KEY" -H 'content-type: application/json' \
-  -d '{"use_case":"diary_generation","variables":{"transcriptions":["a","b"]}}' \
+  -d '{"use_case":"support_reply","variables":{"question":"My invoice shows two charges this month."}}' \
   https://<host>/api/v1/resolve
 ```
 
@@ -282,7 +284,7 @@ For the bundled snapshot use the task the SDK ships rather than a hand-rolled fe
 
 - a snapshot poller (§4.1) with the memory cache, the disk cache and the bundled snapshot (§1.9);
 - the local resolve algorithm from §4.1 (deployment → prompt version → model → layered params and provider options);
-- template rendering for the `liquid` and `raw` engines. **Liquid is a real template language, not `{{ }}` substitution** — the allowed set includes `{% for %}` and `{% if %}`, and the example prompt above is a loop. Use a genuine Liquid implementation (Python `python-liquid`, JavaScript `liquidjs`, Ruby `liquid`, Go `osteele/liquid`). A regex over `{{ name }}` silently drops every tag body, and Jinja2 only *looks* the same: its `default` behaves differently, it has no `size` filter, and it will render something other than what the PromptOn arena and the web app show. If the language has no Liquid library, either keep every prompt to bare `{{ name }}` placeholders with no tags, or render server-side with `POST /resolve` (§4.2) and accept the round-trip per call — the snapshot cache is still what keeps the app alive when PromptOn is down (§1.9);
+- template rendering for the `liquid` and `raw` engines. **Liquid is a real template language, not `{{ }}` substitution** — the allowed set includes `{% for %}` and `{% if %}`, and any prompt that walks a list (a conversation, a set of retrieved documents) is built from them. Use a genuine Liquid implementation (Python `python-liquid`, JavaScript `liquidjs`, Ruby `liquid`, Go `osteele/liquid`). A regex over `{{ name }}` silently drops every tag body, and Jinja2 only *looks* the same: its `default` behaves differently, it has no `size` filter, and it will render something other than what the PromptOn arena and the web app show. If the language has no Liquid library, either keep every prompt to bare `{{ name }}` placeholders with no tags, or render server-side with `POST /resolve` (§4.2) and accept the round-trip per call — the snapshot cache is still what keeps the app alive when PromptOn is down (§1.9);
 - a monitoring-log buffer that batches, truncates per the use case's `payload_policy` (§4.3), retries `429` and 5xx (honour `Retry-After`; back off otherwise), splits a `413` batch in half, and drops on any other 4xx.
 
 Call sites then depend on that module and nothing else. Keep each surrounding function's signature so callers do not change, and delete the hard-coded prompt text, model name and params from the repo.
@@ -356,26 +358,26 @@ Global flags on every command: `--host`, `--token`, `--org <slug|personal>`, `--
 | `logout` | `prompton logout` (revokes this token server-side, clears it locally, keeps the host) |
 | `whoami` | `prompton whoami --json` |
 | `orgs list` | `prompton orgs list --json` |
-| `use --org O [--project P]` | `prompton use --org acme-inc --project heydiary` |
+| `use --org O [--project P]` | `prompton use --org acme --project helpdesk` |
 | `projects list` | `prompton projects list --json` |
-| `projects create <slug> [--name N] [--timezone TZ]` | `prompton projects create heydiary --name HeyDiary --idempotent` |
+| `projects create <slug> [--name N] [--timezone TZ]` | `prompton projects create helpdesk --name Helpdesk --idempotent` |
 | `use-cases list` | `prompton use-cases list --json` |
-| `use-cases get <key>` | `prompton use-cases get diary_generation --json` (prompts, versions, live deployments) |
-| `use-cases create <key> [--kind chat\|text\|embedding] [--name N] [--description D] [--input-schema-file F] [--default-params JSON] [--tags a,b]` | `prompton use-cases create diary_generation --kind chat --input-schema-file schema.json` |
-| `use-cases update <key> [--name] [--description] [--tags] [--input-schema-file] [--default-params]` | `prompton use-cases update diary_generation --default-params '{"temperature":0.3}'` (schema/params replace, not merge) |
-| `prompts open <use-case> <name> [--description D]` | `prompton prompts open diary_generation ko --description Korean` |
-| `prompts commit <use-case> <name> --file F [--format auto\|messages\|text] [--engine liquid\|raw] [--message M]` | `prompton prompts commit diary_generation default --file messages.json --message "v1"` (`--file -` reads stdin) |
+| `use-cases get <key>` | `prompton use-cases get support_reply --json` (prompts, versions, live deployments) |
+| `use-cases create <key> [--kind chat\|text\|embedding] [--name N] [--description D] [--input-schema-file F] [--default-params JSON] [--tags a,b]` | `prompton use-cases create support_reply --kind chat --input-schema-file schema.json` |
+| `use-cases update <key> [--name] [--description] [--tags] [--input-schema-file] [--default-params]` | `prompton use-cases update support_reply --default-params '{"temperature":0.3}'` (schema/params replace, not merge) |
+| `prompts open <use-case> <name> [--description D]` | `prompton prompts open support_reply ko --description Korean` |
+| `prompts commit <use-case> <name> --file F [--format auto\|messages\|text] [--engine liquid\|raw] [--message M]` | `prompton prompts commit support_reply default --file messages.json --message "v1"` (`--file -` reads stdin) |
 | `models list` | `prompton models list --json` |
-| `models register <model-id> [--provider P] [--display-name N]` | `prompton models register anthropic/claude-sonnet-4` |
-| `deploy <use-case> --model M [--environment E] [--params JSON] [--provider-options JSON] [--pin name=version ...]` | `prompton deploy diary_generation --model anthropic/claude-sonnet-4 --pin default=1 --pin ko=latest` |
-| `deployments list <use-case> [--environment E]` | `prompton deployments list diary_generation --environment production` (history) |
-| `rollback <use-case> --revision N [--environment E]` | `prompton rollback diary_generation --revision 2 --environment production` |
+| `models register <model-id> [--provider P] [--display-name N]` | `prompton models register openai/gpt-4o-mini` |
+| `deploy <use-case> --model M [--environment E] [--params JSON] [--provider-options JSON] [--pin name=version ...]` | `prompton deploy support_reply --model openai/gpt-4o-mini --pin default=1 --pin ko=latest` |
+| `deployments list <use-case> [--environment E]` | `prompton deployments list support_reply --environment production` (history) |
+| `rollback <use-case> --revision N [--environment E]` | `prompton rollback support_reply --revision 2 --environment production` |
 | `api-keys issue [--name N] [--scopes resolve,logs]` | `PTN_KEY=$(prompton api-keys issue --quiet)` |
 | `api-keys list` | `prompton api-keys list --json` |
 | `provider-key set [--secret S] [--label L]` | `PTN_OPENROUTER_KEY=sk-or-… prompton provider-key set` |
 | `provider-key status` | `prompton provider-key status --json` |
 
-- `--model` takes a provider string (`anthropic/claude-sonnet-4`, registered on the fly) or a catalog UUID. `--pin` takes a version number, `latest`, or a version UUID; omit `--pin` to pin the newest committed version of every prompt. Promote = same `deploy` with another `--environment`.
+- `--model` takes a provider string (`openai/gpt-4o-mini`, registered on the fly) or a catalog UUID. `--pin` takes a version number, `latest`, or a version UUID; omit `--pin` to pin the newest committed version of every prompt. Promote = same `deploy` with another `--environment`.
 - `--json`: stdout carries exactly one JSON document (create/get commands print the object; lists print `{"projects": [...]}` etc.); progress goes to stderr. Failures are JSON on stderr in the API envelope plus `"status"`: `{"error": {"code": "not_found", "message": "…", "status": 404, "details": {…}}}`.
 - Exit codes: `0` ok · `1` the server or network said no (including "already exists" without `--idempotent`) · `2` wrong invocation (retype the command).
 - `--idempotent`: creates that hit 409 print the existing resource and exit 0, so a provisioning script reruns cleanly.
@@ -417,9 +419,9 @@ Limits: `/device/code` 20 requests / 10 min / IP, `/device/token` 600 / 10 min /
 ```jsonc
 GET  /orgs/:org/projects                      // {"projects": [...]}; archived ones are absent
 POST /orgs/:org/projects
-     {"key": "heydiary", "name": "HeyDiary", "timezone": "Asia/Seoul"}   // key (alias "slug") required; name defaults to key; timezone defaults to Etc/UTC
+     {"key": "helpdesk", "name": "Helpdesk", "timezone": "Etc/UTC"}   // key (alias "slug") required; name defaults to key; timezone defaults to Etc/UTC
 // 201
-{"id": "…", "slug": "heydiary", "name": "HeyDiary", "timezone": "Asia/Seoul", "created_at": "…",
+{"id": "…", "slug": "helpdesk", "name": "Helpdesk", "timezone": "Etc/UTC", "created_at": "…",
  "environments": [{"id": "…", "slug": "production", "name": "Production", "protected": true},
                   {"id": "…", "slug": "staging", "name": "Staging", "protected": false}]}
 // 400 missing/malformed/reserved key · 409 {"details": {"project": {...}}}
@@ -430,19 +432,19 @@ POST /orgs/:org/projects
 ```jsonc
 GET  /orgs/:org/projects/:project/use-cases            // {"use_cases": [...]}
 POST /orgs/:org/projects/:project/use-cases
-     {"key": "diary_generation", "name": "Diary generation", "kind": "chat", "description": "…",
-      "input_schema": [{"name": "transcriptions", "type": "list", "required": true, "description": "…", "example": "…"}],
-      "default_params": {"temperature": 0.5}, "tags": ["diary"]}
+     {"key": "support_reply", "name": "Support reply", "kind": "chat", "description": "…",
+      "input_schema": [{"name": "question", "type": "string", "required": true, "description": "…", "example": "…"}],
+      "default_params": {"temperature": 0.5}, "tags": ["support"]}
 // 201 {"id","key","name","description","kind","input_schema","default_params","tags","created_at"}
 // key required ([a-z0-9_], starts with a letter); kind chat (default) | text | embedding; type string|number|boolean|list|map
 // 400 bad kind / schema · 409 {"details": {"use_case": {...}}}
 
 GET  /orgs/:org/projects/:project/use-cases/:key       // use case + prompts + live deployments
-{"id": "…", "key": "diary_generation", "kind": "chat", "input_schema": [...], "default_params": {...}, "tags": [], "created_at": "…",
+{"id": "…", "key": "support_reply", "kind": "chat", "input_schema": [...], "default_params": {...}, "tags": ["support"], "created_at": "…",
  "prompts": [{"id": "…", "name": "default", "description": null, "created_at": "…", "version_count": 2,
-              "versions": [{"id": "…", "number": 2, "message": "shorter", "detected_variables": ["transcriptions"], "created_at": "…"}]}],
+              "versions": [{"id": "…", "number": 2, "message": "shorter", "detected_variables": ["question"], "created_at": "…"}]}],
  "deployments": [{"id": "…", "revision": 3, "environment": "production", "model_id": "<catalog uuid>",
-                  "model": "anthropic/claude-sonnet-4", "params": {...}, "provider_options": {...},
+                  "model": "openai/gpt-4o-mini", "params": {...}, "provider_options": {...},
                   "prompt_pins": {"default": "<version uuid>", "ko": "<version uuid>"}, "created_at": "…"}]}
 // 404 {"details": {"use_case": "nope"}}; `versions` holds the 20 most recent
 
@@ -456,12 +458,12 @@ POST /orgs/:org/projects/:project/use-cases/:key/prompts
      {"name": "ko", "description": "Korean"}                      // 201 {"id","name","description","created_at"}; "default" already exists → 409 details.prompt
 
 POST /orgs/:org/projects/:project/use-cases/:key/prompts/:name/versions
-     {"messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "{{ transcript }}"}],
+     {"messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "{{ question }}"}],
       "engine": "liquid", "message": "migrated from the app"}      // kind chat
      {"text_template": "…"}                                        // kind text
 // 201
 {"id": "…", "prompt_id": "…", "number": 1, "engine": "liquid", "messages": [...], "text_template": null,
- "detected_variables": ["transcript"], "message": "migrated from the app", "content_sha256": "…", "created_at": "…"}
+ "detected_variables": ["question"], "message": "migrated from the app", "content_sha256": "…", "created_at": "…"}
 // 400 content does not match kind / lint failure / a message missing role or content · 404 unknown name {"details": {"prompt": "ja", "available_prompts": ["default"]}}
 ```
 
@@ -472,10 +474,10 @@ Versions are immutable; committing again yields `number + 1`. Committing alone c
 ```jsonc
 GET  /orgs/:org/projects/:project/models        // {"models": [...]}, archived excluded
 POST /orgs/:org/projects/:project/models
-     {"model_id": "anthropic/claude-sonnet-4", "provider": "openrouter", "display_name": "Claude Sonnet 4",
-      "metadata": {}, "provider_options": {"only": ["Anthropic"]},
-      "pricing": {"input_per_m": 3.0, "output_per_m": 15.0, "currency": "USD", "unit": "token"},
-      "context_length": 200000, "capabilities": ["tools", "streaming"], "status": "active"}
+     {"model_id": "openai/gpt-4o-mini", "provider": "openrouter", "display_name": "GPT-4o-mini",
+      "metadata": {}, "provider_options": {"only": ["OpenAI"]},
+      "pricing": {"input_per_m": 0.15, "output_per_m": 0.6, "currency": "USD", "unit": "token"},
+      "context_length": 128000, "capabilities": ["tools", "streaming"], "status": "active"}
 // 201 — same fields plus "id" (the catalog UUID a deployment pins) and "created_at"
 // only model_id is required; provider defaults to openrouter; OpenRouter models get display_name/pricing/context_length filled from the public catalog
 // 400 missing model_id / bad pricing · 409 {"details": {"model": {...}}}
@@ -490,9 +492,9 @@ GET  /orgs/:org/projects/:project/use-cases/:key/deployments                    
 GET  /orgs/:org/projects/:project/use-cases/:key/deployments?environment=staging    // that environment's history, newest first
 POST /orgs/:org/projects/:project/use-cases/:key/deployments
      {"environment": "production",                       // default production
-      "model_id": "<catalog uuid>",                      // or "model": "anthropic/claude-sonnet-4" (registered if missing; model_id wins if both)
+      "model_id": "<catalog uuid>",                      // or "model": "openai/gpt-4o-mini" (registered if missing; model_id wins if both)
       "prompt_pins": {"default": "<version uuid>", "ko": "<version uuid>"},   // omit → newest committed version of every prompt
-      "params": {"temperature": 0.4},                    // layered over use case default_params
+      "params": {"temperature": 0.3},                    // layered over use case default_params
       "provider_options": {"allow_fallbacks": false}}    // layered over the model's provider_options
 // 201 {"id","revision","environment","model_id","model","params","provider_options","prompt_pins","created_at"}
 // 400 no model · 404 unknown model_id (details.model_id) / environment (details.environment)
@@ -510,8 +512,8 @@ A revision is live the moment it is committed. Embedding use cases pin `{}`.
 ```jsonc
 GET  /orgs/:org/projects/:project/api-keys      // {"api_keys": [{"id","name","key_prefix","scopes","last_used_at","created_at"}]} — no secret
 POST /orgs/:org/projects/:project/api-keys
-     {"name": "HeyDiary server", "scopes": ["resolve", "logs"]}    // name defaults to "CLI key"; scopes default to both
-// 201 {"id","name","key_prefix","scopes","last_used_at","created_at","key": "ptn_heydiary_…"}  ← the only time "key" is returned
+     {"name": "Helpdesk server", "scopes": ["resolve", "logs"]}    // name defaults to "CLI key"; scopes default to both
+// 201 {"id","name","key_prefix","scopes","last_used_at","created_at","key": "ptn_helpdesk_…"}  ← the only time "key" is returned
 // 400 unknown scope or non-list scopes
 
 GET  /orgs/:org/provider-key      // {"connected": false, "provider": "openrouter"} or {"connected": true, "id","provider","label","hint": "sk-or-v1-••••4Xa2","last_used_at","created_at"}
@@ -535,22 +537,23 @@ If-None-Match: "sha256-…"          → 304 with an empty body when unchanged
 Response headers: `ETag: "sha256-<hex>"` (sha256 of the canonical body), `Last-Modified`, `Cache-Control: max-age=30`. Body (schema v3):
 
 ```jsonc
-{"schema_version": 3, "project": "heydiary", "environment": "production",
+{"schema_version": 3, "project": "helpdesk", "environment": "production",
  "use_cases": {
-   "diary_generation": {"id": "…", "kind": "chat",
-     "input_schema": [{"name": "transcriptions", "type": "list", "required": true}],
+   "support_reply": {"id": "…", "kind": "chat",
+     "input_schema": [{"name": "question", "type": "string", "required": true},
+                      {"name": "plan", "type": "string", "required": false}],
      "default_params": {"temperature": 0.5},
      "payload_policy": {"mode": "full", "sample_rate": 1.0, "max_bytes": 262144, "retention_days": 30, "encrypt": true}}},
  "deployments": {
-   "diary_generation": {"id": "…", "revision": 3, "model_id": "<catalog uuid>",
-     "params": {"temperature": 0.4}, "provider_options": {"allow_fallbacks": false},
+   "support_reply": {"id": "…", "revision": 3, "model_id": "<catalog uuid>",
+     "params": {"temperature": 0.3}, "provider_options": {"allow_fallbacks": false},
      "prompt_pins": {"default": "<version uuid>", "ko": "<version uuid>"}}},
  "prompt_versions": {
    "<version uuid>": {"id": "…", "prompt_id": "…", "number": 2, "engine": "liquid",
      "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…"}], "text_template": null}},
  "models": {
-   "<catalog uuid>": {"id": "…", "provider": "openrouter", "model_id": "anthropic/claude-sonnet-4", "display_name": "…",
-     "metadata": {}, "provider_options": {"only": ["Anthropic"]}, "capabilities": ["tools"], "status": "active"}}}
+   "<catalog uuid>": {"id": "…", "provider": "openrouter", "model_id": "openai/gpt-4o-mini", "display_name": "…",
+     "metadata": {}, "provider_options": {"only": ["OpenAI"]}, "capabilities": ["tools"], "status": "active"}}}
 ```
 
 Resolve locally (`<-` = shallow merge, right side wins):
@@ -569,46 +572,46 @@ Poll every 10 s by default with `If-None-Match` (a `304` costs nothing); keep th
 
 ```jsonc
 // request
-{"use_case": "diary_generation",          // required
+{"use_case": "support_reply",             // required
  "environment": "production",             // default production
  "prompt": "ko",                          // default "default"; the only selection axis
- "variables": {"transcriptions": ["a", "b"]}}   // present → rendered; absent → raw template
+ "variables": {"question": "My invoice shows two charges this month."}}   // present → rendered; absent → raw template
 // 200
-{"use_case": "diary_generation", "kind": "chat",
+{"use_case": "support_reply", "kind": "chat",
  "deployment": {"id": "…", "revision": 3},
  "prompt": "ko", "prompts": ["default", "ko"],
- "model_id": "<catalog uuid>", "model": "anthropic/claude-sonnet-4", "provider": "openrouter",
- "effective_params": {"temperature": 0.4},
- "effective_provider_options": {"only": ["Anthropic"], "allow_fallbacks": false},
+ "model_id": "<catalog uuid>", "model": "openai/gpt-4o-mini", "provider": "openrouter",
+ "effective_params": {"temperature": 0.3},
+ "effective_provider_options": {"only": ["OpenAI"], "allow_fallbacks": false},
  "prompt_version": {"id": "…", "number": 1},
  "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…rendered…"}],   // kind text: "text": "…"; embedding: neither, prompt null, prompts [], prompt_version null
  "warnings": [], "etag": "sha256-…"}
 ```
 
-Errors: 400 `invalid_request` — `use_case` missing, `variables` not an object, `prompt` not a non-empty string, environment not a string, or a required variable missing (`{"details": {"missing_variable": "transcriptions"}}`); 404 `not_found` — unknown `use_case`, no live deployment (`{"details": {"reason": "unresolved"}}`), unpinned prompt name (`{"details": {"reason": "unknown_prompt", "prompt": "ja", "available_prompts": ["default", "ko"]}}`), unknown environment. Not cached: a just-committed revision shows immediately.
+Errors: 400 `invalid_request` — `use_case` missing, `variables` not an object, `prompt` not a non-empty string, environment not a string, or a required variable missing (`{"details": {"missing_variable": "question"}}`); 404 `not_found` — unknown `use_case`, no live deployment (`{"details": {"reason": "unresolved"}}`), unpinned prompt name (`{"details": {"reason": "unknown_prompt", "prompt": "ja", "available_prompts": ["default", "ko"]}}`), unknown environment. Not cached: a just-committed revision shows immediately.
 
 ### 4.3 `POST /generations?environment=production` — monitoring logs
 
 ```jsonc
 {"generations": [
   {"id": "<UUIDv7 made by the app>",         // required — idempotency key
-   "use_case": "diary_generation",           // required (unknown keys are stored, not rejected)
-   "model": "anthropic/claude-sonnet-4",     // required — provider model string
+   "use_case": "support_reply",              // required (unknown keys are stored, not rejected)
+   "model": "openai/gpt-4o-mini",            // required — provider model string
    "status": "ok",                           // required — "ok" | "error"
    "started_at": "2026-09-01T09:12:03.123Z", // required — ISO 8601; ≤ 5 min in the future, ≤ 7 days in the past
    "kind": "chat",                           // chat (default) | text | embedding
-   "deployment_id": "…", "deployment_revision": 3, "prompt": "ko", "prompt_version_id": "…", "model_id": "<catalog uuid>",
+   "deployment_id": "…", "deployment_revision": 3, "prompt": "default", "prompt_version_id": "…", "model_id": "<catalog uuid>",
    "resolution_source": "remote",            // remote | disk | bundle | manual
-   "provider": "openrouter", "model_used": "…", "upstream_provider": "Anthropic",
-   "params": {"temperature": 0.4},           // > 4 KB → blanked, listed in metadata.truncated_fields
+   "provider": "openrouter", "model_used": "…", "upstream_provider": "OpenAI",
+   "params": {"temperature": 0.3},           // > 4 KB → blanked, listed in metadata.truncated_fields
    "input": {"variables": {...}, "messages": [{"role": "system", "content": "…"}], "truncated": false},   // or {"text": "…"}
    "output": {"content": "…", "tool_calls": [], "truncated": false},
    "finish_reason": "stop", "stop_kind": "stop",   // stop | length | tool_call | content_filter | other; derived from finish_reason when absent
    "error": {"kind": "rate_limited", "status": 429, "message": "…"},   // on status "error": kind http_4xx | http_5xx | rate_limited | timeout | transport | parse | app
-   "usage": {"input_tokens": 1830, "output_tokens": 412, "cost_usd": 0.00312, "cost_source": "provider", "raw": {}},   // cost_source provider | catalog | unknown; raw > 16 KB → blanked
-   "latency_ms": 4180, "trace_id": "job:88213", "sequence": 1, "end_user_ref": "u_…",
-   "context": {"language": "ko", "plan": "pro"},   // ≤ 2 KB or the record is rejected
-   "metadata": {"job_id": 88213},                  // ≤ 4 KB or the record is rejected
+   "usage": {"input_tokens": 512, "output_tokens": 96, "cost_usd": 0.000134, "cost_source": "provider", "raw": {}},   // cost_source provider | catalog | unknown; raw > 16 KB → blanked
+   "latency_ms": 940, "trace_id": "ticket:88213", "sequence": 1, "end_user_ref": "cust_8f31",
+   "context": {"language": "en", "plan": "pro"},   // ≤ 2 KB or the record is rejected
+   "metadata": {"ticket_id": 88213},               // ≤ 4 KB or the record is rejected
    "sdk": {"name": "myapp-prompton-client", "version": "0.1.0"}}
 ]}
 // 202
