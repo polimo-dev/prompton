@@ -61,7 +61,7 @@ defmodule PromptOnWeb.Endpoint do
   # request logs are written as-is.
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
-  # Body cap: `POST /api/v1/generations` is ≤5MB (plan.md §6.1 - batches of ≤200 records). The other
+  # Body cap: `POST /api/v1/logs` is ≤5MB (plan.md §6.1 - batches of ≤200 records). The other
   # APIs have a 1MB convention, but the parser is global so it stays at 5MB (lowered from the
   # default 8MB). Exceeding it raises Plug.Parsers.RequestTooLargeError -> 413.
   plug Plug.Parsers,

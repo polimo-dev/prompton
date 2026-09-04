@@ -47,7 +47,7 @@ defmodule PromptOn.MixProject do
       {:logger_json, "~> 7.0"},
       {:prompton_sdk,
        git: "https://github.com/polimo-dev/prompton-elixir.git",
-       ref: "86e8d920234aba5c07dc93489e4119c49198fda5"},
+       ref: "c20bbe121be8cf13c90d009d169e60f539c2d39b"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},

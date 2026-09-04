@@ -101,7 +101,7 @@ defmodule PromptOn.Projects.ProjectTest do
     assert String.length(raw) == String.length(prefix) + 32
     assert key.key_prefix == String.slice(raw, 0, 16)
     assert key.key_hash == PromptOn.Projects.ApiKey.hash(raw)
-    assert key.scopes == [:resolve, :logs]
+    assert key.scopes == [:read, :logs]
 
     assert {:ok, %{id: id}} = Projects.api_key_by_raw_key(raw)
     assert id == key.id

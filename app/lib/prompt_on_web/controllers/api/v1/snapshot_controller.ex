@@ -1,9 +1,9 @@
 defmodule PromptOnWeb.API.V1.SnapshotController do
   @moduledoc """
-  `GET /api/v1/snapshot` - the SDK's main path (plan.md §6.2, snapshot v3 / ADR 0007). The full
+  `GET /api/v1/use-cases` - the SDK's main path (plan.md §6.2, schema v4 / ADR 0007). The full
   deployment state of one environment.
 
-  - Scope `:resolve`.
+  - Scope `:read`.
   - The environment is chosen by the **query parameter** `?environment=<slug>` (default
     `production`) - keys are project-level (2026-09-01). An unknown environment is 404.
   - `ETag` = sha256 of the canonical JSON body (`"sha256-<hex>"`, a strong ETag including the
@@ -22,7 +22,7 @@ defmodule PromptOnWeb.API.V1.SnapshotController do
   alias PromptOn.Deployments.SnapshotCache
   alias PromptOnWeb.API.V1.RequestEnvironment
 
-  plug PromptOnWeb.Plugs.RequireScope, :resolve
+  plug PromptOnWeb.Plugs.RequireScope, :read
 
   action_fallback PromptOnWeb.API.V1.FallbackController
 

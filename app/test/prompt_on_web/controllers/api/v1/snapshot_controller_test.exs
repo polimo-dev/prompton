@@ -14,18 +14,18 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
   defp authed(conn, raw), do: put_req_header(conn, "authorization", "Bearer #{raw}")
 
   test "401 without a key", %{conn: conn} do
-    conn = get(conn, ~p"/api/v1/snapshot")
+    conn = get(conn, ~p"/api/v1/use-cases")
     assert %{"error" => %{"code" => "unauthorized"}} = json_response(conn, 401)
 
-    conn = build_conn() |> authed("ptn_production_nope") |> get(~p"/api/v1/snapshot")
+    conn = build_conn() |> authed("ptn_production_nope") |> get(~p"/api/v1/use-cases")
     assert json_response(conn, 401)
   end
 
-  test "403 with a key lacking the resolve scope", %{conn: conn, hd: hd} do
+  test "403 with a key lacking the read scope", %{conn: conn, hd: hd} do
     {_key, raw} = api_key_fixture(hd.project, scopes: [:logs])
-    conn = conn |> authed(raw) |> get(~p"/api/v1/snapshot")
+    conn = conn |> authed(raw) |> get(~p"/api/v1/use-cases")
     assert %{"error" => %{"code" => "forbidden", "message" => msg}} = json_response(conn, 403)
-    assert msg =~ "resolve"
+    assert msg =~ "read"
   end
 
   test "200 with canonical body, ETag, Last-Modified, Cache-Control", %{
@@ -34,7 +34,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     api_key: api_key,
     raw: raw
   } do
-    conn = conn |> authed(raw) |> get(~p"/api/v1/snapshot")
+    conn = conn |> authed(raw) |> get(~p"/api/v1/use-cases")
     assert conn.status == 200
     assert [content_type] = get_resp_header(conn, "content-type")
     assert content_type =~ "application/json"
@@ -47,7 +47,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     assert get_resp_header(conn, "cache-control") == ["max-age=30"]
 
     body = Jason.decode!(conn.resp_body)
-    assert body["schema_version"] == 3
+    assert body["schema_version"] == 4
     assert body["environment"] == "production"
 
     # A revision is a **pin**: one model + one version per prompt name (no rules, no targets).
@@ -63,7 +63,9 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
 
     refute Map.has_key?(diary, "rules")
     refute Map.has_key?(body, "dimensions")
-    assert {:ok, _data, []} = PromptOnSDK.SnapshotData.decode_json(conn.resp_body)
+
+    assert {:ok, data, []} = PromptOnSDK.UseCaseDocument.decode_json(conn.resp_body)
+    assert data.schema_version == 4
   end
 
   test "?environment= picks the environment; the same project key reads both", %{
@@ -72,7 +74,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     raw: raw
   } do
     # Defaults to production
-    body = json_response(conn |> authed(raw) |> get(~p"/api/v1/snapshot"), 200)
+    body = json_response(conn |> authed(raw) |> get(~p"/api/v1/use-cases"), 200)
     assert body["environment"] == "production"
 
     # When given, that environment; keys are per project, so the same key reads it (2026-09-01)
@@ -82,7 +84,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
         prompt_pins: %{"default" => hd.prompt_versions.chat.id}
       })
 
-    conn = build_conn() |> authed(raw) |> get(~p"/api/v1/snapshot?environment=staging")
+    conn = build_conn() |> authed(raw) |> get(~p"/api/v1/use-cases?environment=staging")
     body = json_response(conn, 200)
     assert body["environment"] == "staging"
     assert Map.keys(body["deployments"]) == ["chat_response"]
@@ -90,19 +92,19 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
 
     # The two environments' ETags differ (their contents differ)
     [production_etag] =
-      build_conn() |> authed(raw) |> get(~p"/api/v1/snapshot") |> get_resp_header("etag")
+      build_conn() |> authed(raw) |> get(~p"/api/v1/use-cases") |> get_resp_header("etag")
 
     [staging_etag] = get_resp_header(conn, "etag")
     refute production_etag == staging_etag
   end
 
   test "an unknown environment is 404, a blank one is 400", %{conn: conn, raw: raw} do
-    conn2 = build_conn() |> authed(raw) |> get(~p"/api/v1/snapshot?environment=canary")
+    conn2 = build_conn() |> authed(raw) |> get(~p"/api/v1/use-cases?environment=canary")
 
     assert %{"error" => %{"code" => "not_found", "details" => %{"environment" => "canary"}}} =
              json_response(conn2, 404)
 
-    conn3 = conn |> authed(raw) |> get(~p"/api/v1/snapshot?environment=")
+    conn3 = conn |> authed(raw) |> get(~p"/api/v1/use-cases?environment=")
 
     assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
              json_response(conn3, 400)
@@ -111,7 +113,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
   end
 
   test "304 with matching If-None-Match (quoted, weak, list)", %{conn: conn, raw: raw} do
-    first = conn |> authed(raw) |> get(~p"/api/v1/snapshot")
+    first = conn |> authed(raw) |> get(~p"/api/v1/use-cases")
     [etag] = get_resp_header(first, "etag")
 
     for header <- [etag, "W/#{etag}", ~s("sha256-other", #{etag})] do
@@ -119,7 +121,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
         build_conn()
         |> authed(raw)
         |> put_req_header("if-none-match", header)
-        |> get(~p"/api/v1/snapshot")
+        |> get(~p"/api/v1/use-cases")
 
       assert conn.status == 304, "expected 304 for #{header}"
       assert conn.resp_body == ""
@@ -130,7 +132,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
       build_conn()
       |> authed(raw)
       |> put_req_header("if-none-match", ~s("sha256-stale"))
-      |> get(~p"/api/v1/snapshot")
+      |> get(~p"/api/v1/use-cases")
 
     assert conn.status == 200
   end
@@ -139,7 +141,7 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     conn: conn,
     raw: raw
   } do
-    conn = conn |> authed(raw) |> get(~p"/api/v1/snapshot?environment=staging")
+    conn = conn |> authed(raw) |> get(~p"/api/v1/use-cases?environment=staging")
     body = json_response(conn, 200)
     assert body["environment"] == "staging"
     assert body["deployments"] == %{}
@@ -169,10 +171,10 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
 
     on_exit(fn -> :telemetry.detach(handler) end)
 
-    assert (conn |> authed(raw) |> get(~p"/api/v1/snapshot")).status == 200
+    assert (conn |> authed(raw) |> get(~p"/api/v1/use-cases")).status == 200
     assert_receive {:cache, :miss}
 
-    second = build_conn() |> authed(raw) |> get(~p"/api/v1/snapshot")
+    second = build_conn() |> authed(raw) |> get(~p"/api/v1/use-cases")
     assert second.status == 200
     assert_receive {:cache, :hit}
     refute_receive {:cache, :miss}, 20

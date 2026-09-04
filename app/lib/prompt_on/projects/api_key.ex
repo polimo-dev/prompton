@@ -1,6 +1,6 @@
 defmodule PromptOn.Projects.ApiKey do
   @moduledoc """
-  SDK machine key: **owned by a project**, `scopes [:resolve, :logs]`, only the sha256 hash is
+  SDK machine key: **owned by a project**, `scopes [:read, :logs]`, only the sha256 hash is
   stored (plan.md §5.4). The raw `ptn_<project_slug>_<random32>` leaves **exactly once**, as the
   `:raw_key` metadata of the `:issue` result.
 
@@ -100,10 +100,11 @@ defmodule PromptOn.Projects.ApiKey do
     attribute :scopes, {:array, :atom} do
       allow_nil? false
       public? true
-      # `:resolve` = config-fetch (`GET /snapshot`, `POST /resolve`), `:logs` = monitoring logs
-      # (`POST /generations`). `:logs` replaced `:ingest` on 2026-09-01 (agent-first-spec §2).
-      default [:resolve, :logs]
-      constraints items: [one_of: [:resolve, :logs]]
+
+      # `:read` = config-fetch (`GET /use-cases`, `POST /use-cases/:key/prompt`), `:logs` = monitoring logs
+      # (`POST /logs`). `:logs` replaced `:ingest` on 2026-09-01 (agent-first-spec §2).
+      default [:read, :logs]
+      constraints items: [one_of: [:read, :logs]]
     end
 
     attribute :last_used_at, :utc_datetime_usec, public?: true

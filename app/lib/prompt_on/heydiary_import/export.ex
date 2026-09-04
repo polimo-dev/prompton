@@ -1,6 +1,7 @@
 defmodule PromptOn.HeyDiaryImport.Export do
   @moduledoc """
-  Reverse direction (for rollback): PromptOn **snapshot v3** (live Deployment = pin) → HeyDiary
+  Reverse direction (for rollback): PromptOn **schema-v4 use-case document**
+  (live Deployment = pin) → HeyDiary
   `ai_models` / `ai_tasks` / `plan_ai_models` UPSERT SQL (plan.md §12.2 last paragraph, ADR 0007
   revision 2026-09-01). Brings the tables up to date when, during the parallel-run period, edits
   happened only in PromptOn and you roll back to the HeyDiary DB path.
@@ -45,7 +46,7 @@ defmodule PromptOn.HeyDiaryImport.Export do
   """
 
   alias PromptOn.HeyDiaryImport.{Dump, Spec}
-  alias PromptOnSDK.{Params, SnapshotData, Template}
+  alias PromptOnSDK.{Params, Template, UseCaseDocument}
 
   @lossy_warning [
     "-- WARNING: this export is LOSSY.",
@@ -55,8 +56,8 @@ defmodule PromptOn.HeyDiaryImport.Export do
     "-- the app's job now (see docs/adr/0007 — \"deployments are pins\")."
   ]
 
-  @doc "Snapshot (`%SnapshotData{}` or map) → SQL string."
-  @spec sql(SnapshotData.t() | map()) :: String.t()
+  @doc "Use-case document (`%UseCaseDocument{}` or map) → SQL string."
+  @spec sql(UseCaseDocument.t() | map()) :: String.t()
   def sql(snapshot) do
     snapshot = decode!(snapshot)
     specs = exportable_specs()
@@ -101,7 +102,7 @@ defmodule PromptOn.HeyDiaryImport.Export do
     end)
   end
 
-  defp deployment(snapshot, key), do: SnapshotData.deployment(snapshot, key)
+  defp deployment(snapshot, key), do: UseCaseDocument.deployment(snapshot, key)
 
   defp pinned_model(snapshot, key) do
     with %{model_id: model_id} when is_binary(model_id) <- deployment(snapshot, key),
@@ -241,10 +242,10 @@ defmodule PromptOn.HeyDiaryImport.Export do
   defp jsonb(nil), do: "NULL"
   defp jsonb(value), do: str(Jason.encode!(value)) <> "::jsonb"
 
-  defp decode!(%SnapshotData{} = snapshot), do: snapshot
+  defp decode!(%UseCaseDocument{} = snapshot), do: snapshot
 
   defp decode!(map) when is_map(map) do
-    case SnapshotData.decode(map) do
+    case UseCaseDocument.decode(map) do
       {:ok, snapshot, _warnings} -> snapshot
       {:error, reason} -> raise ArgumentError, "invalid snapshot: #{inspect(reason)}"
     end

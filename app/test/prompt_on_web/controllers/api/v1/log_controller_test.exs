@@ -1,5 +1,5 @@
-defmodule PromptOnWeb.API.V1.GenerationControllerTest do
-  @moduledoc "POST /api/v1/generations (plan.md §6.4, docs/api.md)."
+defmodule PromptOnWeb.API.V1.LogControllerTest do
+  @moduledoc "POST /api/v1/logs (plan.md §6.4, docs/api.md)."
 
   use PromptOnWeb.ConnCase, async: true
 
@@ -10,7 +10,7 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
   setup %{conn: conn} do
     project = project_fixture()
     use_case = use_case_fixture(project, %{key: "diary_generation"})
-    {api_key, raw} = api_key_fixture(project, scopes: [:resolve, :logs])
+    {api_key, raw} = api_key_fixture(project, scopes: [:read, :logs])
 
     conn =
       conn
@@ -22,20 +22,20 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
 
   test "401 without a key" do
     conn = build_conn() |> put_req_header("content-type", "application/json")
-    conn = post(conn, ~p"/api/v1/generations", Jason.encode!(%{"generations" => []}))
+    conn = post(conn, ~p"/api/v1/logs", Jason.encode!(%{"logs" => []}))
     assert %{"error" => %{"code" => "unauthorized"}} = json_response(conn, 401)
   end
 
-  test "403 with a resolve-only key", %{project: project, use_case: use_case} do
-    {_key, raw} = api_key_fixture(project, scopes: [:resolve])
+  test "403 with a read-only key", %{project: project, use_case: use_case} do
+    {_key, raw} = api_key_fixture(project, scopes: [:read])
 
     conn =
       build_conn()
       |> put_req_header("authorization", "Bearer #{raw}")
       |> put_req_header("content-type", "application/json")
       |> post(
-        ~p"/api/v1/generations",
-        Jason.encode!(%{"generations" => [generation_payload_fixture(use_case)]})
+        ~p"/api/v1/logs",
+        Jason.encode!(%{"logs" => [generation_payload_fixture(use_case)]})
       )
 
     assert %{"error" => %{"code" => "forbidden"}} = json_response(conn, 403)
@@ -52,7 +52,7 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     bad = generation_payload_fixture(use_case, %{"started_at" => "2020-01-01T00:00:00Z"})
 
     conn =
-      post(conn, ~p"/api/v1/generations", Jason.encode!(%{"generations" => [good, dup, bad]}))
+      post(conn, ~p"/api/v1/logs", Jason.encode!(%{"logs" => [good, dup, bad]}))
 
     assert %{
              "accepted" => 1,
@@ -73,8 +73,8 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     conn =
       post(
         recycle_keep_auth(conn),
-        ~p"/api/v1/generations",
-        Jason.encode!(%{"generations" => [good]})
+        ~p"/api/v1/logs",
+        Jason.encode!(%{"logs" => [good]})
       )
 
     assert %{"accepted" => 0, "duplicates" => 1, "rejected" => []} = json_response(conn, 202)
@@ -90,8 +90,8 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     conn =
       post(
         conn,
-        ~p"/api/v1/generations?environment=staging",
-        Jason.encode!(%{"generations" => [payload]})
+        ~p"/api/v1/logs?environment=staging",
+        Jason.encode!(%{"logs" => [payload]})
       )
 
     assert %{"accepted" => 1} = json_response(conn, 202)
@@ -108,8 +108,8 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     conn =
       post(
         conn,
-        ~p"/api/v1/generations?environment=canary",
-        Jason.encode!(%{"generations" => [generation_payload_fixture(use_case)]})
+        ~p"/api/v1/logs?environment=canary",
+        Jason.encode!(%{"logs" => [generation_payload_fixture(use_case)]})
       )
 
     assert %{"error" => %{"code" => "not_found", "details" => %{"environment" => "canary"}}} =
@@ -118,18 +118,18 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     assert {:ok, %{results: []}} = Observability.list_generations(scope(project))
   end
 
-  test "400 when generations is not a list or missing, or over 200", %{
+  test "400 when logs is not a list or missing, or over 200", %{
     conn: conn,
     use_case: use_case
   } do
-    conn1 = post(conn, ~p"/api/v1/generations", Jason.encode!(%{"generations" => %{"id" => "x"}}))
+    conn1 = post(conn, ~p"/api/v1/logs", Jason.encode!(%{"logs" => %{"id" => "x"}}))
 
     assert %{"error" => %{"code" => "invalid_request", "message" => msg}} =
              json_response(conn1, 400)
 
     assert msg =~ "list"
 
-    conn2 = post(recycle_keep_auth(conn), ~p"/api/v1/generations", Jason.encode!(%{"nope" => []}))
+    conn2 = post(recycle_keep_auth(conn), ~p"/api/v1/logs", Jason.encode!(%{"nope" => []}))
     assert %{"error" => %{"code" => "invalid_request"}} = json_response(conn2, 400)
 
     too_many = List.duplicate(generation_payload_fixture(use_case), 201)
@@ -137,8 +137,8 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     conn3 =
       post(
         recycle_keep_auth(conn),
-        ~p"/api/v1/generations",
-        Jason.encode!(%{"generations" => too_many})
+        ~p"/api/v1/logs",
+        Jason.encode!(%{"logs" => too_many})
       )
 
     assert %{"error" => %{"code" => "invalid_request", "message" => msg}} =
@@ -153,7 +153,7 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
     use_case: use_case
   } do
     p = generation_payload_fixture(use_case, %{"output" => %{"content" => "DIARY-BODY"}})
-    conn = post(conn, ~p"/api/v1/generations", Jason.encode!(%{"generations" => [p]}))
+    conn = post(conn, ~p"/api/v1/logs", Jason.encode!(%{"logs" => [p]}))
     assert %{"accepted" => 1} = json_response(conn, 202)
 
     gen = Observability.get_generation!(p["id"], scope(project))
@@ -184,7 +184,7 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
 
     mine = generation_payload_fixture(use_case)
     clash = generation_payload_fixture(use_case, %{"id" => taken["id"]})
-    conn = post(conn, ~p"/api/v1/generations", Jason.encode!(%{"generations" => [mine, clash]}))
+    conn = post(conn, ~p"/api/v1/logs", Jason.encode!(%{"logs" => [mine, clash]}))
 
     assert %{
              "accepted" => 1,
@@ -242,7 +242,7 @@ defmodule PromptOnWeb.API.V1.GenerationControllerTest do
   end
 
   test "empty batch is accepted", %{conn: conn} do
-    conn = post(conn, ~p"/api/v1/generations", Jason.encode!(%{"generations" => []}))
+    conn = post(conn, ~p"/api/v1/logs", Jason.encode!(%{"logs" => []}))
     assert %{"accepted" => 0, "duplicates" => 0, "rejected" => []} = json_response(conn, 202)
   end
 

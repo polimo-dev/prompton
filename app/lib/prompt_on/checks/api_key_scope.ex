@@ -1,6 +1,6 @@
 defmodule PromptOn.Checks.ApiKeyScope do
   @moduledoc """
-  Is the actor a `%PromptOn.Projects.ApiKey{}` holding the required scope (`:resolve` | `:logs`)?
+  Is the actor a `%PromptOn.Projects.ApiKey{}` holding the required scope (`:read` | `:logs`)?
   Tenant (project_id) matching is enforced by multitenancy; environment matching by each resource's
   filter policy.
   """

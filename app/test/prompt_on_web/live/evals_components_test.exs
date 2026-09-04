@@ -34,14 +34,14 @@ defmodule PromptOnWeb.EvalsComponentsTest do
       assert render_component(&EvalsComponents.score_badge/1, run: nil) |> String.trim() == ""
     end
 
-    test "shows the average, the sample count and the rubric version" do
+    test "shows the average, sample count, and criteria version" do
       html = render_component(&EvalsComponents.score_badge/1, run: run(), id: "pin-score")
 
       assert html =~ "4.2"
       assert html =~ "n=812"
       assert html =~ "v3"
       assert html =~ ~s|id="pin-score"|
-      assert html =~ "rubric v3 · openai/gpt-4o-mini"
+      assert html =~ "criteria v3 · openai/gpt-4o-mini"
     end
 
     test "the tone flips at 4.0 and at 3.0" do

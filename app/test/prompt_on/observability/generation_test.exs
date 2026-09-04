@@ -45,7 +45,7 @@ defmodule PromptOn.Observability.GenerationTest do
       assert gen.resolution_source == :remote
       assert gen.trace_id == "oban:1" and gen.sequence == 1
       assert gen.end_user_ref == "u_1"
-      assert gen.sdk_version == "0.1.0"
+      assert gen.sdk_version == "0.2.0"
       assert gen.context == %{"language" => "ko", "plan" => "pro"}
       assert gen.params == %{"temperature" => 0.5}
       assert gen.metadata["job_id"] == 1
@@ -73,7 +73,7 @@ defmodule PromptOn.Observability.GenerationTest do
       assert length(list(project)) == 1
     end
 
-    test "environment is forced by the request, not the record (2026-09-01)", %{
+    test "environment is forced by the request while use-case source is preserved", %{
       project: project,
       use_case: use_case
     } do
@@ -85,7 +85,7 @@ defmodule PromptOn.Observability.GenerationTest do
         generation_payload_fixture(use_case, %{
           "environment_id" => production.id,
           "project_id" => Ash.UUIDv7.generate(),
-          "source" => "playground"
+          "source" => "disk"
         })
 
       # the request picked staging, so even though the record claims production it is recorded
@@ -97,6 +97,7 @@ defmodule PromptOn.Observability.GenerationTest do
       assert gen.environment_id == staging.id
       assert gen.project_id == project.id
       assert gen.source == :live
+      assert gen.resolution_source == :disk
     end
 
     test "unknown use_case key is stored with use_case_id nil", %{project: project} do
@@ -549,15 +550,15 @@ defmodule PromptOn.Observability.GenerationTest do
       assert {:ok, []} = Ash.read(Generation, tenant: project.id, actor: api_key)
     end
 
-    test "resolve-only api key cannot ingest, users cannot ingest", %{
+    test "read-only api key cannot ingest, users cannot ingest", %{
       project: project,
       use_case: use_case
     } do
-      {resolve_key, _} = api_key_fixture(project, scopes: [:resolve])
+      {read_key, _} = api_key_fixture(project, scopes: [:read])
       payload = generation_payload_fixture(use_case)
 
       assert {:ok, %{accepted: 0, rejected: [%{message: message}]}} =
-               Ingest.ingest([payload], actor: resolve_key, tenant: project.id)
+               Ingest.ingest([payload], actor: read_key, tenant: project.id)
 
       assert message =~ "forbidden"
 

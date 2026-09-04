@@ -1,9 +1,9 @@
 defmodule PromptOn.Observability.Ingest do
   @moduledoc """
-  The `POST /generations` batch ingest service (plan.md §6.4, §9.2, §9.3). Called directly from the
+  The `POST /logs` batch ingest service (plan.md §6.4, §9.2, §9.3). Called directly from the
   request handler; no queue or job in between.
 
-      ingest(generations, actor: api_key, tenant: api_key.project_id)
+      ingest(logs, actor: api_key, tenant: api_key.project_id)
       #=> {:ok, %{accepted: 98, duplicates: 2, rejected: [%{index: 5, id: "…", code: "invalid_request", message: "…"}]}}
 
   Flow
@@ -91,26 +91,26 @@ defmodule PromptOn.Observability.Ingest do
   policy applies the same condition).
   """
   @spec ingest([map()], keyword()) :: {:ok, result()} | {:error, term()}
-  def ingest(generations, opts) when is_list(generations) and length(generations) <= @max_batch do
+  def ingest(logs, opts) when is_list(logs) and length(logs) <= @max_batch do
     actor = Keyword.fetch!(opts, :actor)
     tenant = Keyword.fetch!(opts, :tenant)
 
     case actor do
       %ApiKey{project_id: project_id} when project_id != tenant -> {:error, :forbidden}
-      _ -> do_ingest(generations, actor, tenant, opts)
+      _ -> do_ingest(logs, actor, tenant, opts)
     end
   end
 
-  def ingest(generations, _opts) when is_list(generations),
-    do: {:error, {:invalid_request, "at most #{@max_batch} generations per request"}}
+  def ingest(logs, _opts) when is_list(logs),
+    do: {:error, {:invalid_request, "at most #{@max_batch} logs per request"}}
 
-  def ingest(_generations, _opts), do: {:error, {:invalid_request, "generations must be a list"}}
+  def ingest(_logs, _opts), do: {:error, {:invalid_request, "logs must be a list"}}
 
-  defp do_ingest(generations, actor, tenant, opts) do
+  defp do_ingest(logs, actor, tenant, opts) do
     now = DateTime.utc_now()
     started = System.monotonic_time()
 
-    {normalized, rejected} = normalize_all(generations, now)
+    {normalized, rejected} = normalize_all(logs, now)
     {unique, in_batch_dups} = dedupe(normalized)
     {fresh, existing_dups, conflicts} = split_existing(unique, tenant)
 
@@ -126,7 +126,7 @@ defmodule PromptOn.Observability.Ingest do
       :telemetry.execute(
         [:prompton, :ingest, :batch],
         %{
-          count: length(generations),
+          count: length(logs),
           accepted: accepted,
           duplicates: duplicates,
           rejected: length(rejected),
@@ -143,8 +143,8 @@ defmodule PromptOn.Observability.Ingest do
   # ---------------------------------------------------------------------------
   # 1. Validation
 
-  defp normalize_all(generations, now) do
-    generations
+  defp normalize_all(logs, now) do
+    logs
     |> Enum.with_index()
     |> Enum.reduce({[], []}, fn {record, index}, {ok, rejected} ->
       case Record.normalize(record, now) do

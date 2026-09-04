@@ -47,7 +47,7 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
     ingest_fixture(project, payloads)
   end
 
-  # A row's mono cells = [project, generations, errors, tokens, cost]. Checking a number by
+  # A row's mono cells = [project, logs, errors, tokens, cost]. Checking a number by
   # substring could pass by matching a digit in another cell, so check cell by cell.
   defp row_cells(view, id) do
     view
@@ -68,14 +68,14 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/personal/usage")
 
-    # 2 generations, 1 error, 120 tokens, $0.25 cost
+    # 2 logs, 1 error, 120 tokens, $0.25 cost
     assert ["acme", "2", "1", "120", "$0.25"] = row_cells(view, "usage-row-acme")
 
     totals = view |> element("#usage-totals") |> render()
     assert totals =~ "$0.25"
   end
 
-  test "with no generations it is 0 (not glossed over as —)", %{conn: conn} do
+  test "with no logs it is 0 (not glossed over as —)", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/personal/usage")
 
     assert ["acme", "0", "0", "0", "$0"] = row_cells(view, "usage-row-acme")
@@ -89,7 +89,7 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
     assert_patched(view, ~p"/personal/usage?period=30d")
   end
 
-  test "generations outside the period are not counted", %{
+  test "logs outside the period are not counted", %{
     conn: conn,
     project: project,
     use_case: use_case
@@ -147,7 +147,7 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
       other_use_case = Fixtures.use_case_fixture(project, %{key: "voice_transcription"})
       now = DateTime.utc_now()
 
-      # chat_response: 2 generations (1 error), 120 tokens, $0.25
+      # chat_response: 2 logs (1 error), 120 tokens, $0.25
       # voice_transcription: 1 generation, 30 tokens, $0.50
       payloads = [
         generation_payload_fixture(use_case, %{
@@ -196,7 +196,7 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
       assert ["chat_response", "2", "1", "120", "$0.25"] = chat
       assert ["voice_transcription", "1", "0", "30", "$0.5"] = voice
 
-      # Project total = sum over use cases (generations, errors, tokens)
+      # Project total = sum over use cases (logs, errors, tokens)
       for column <- 1..3 do
         total = project_row |> Enum.at(column) |> String.to_integer()
         parts = [chat, voice] |> Enum.map(&(&1 |> Enum.at(column) |> String.to_integer()))
@@ -230,7 +230,7 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
       assert has_element?(view, "#usage-breakdown-acme")
     end
 
-    test "generations outside the period are absent from the use case rows too", %{
+    test "logs outside the period are absent from the use case rows too", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -249,11 +249,11 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
       assert ["chat_response", "3" | _rest] = row_cells(view, "usage-uc-acme-chat_response")
     end
 
-    test "expanding a project with no generations says so", %{conn: conn} do
+    test "expanding a project with no logs says so", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/personal/usage?open=acme")
 
       assert has_element?(view, "#usage-breakdown-empty-acme")
-      assert view |> element("#usage-breakdown-empty-acme") |> render() =~ "No generations"
+      assert view |> element("#usage-breakdown-empty-acme") |> render() =~ "No logs"
     end
 
     test "a tampered ?open= falls back to collapsed", %{conn: conn, user: user} do

@@ -60,7 +60,7 @@ defmodule PromptOn.Deployments.SnapshotCacheTest do
     assert Map.has_key?(first.data.deployments, "greeting")
 
     # The entry carries not only the decoded result but also the canonical body that
-    # `GET /snapshot` sends as is.
+    # `GET /use-cases` sends as is.
     assert is_binary(first.body)
     assert PromptOn.CanonicalJSON.etag(first.body) == first.etag
     assert %DateTime{} = first.last_modified

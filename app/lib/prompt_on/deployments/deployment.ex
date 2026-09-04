@@ -19,8 +19,8 @@ defmodule PromptOn.Deployments.Deployment do
     the model must be in the same project, `active` and not archived, each pin name must be a live
     Prompt name of this use case and its version must belong to that Prompt, `kind :embedding` must
     have empty pins, and every other kind must pin at least the `default` prompt.
-  - The `:resolve` generic action delegates to the same `PromptOnSDK.Resolver` the SDK uses (after
-    assembling snapshot v3).
+  - The internal `:resolve` generic action delegates to the same `PromptOnSDK.Resolver` the SDK
+    uses (after assembling the deployed use-case document).
   - An ApiKey reads only the Deployments of its own project (tenant-pinned). The environment is
     chosen by a request parameter, so it is not bound to the key. Writes are forbidden.
   """
@@ -120,10 +120,10 @@ defmodule PromptOn.Deployments.Deployment do
 
     action :resolve, :map do
       description """
-      Assembles the environment snapshot (v3) with the `deployment_id` revision slotted into the
+      Assembles the environment use-case document with the `deployment_id` revision slotted into the
       live position and resolves it with `PromptOnSDK.Resolver.resolve/3` (the same code as the
       SDK). Passing a past revision is a simulation. `prompt` is the prompt name to select (default
-      `"default"`; ignored for `kind :embedding`). The result is a `%PromptOnSDK.Resolution{}`
+      `"default"`; ignored for `kind :embedding`). The result is a `%PromptOnSDK.UseCase{}`
       unpacked into a map.
       """
 
@@ -153,7 +153,7 @@ defmodule PromptOn.Deployments.Deployment do
     end
 
     policy [PromptOn.Checks.ApiKeyActor, action(:resolve)] do
-      authorize_if {PromptOn.Checks.ApiKeyScope, scope: :resolve}
+      authorize_if {PromptOn.Checks.ApiKeyScope, scope: :read}
     end
 
     policy action(:resolve) do
@@ -255,7 +255,7 @@ defmodule PromptOn.Deployments.Deployment do
 
   def normalize_pins(_pins), do: %{}
 
-  @doc "The snapshot v3 `deployments[use_case_key]` entry."
+  @doc "The schema-v4 use-case document's `deployments[use_case_key]` entry."
   @spec to_snapshot_map(t()) :: map()
   def to_snapshot_map(%__MODULE__{} = deployment) do
     %{

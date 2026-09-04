@@ -26,7 +26,7 @@ defmodule PromptOn.Evals.Sampler do
 
   Returns `{:ok, generations}` or `{:error, error}`. It deliberately does **not** collapse a failure
   into `[]`: every caller turns "no rows" into a confident sentence ("this use case has no logs with
-  stored payloads"), and saying that because a read was forbidden or the database hiccuped is a
+  stored log content"), and saying that because a read was forbidden or the database hiccuped is a
   lie the user cannot act on.
 
   Options: `:limit` (required), `:tenant` (required), `:actor` (default the system actor),

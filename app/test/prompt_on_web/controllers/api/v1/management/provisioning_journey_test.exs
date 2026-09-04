@@ -8,7 +8,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
       device/code → (human approves) → device/token → /me
       → create project → define use case → prompts (default, ko) + commit versions
       → register model → commit deployment pins → issue runtime API key
-      → **with that key, `POST /api/v1/resolve` actually answers**
+      → **with that key, `POST /api/v1/use-cases/:key/prompt` actually answers**
 
   The last line is why this test exists: provisioning ends at "the app can fetch its config", not at
   "rows were created". It then continues with the same token through staging promotion (§4),
@@ -212,9 +212,8 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
       runtime_key
       |> runtime_conn()
       |> post(
-        ~p"/api/v1/resolve",
+        ~p"/api/v1/use-cases/diary_generation/prompt",
         Jason.encode!(%{
-          use_case: "diary_generation",
           prompt: "ko",
           variables: %{"transcriptions" => ["a", "b"]}
         })
@@ -223,19 +222,19 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
 
     assert resolved["deployment"] == %{"id" => deployment["id"], "revision" => 1}
     assert resolved["model"] == "anthropic/claude-sonnet-4"
-    assert resolved["prompts"] == ["default", "ko"]
-    assert resolved["effective_params"] == %{"temperature" => 0.4}
-    assert resolved["effective_provider_options"] == %{"only" => ["Anthropic"]}
+    assert resolved["prompt_names"] == ["default", "ko"]
+    assert resolved["params"] == %{"temperature" => 0.4}
+    assert resolved["provider_options"] == %{"only" => ["Anthropic"]}
     assert [%{"content" => @ko_system}, %{"content" => rendered}] = resolved["messages"]
     assert rendered == "Write a diary from:\n\n1. a\n2. b\n"
 
     snapshot =
       runtime_key
       |> runtime_conn()
-      |> get(~p"/api/v1/snapshot?environment=production")
+      |> get(~p"/api/v1/use-cases?environment=production")
       |> json_response(200)
 
-    assert snapshot["schema_version"] == 3
+    assert snapshot["schema_version"] == 4
     assert snapshot["project"] == "heydiary"
     assert Map.keys(snapshot["deployments"]) == ["diary_generation"]
 
@@ -351,7 +350,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
     # The app's runtime key is still alive; a human's logout does not cut off the service.
     assert runtime_key
            |> runtime_conn()
-           |> get(~p"/api/v1/snapshot?environment=production")
+           |> get(~p"/api/v1/use-cases?environment=production")
            |> json_response(200)
   end
 

@@ -18,7 +18,7 @@ defmodule PromptOn.Prompts.PromptVersion do
     filters size/join/default, no whitespace control) and `detected_variables` and `content_sha256`
     are computed, using the same code as the SDK.
   - `tools` is a P2 reserved column; no action accepts it.
-  - An ApiKey (`:resolve`) reads the versions of its own project **without a gate**: what is live
+  - An ApiKey (`:read`) reads the versions of its own project **without a gate**: what is live
     is decided by the Deployment.
   """
 

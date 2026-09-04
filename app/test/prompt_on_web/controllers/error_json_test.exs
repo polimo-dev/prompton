@@ -54,7 +54,7 @@ defmodule PromptOnWeb.ErrorJSONTest do
 
     {413, _headers, body} =
       assert_error_sent(413, fn ->
-        post(conn, "/api/v1/generations", ~s({"generations": [], "filler": "#{filler}"}))
+        post(conn, "/api/v1/logs", ~s({"logs": [], "filler": "#{filler}"}))
       end)
 
     assert %{"error" => %{"code" => "payload_too_large", "details" => %{}}} = Jason.decode!(body)
@@ -67,7 +67,7 @@ defmodule PromptOnWeb.ErrorJSONTest do
       |> put_req_header("content-type", "application/json")
 
     {400, _headers, body} =
-      assert_error_sent(400, fn -> post(conn, "/api/v1/generations", "{not json") end)
+      assert_error_sent(400, fn -> post(conn, "/api/v1/logs", "{not json") end)
 
     assert %{"error" => %{"code" => "bad_request", "details" => %{}}} = Jason.decode!(body)
   end

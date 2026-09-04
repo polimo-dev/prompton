@@ -17,7 +17,7 @@ written in English.
 - Public API controllers: `lib/prompt_on_web/controllers/api/v1/`; plugs:
   `lib/prompt_on_web/plugs/`.
 - The Elixir SDK is its own repository, `polimo-dev/prompton-elixir` (hex `prompton_sdk`, module
-  `PromptOnSDK`). The server reuses its pure modules (Resolver/Template/StopKind/SnapshotData) through
+  `PromptOnSDK`). The server reuses its pure modules (Resolver/Template/StopKind/UseCaseDocument) through
   a git dependency pinned to a commit in `mix.exs` (`{:prompton_sdk, git: …, ref: …}`); bump the
   ref deliberately and run the contract test (`test/prompt_on/contract/`).
 - **License**: the repo is FSL-1.1-ALv2 (`../LICENSE`, Licensor Polimo — Apache-2.0 after 2 years);
@@ -59,7 +59,7 @@ written in English.
     agreement (mean absolute error / within ±1 / exact) is **aggregates over CalibrationScore**,
     never a stored field. `EvaluationRun` is the only `AshStateMachine` resource in the domain.
     **Deployment is untouched** — no column, no `has_many`: a revision is measured many times, and
-    Deployment is immutable (ADR 0007) and on the `/snapshot` hot path. A screen reads the number
+    Deployment is immutable (ADR 0007) and on the `/use-cases` hot path. A screen reads the number
     with `PromptOn.Evals.scores_for_deployments/2`.
   - **Attribution is derived, not accepted**: `sampled_by` · `scored_by` · `authored_by` ·
     `requested_by` are written by `PromptOn.Evals.Changes.SetActorId` from `context.actor` (nil for
@@ -117,7 +117,7 @@ written in English.
   (**Amended 2026-09-01**: the BYOK `ProviderKey` is organization-owned —
   `PromptOn.Accounts.ProviderKey` holds `organization_id` directly; no tenant.)
 - **Two actors plus the system**: `%PromptOn.Accounts.User{}` (UI **and the management API**),
-  `%PromptOn.Projects.ApiKey{}` (public API, `scopes [:resolve, :logs]` — `:resolve` = config-fetch,
+  `%PromptOn.Projects.ApiKey{}` (public API, `scopes [:read, :logs]` — `:read` = config-fetch,
   `:logs` = monitoring logs, **project-scoped — no environment binding**). Mix tasks and jobs use
   `%PromptOn.SystemActor{}`.
 - **Sign-in is a single 6-digit code sent by email** (user decision 2026-09-03, ADR 0008
@@ -232,12 +232,12 @@ written in English.
   not decide the environment** — the controller picks it with
   `PromptOnWeb.API.V1.RequestEnvironment.fetch/2` (parameter `environment`, default `"production"`).
 - **There are only three public API endpoints, and PromptOn does not sit on the app's request path**
-  (amended 2026-09-01, ADR 0007 amendment "proxy mode removed"): config-fetch `GET /snapshot` and
-  `POST /resolve` (scope `:resolve`), and monitoring logs `POST /generations` (scope `:logs`). The
+  (amended 2026-09-01, ADR 0007 amendment "proxy mode removed"): config-fetch `GET /use-cases` and
+  `POST /use-cases/:key/prompt` (scope `:read`), and monitoring logs `POST /logs` (scope `:logs`). The
   app receives the config and calls the provider **directly with its own provider key**. Proxy mode
   (`POST /generate`, `PromptOn.Proxy`) was deleted; the only places where the server calls an LLM
-  itself are the arena and AI drafts (`PromptOn.LLM`). Only `GET /snapshot` goes through
-  `PromptOn.Deployments.SnapshotCache` (per-environment ETS, 5-second TTL); `POST /resolve` is the
+  itself are the arena and AI drafts (`PromptOn.LLM`). Only `GET /use-cases` goes through
+  `PromptOn.Deployments.SnapshotCache` (per-environment ETS, 5-second TTL); `POST /use-cases/:key/prompt` is the
   smoke test right after a deploy and is not cached.
 - The error envelope is `PromptOnWeb.API.V1.FallbackController` (`action_fallback`) —
   `{:error, {:invalid_request, msg}}` and the like.

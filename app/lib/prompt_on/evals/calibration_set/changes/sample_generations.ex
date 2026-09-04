@@ -82,7 +82,7 @@ defmodule PromptOn.Evals.CalibrationSet.Changes.SampleGenerations do
   defp enough?(candidates) do
     {:error,
      invalid(
-       "needs at least #{@minimum_candidates} monitoring logs with stored payloads; " <>
+       "needs at least #{@minimum_candidates} monitoring logs with stored log content; " <>
          "this use case has #{length(candidates)}"
      )}
   end

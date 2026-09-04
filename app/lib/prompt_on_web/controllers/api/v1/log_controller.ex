@@ -1,18 +1,18 @@
-defmodule PromptOnWeb.API.V1.GenerationController do
+defmodule PromptOnWeb.API.V1.LogController do
   @moduledoc """
-  `POST /api/v1/generations` - **monitoring logs** ingestion: batched, idempotent, partially
+  `POST /api/v1/logs` - **monitoring logs** ingestion: batched, idempotent, partially
   accepted (plan.md §6.4, docs/api.md).
 
   The app calls its own provider directly without PromptOn (§2 config-fetch) and sends the result of
   each call here - PromptOn does not sit on the request path. The route is named after the resource,
-  `generations`.
+  `logs`.
 
   - Scope `:logs` (403 `forbidden` without it).
   - **The request picks the environment** (2026-09-01): the `environment` parameter (default
     `"production"`) is enforced on the **whole** batch - keys are not bound to an environment
     (`PromptOnWeb.API.V1.RequestEnvironment`), so the value a record claims is still ignored. An
     unknown environment is 404.
-  - Body `{"generations": [ … ≤200 records … ]}` - not a list, or more than 200 records, is 400
+  - Body `{"logs": [ … ≤200 records … ]}` - not a list, or more than 200 records, is 400
     `invalid_request`.
   - Response `202 {"accepted", "duplicates", "rejected": [{"index", "id", "code", "message"}]}`.
   - The 5MB body cap is set by the `Plug.Parsers` `length` in `PromptOnWeb.Endpoint` (a global
@@ -36,13 +36,13 @@ defmodule PromptOnWeb.API.V1.GenerationController do
 
   action_fallback PromptOnWeb.API.V1.FallbackController
 
-  def create(conn, %{"generations" => generations} = params) when is_list(generations) do
+  def create(conn, %{"logs" => logs} = params) when is_list(logs) do
     api_key = conn.assigns.api_key
 
-    with :ok <- check_batch_size(generations),
+    with :ok <- check_batch_size(logs),
          {:ok, environment} <- RequestEnvironment.fetch(conn, params),
          {:ok, result} <-
-           Ingest.ingest(generations,
+           Ingest.ingest(logs,
              actor: api_key,
              tenant: api_key.project_id,
              environment_id: environment.id,
@@ -85,16 +85,16 @@ defmodule PromptOnWeb.API.V1.GenerationController do
     end
   end
 
-  def create(_conn, %{"generations" => _}),
-    do: {:error, {:invalid_request, "generations must be a list"}}
+  def create(_conn, %{"logs" => _}),
+    do: {:error, {:invalid_request, "logs must be a list"}}
 
   def create(_conn, _params),
-    do: {:error, {:invalid_request, "body must be {\"generations\": [...]}"}}
+    do: {:error, {:invalid_request, "body must be {\"logs\": [...]}"}}
 
-  defp check_batch_size(generations) do
-    if length(generations) <= Ingest.max_batch(),
+  defp check_batch_size(logs) do
+    if length(logs) <= Ingest.max_batch(),
       do: :ok,
-      else: {:error, {:invalid_request, "at most #{Ingest.max_batch()} generations per request"}}
+      else: {:error, {:invalid_request, "at most #{Ingest.max_batch()} logs per request"}}
   end
 
   defp body_bytes(conn) do

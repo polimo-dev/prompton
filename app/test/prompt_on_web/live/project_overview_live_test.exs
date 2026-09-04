@@ -83,10 +83,10 @@ defmodule PromptOnWeb.ProjectOverviewLiveTest do
   end
 
   describe "honest numbers" do
-    test "with no generations it is 0 (not glossed over as —)", %{conn: conn} do
+    test "with no logs it is 0 (not glossed over as —)", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/personal/acme")
 
-      assert ["generations", "0", "errors", "0", "tokens", "0", "cost", "$0"] =
+      assert ["logs", "0", "errors", "0", "tokens", "0", "cost", "$0"] =
                cells(view, "overview-totals")
     end
 
@@ -119,11 +119,11 @@ defmodule PromptOnWeb.ProjectOverviewLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/personal/acme")
 
-      assert ["generations", "2", "errors", "1", "tokens", "120", "cost", "$0.25"] =
+      assert ["logs", "2", "errors", "1", "tokens", "120", "cost", "$0.25"] =
                cells(view, "overview-totals")
     end
 
-    test "the period stays in the URL and generations outside the window are not counted", %{
+    test "the period stays in the URL and logs outside the window are not counted", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -138,15 +138,15 @@ defmodule PromptOnWeb.ProjectOverviewLiveTest do
 
       # The default is 24h: a generation from 3 days ago is not visible.
       {:ok, view, _html} = live(conn, ~p"/personal/acme")
-      assert ["generations", "0" | _] = cells(view, "overview-totals")
+      assert ["logs", "0" | _] = cells(view, "overview-totals")
 
       view |> element("#overview-period a", "7d") |> render_click()
       assert_patched(view, ~p"/personal/acme?period=7d")
-      assert ["generations", "1" | _] = cells(view, "overview-totals")
+      assert ["logs", "1" | _] = cells(view, "overview-totals")
 
       # Opening directly from the URL gives the same result (the same window after a remount).
       {:ok, view, _html} = live(conn, ~p"/personal/acme?period=7d")
-      assert ["generations", "1" | _] = cells(view, "overview-totals")
+      assert ["logs", "1" | _] = cells(view, "overview-totals")
     end
 
     test "an unknown ?period= falls back to the default period", %{conn: conn} do

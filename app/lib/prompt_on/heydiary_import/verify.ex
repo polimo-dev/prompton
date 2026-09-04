@@ -3,7 +3,8 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   Migration verification (plan.md §12.2 step 9, ADR 0007 + revision 2026-09-01 "deployments are
   pins"): for every **(task, language)** combination, compares a **reproduction of HeyDiary's
   `Tasks.build_llm_config`** against **`PromptOnSDK.Resolver.resolve` over the committed
-  Deployments**. The PromptOn-side input is snapshot v3 (`PromptOn.Deployments.Snapshot`).
+  Deployments**. The PromptOn-side input is the schema-v4 use-case document assembled by
+  `PromptOn.Deployments.Snapshot`.
 
   ## One axis fewer — plans are not compared
 
@@ -27,7 +28,7 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   `prompt: "default"`. This module reproduces that rule as is (`app_prompt_name/3`) and checks
   that both sides pick the same document.
 
-  Compared fields: `model`, `temperature`, `providers` (`effective_provider_options["only"]`),
+  Compared fields: `model`, `temperature`, `providers` (`provider_options["only"]`),
   `allow_fallbacks`, `system_prompt` (the first message content rendered with empty variables —
   this also checks that the escapes come back as the original) / `text_template` for
   `voice_transcription`. When both sides have "no config" (HeyDiary no rows ↔ PromptOn resolution
@@ -38,7 +39,7 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   """
 
   alias PromptOn.HeyDiaryImport.{Dump, Planner, Spec}
-  alias PromptOnSDK.{Resolver, SnapshotData, Template}
+  alias PromptOnSDK.{Resolver, Template, UseCaseDocument}
 
   @extra_languages ["", "xx"]
 
@@ -53,10 +54,10 @@ defmodule PromptOn.HeyDiaryImport.Verify do
 
   @doc """
   Returns the list of mismatches (an empty list = verification passed). `snapshot` is a
-  `%PromptOnSDK.SnapshotData{}` or a snapshot map (the `map` of a
+  `%PromptOnSDK.UseCaseDocument{}` or a use-case document map (the `map` of a
   `PromptOn.Projects.config_snapshot/…` result).
   """
-  @spec compare(Dump.t() | map(), SnapshotData.t() | map()) :: [mismatch()]
+  @spec compare(Dump.t() | map(), UseCaseDocument.t() | map()) :: [mismatch()]
   def compare(dump, snapshot) do
     {:ok, dump} = Dump.parse(dump)
     snapshot = decode!(snapshot)
@@ -191,12 +192,20 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   end
 
   defp param(%{kind: :text}, _resolution), do: nil
-  defp param(_spec, resolution), do: Map.get(resolution.effective_params, "temperature")
+  defp param(_spec, resolution), do: Map.get(resolution_params(resolution), "temperature")
 
   defp provider_option(%{kind: :text}, _resolution, _key), do: nil
 
   defp provider_option(_spec, resolution, key),
-    do: Map.get(resolution.effective_provider_options, key)
+    do: Map.get(resolution_provider_options(resolution), key)
+
+  defp resolution_params(resolution),
+    do: Map.get(resolution, :params) || %{}
+
+  defp resolution_provider_options(resolution),
+    do:
+      Map.get(resolution, :provider_options) ||
+        %{}
 
   defp system_prompt(%{kind: :text}, %{text_template: text, engine: engine}),
     do: render(text, engine)
@@ -215,10 +224,10 @@ defmodule PromptOn.HeyDiaryImport.Verify do
     end
   end
 
-  defp decode!(%SnapshotData{} = snapshot), do: snapshot
+  defp decode!(%UseCaseDocument{} = snapshot), do: snapshot
 
   defp decode!(map) when is_map(map) do
-    case SnapshotData.decode(map) do
+    case UseCaseDocument.decode(map) do
       {:ok, snapshot, _warnings} -> snapshot
       {:error, reason} -> raise ArgumentError, "invalid snapshot: #{inspect(reason)}"
     end

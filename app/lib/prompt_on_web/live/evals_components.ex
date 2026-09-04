@@ -393,7 +393,7 @@ defmodule PromptOnWeb.EvalsComponents do
 
   defp badge_title(run) do
     [
-      "rubric v#{run.rubric_number}",
+      "criteria v#{run.rubric_number}",
       run.judge_model,
       ago_label(run.finished_at)
     ]
@@ -600,7 +600,7 @@ defmodule PromptOnWeb.EvalsComponents do
             {row.error_message || "The judge call failed."}
           </div>
           <div :if={is_nil(row.status)} style="font-size:13px;color:var(--tx-3);line-height:1.55;">
-            Not scored against this rubric yet.
+            Not scored against these criteria yet.
           </div>
         </div>
       </details>
@@ -701,7 +701,7 @@ defmodule PromptOnWeb.EvalsComponents do
     >
       <div style="display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;">
         <span class="font-mono" style="font-size:13px;color:var(--tx-0);white-space:nowrap;">
-          #{@run.deployment_revision} · {run_env(@run)} · rubric v{@run.rubric_number}
+          #{@run.deployment_revision} · {run_env(@run)} · criteria v{@run.rubric_number}
         </span>
         <span class="font-mono" style="font-size:11.5px;color:var(--tx-3);">
           {@run.judge_model} · {ago_label(@run.finished_at || @run.inserted_at)}
@@ -756,7 +756,7 @@ defmodule PromptOnWeb.EvalsComponents do
 
   The worst items are the product — an average tells you there is a problem, these tell you what it
   is. There is no link to a log detail screen because there is no log detail screen yet; the
-  generation id is shown instead so it can be found in the logs the app itself keeps.
+  log id is shown instead so it can be found in the logs the app itself keeps.
   """
   attr :run, :map, required: true
   attr :items, :list, default: []
@@ -769,7 +769,7 @@ defmodule PromptOnWeb.EvalsComponents do
       id="run-drawer"
       on_close={@on_close}
       width={720}
-      title={"Evaluation ##{@run.deployment_revision} · rubric v#{@run.rubric_number}"}
+      title={"Evaluation ##{@run.deployment_revision} · criteria v#{@run.rubric_number}"}
       sub={"#{run_env(@run)} · #{@run.judge_model}"}
     >
       <:badge>

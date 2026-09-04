@@ -3,8 +3,8 @@ defmodule PromptOnWeb.OrgUsageLive do
   Organization usage (`/:org_slug/usage?period=24h|7d|30d`).
 
   Every number is what `PromptOn.Observability.Stats.time_series/2` actually scanned out of the
-  `generations` table, called once per project with the buckets summed. So **the columns are only
-  what Stats really produces**: generations · errors · tokens · cost. The screen is named "Usage";
+  internal `generations` table, called once per project with the buckets summed. So **the columns are
+  only what Stats really produces**: logs · errors · tokens · cost. The screen is named "Usage";
   it is not an invoice (there is no billing yet).
 
   - The period travels in the URL as `?period=`, and the **expanded project** as
@@ -35,7 +35,7 @@ defmodule PromptOnWeb.OrgUsageLive do
 
   @cols [
     %{label: "project", w: "minmax(0,2fr)"},
-    %{label: "generations", w: "120px", align: "right"},
+    %{label: "logs", w: "120px", align: "right"},
     %{label: "errors", w: "100px", align: "right"},
     %{label: "tokens", w: "120px", align: "right"},
     %{label: "cost", w: "110px", align: "right"}
@@ -270,7 +270,7 @@ defmodule PromptOnWeb.OrgUsageLive do
             }
           />
           <span style="font-size:12.5px;color:var(--tx-2);">
-            Every generation recorded in this window — monitoring logs your apps reported, plus
+            Every log recorded in this window — monitoring logs your apps reported, plus
             arena runs. Open a project to see it split by use case.
           </span>
         </div>
@@ -279,7 +279,7 @@ defmodule PromptOnWeb.OrgUsageLive do
           id="usage-totals"
           style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;"
         >
-          <DS.stat_tile label="generations" value={compact(@totals.count)} icon="activity" />
+          <DS.stat_tile label="logs" value={compact(@totals.count)} icon="activity" />
           <DS.stat_tile
             label="errors"
             value={compact(@totals.error_count)}
@@ -382,7 +382,7 @@ defmodule PromptOnWeb.OrgUsageLive do
                 tone={:neutral}
               >
                 <span style="font-size:12.5px;color:var(--tx-2);padding-left:29px;">
-                  No generations in this window.
+                  No logs in this window.
                 </span>
               </DS.row>
             </div>

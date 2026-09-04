@@ -5,7 +5,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
 
   Covers the whole loop the product decision describes — sample ten logs → score them → draft the
   rubric → look at the agreement → revise → evaluate a revision → watch the run — plus the states
-  that are *not* the happy path: no logs with stored payloads, no provider key, an `embedding` use
+  that are *not* the happy path: no logs with stored log content, no provider key, an `embedding` use
   case, and hand-edited `?set=` / `?rubric=` / `?run=` values.
 
   The judge is `PromptOn.LLM.Fake` (the test adapter), planted through
@@ -48,7 +48,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
 
   defp with_key(project), do: Fixtures.provider_key_fixture(project, provider: :openrouter)
 
-  # A set whose ten samples all carry a human score, so "Draft rubric with AI" is unlocked.
+  # A set whose ten samples all carry a human score, so "Draft criteria with AI" is unlocked.
   defp scored_set(project, use_case) do
     {set, samples} =
       EvalsFixtures.scored_calibration_set_fixture(project, use_case, [
@@ -101,7 +101,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       refute has_element?(view, "#evals-no-logs")
     end
 
-    test "says so when there are fewer than five logs with stored payloads", %{
+    test "says so when there are fewer than five logs with stored log content", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -110,7 +110,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
 
       {:ok, view, html} = live(conn, evals_path(project, use_case))
 
-      assert html =~ "No monitoring logs with stored payloads yet"
+      assert html =~ "No monitoring logs with stored log content yet"
       assert has_element?(view, "#evals-no-logs")
       assert has_element?(view, "#evals-open-api-keys")
       refute has_element?(view, "#sample-logs")
@@ -202,7 +202,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       assert first.user_note == "perfect answer"
     end
 
-    test "Draft rubric with AI is disabled until every sample is scored", %{
+    test "Draft criteria with AI is disabled until every sample is scored", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -234,7 +234,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
   end
 
   # ---------------------------------------------------------------------------
-  # (d) Rubric and agreement
+  # (d) Criteria and agreement
 
   describe "drafting a rubric" do
     setup %{project: project, use_case: use_case} do
@@ -253,7 +253,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       refute view |> element("#draft-rubric") |> render() =~ "disabled"
 
       render_click(element(view, "#draft-rubric"))
-      html = render_async(view)
+      html = render_async(view, 1_000)
 
       assert html =~ "A good answer is short and answers the question."
       assert has_element?(view, "#rubric-card")
@@ -278,7 +278,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       {:ok, view, _html} = live(conn, evals_path(project, use_case))
       render_click(element(view, "#draft-rubric"))
 
-      render_async(view)
+      render_async(view, 1_000)
 
       # The panel hands its flashes to the LiveView, so the tray shows on the render after the
       # async result lands.
@@ -313,7 +313,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
     end
 
     # Before: the three tiles read "n = 10 · within ±1 100%" (rubric aggregates over set A) while
-    # every agreement row read "not scored against this rubric yet" (samples of set B) — one screen
+    # every agreement row read "not scored against these criteria yet" (samples of set B) — one screen
     # contradicting itself, and no way back to set A because `?set=` had no control.
     test "sampling again does not leave the rubric's numbers next to another set's rows", %{
       conn: conn,
@@ -392,7 +392,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       |> form("#revise-form", %{"revise" => %{"note" => "a wrong language is never above 2"}})
       |> render_submit()
 
-      render_async(view)
+      render_async(view, 1_000)
 
       {:ok, rubrics} = Evals.list_rubrics(use_case.id, scope(project))
 
@@ -433,7 +433,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       assert latest.criteria.must_never == ["switch language", "invent facts"]
     end
 
-    test "Re-score with this rubric re-runs the judge over the same samples", %{
+    test "Re-score with these criteria re-runs the judge over the same samples", %{
       conn: conn,
       project: project,
       use_case: use_case,
@@ -444,8 +444,8 @@ defmodule PromptOnWeb.EvalsPanelTest do
       {:ok, view, _html} = live(conn, evals_path(project, use_case))
       render_click(element(view, "#rescore-rubric"))
 
-      render_async(view)
-      assert render(view) =~ "Scored 10 sample(s) with this rubric."
+      render_async(view, 1_000)
+      assert render(view) =~ "Scored 10 sample(s) with these criteria."
 
       {:ok, scores} = Evals.list_calibration_scores(v1.id, scope(project))
       assert Enum.all?(scores, &(&1.score == 2))
@@ -478,7 +478,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       assert has_element?(view, "#evaluate-modal")
       assert html =~ "##{deployment.revision}"
       assert html =~ "v#{rubric.number}"
-      assert html =~ "6 of the last 1,000 logs of this revision have stored payloads."
+      assert html =~ "6 of the last 1,000 logs of this revision have stored log content."
       assert html =~ "on your OpenRouter key"
       assert has_element?(view, "#run-evaluation")
     end
@@ -570,7 +570,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       html = view |> element("#evaluate-modal") |> render()
 
       refute html =~ ">v<"
-      assert html =~ "Draft a rubric first"
+      assert html =~ "Draft criteria first"
     end
 
     test "a second run of the same revision is refused while the first is active", %{

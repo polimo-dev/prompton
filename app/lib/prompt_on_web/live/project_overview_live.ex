@@ -6,7 +6,7 @@ defmodule PromptOnWeb.ProjectOverviewLive do
 
   | Block | Source |
   |---|---|
-  | generations · errors · tokens · cost | `PromptOn.Observability.Stats.time_series/2` (`source: nil`: monitoring logs and arena alike) |
+  | logs · errors · tokens · cost | `PromptOn.Observability.Stats.time_series/2` (`source: nil`: monitoring logs and arena alike) |
   | use case count and whether deployed | `PromptOn.Prompts.list_use_cases/1` + the live `Deployment` per environment |
   | live deployment count per environment | `PromptOn.Deployments.current_deployments_for_environment/2` |
   | how long those logs live | `PromptOnWeb.SettingsComponents.retention_note/1` ← `PromptOn.Entitlements` |
@@ -207,7 +207,7 @@ defmodule PromptOnWeb.ProjectOverviewLive do
           style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;"
         >
           <DS.stat_tile
-            label="generations"
+            label="logs"
             value={OrgUsageLive.compact(@totals.count)}
             icon="activity"
           />
@@ -309,7 +309,7 @@ defmodule PromptOnWeb.ProjectOverviewLive do
         </SC.setting_card>
 
         <SC.info_box id="overview-note" icon="info">
-          Every number on this page is counted from rows that already exist — generations recorded in
+          Every number on this page is counted from rows that already exist — logs recorded in
           the selected window (monitoring logs your apps reported, plus arena runs) and deployment
           revisions that are live right now.
         </SC.info_box>

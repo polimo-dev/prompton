@@ -11,7 +11,8 @@ defmodule PromptOnWeb.API.V1.Management.ModelController do
 
   `id` is the UUID of this catalog entry, and that is what a deployment pin nails down. `model_id`
   is the **provider-side string** (`"anthropic/claude-sonnet-4"`) - it carries the same name in
-  snapshot v3 and `POST /resolve`, so it is not renamed here either.
+  the schema-v4 use-case document and `POST /use-cases/:key/prompt`, so it is not renamed here
+  either.
 
   The only required field is `model_id`. Without `display_name` it is taken from the OpenRouter
   public list, and if that has none either, `model_id` is used verbatim. Without `pricing`, the

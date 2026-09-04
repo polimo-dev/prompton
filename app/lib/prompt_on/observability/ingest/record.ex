@@ -1,6 +1,6 @@
 defmodule PromptOn.Observability.Ingest.Record do
   @moduledoc """
-  Validation and normalization of one §6.4 Generation payload (plan.md §6.4, §9.2). On success it
+  Validation and normalization of one §6.4 monitoring log (plan.md §6.4, §9.2). On success it
   returns the `Generation.:ingest` input (attrs) and the raw pieces
   (`input`/`output`/`usage_raw`/`prehashed`); on failure `{:error, message}` -- only that record
   goes to `rejected`, not the whole batch (partial acceptance).
@@ -31,8 +31,9 @@ defmodule PromptOn.Observability.Ingest.Record do
     (decision #3).
   - `model_used`/`upstream_provider`/`error.status` →
     `metadata.model_used|upstream_provider|http_status`.
-  - `project`/`environment`/`source` ignore the payload values and are forced from the actor (the
-    action change).
+  - `project`/`environment` ignore payload values and are forced from the authenticated request.
+    Public `source` records where the deployed use-case document came from and is stored in the
+    internal `resolution_source` column.
   """
 
   alias PromptOn.Observability.Generation
@@ -75,8 +76,7 @@ defmodule PromptOn.Observability.Ingest.Record do
          {:ok, prompt} <- string(record["prompt"], "prompt"),
          {:ok, prompt_version_id} <- uuid(record["prompt_version_id"], "prompt_version_id"),
          {:ok, model_id} <- uuid(record["model_id"], "model_id"),
-         {:ok, resolution_source} <-
-           enum(record["resolution_source"], "resolution_source", Generation.resolution_sources()),
+         {:ok, source} <- enum(record["source"], "source", Generation.resolution_sources()),
          {:ok, finish_reason} <- string(record["finish_reason"], "finish_reason"),
          {:ok, trace_id} <- string(record["trace_id"], "trace_id"),
          {:ok, end_user_ref} <- string(record["end_user_ref"], "end_user_ref"),
@@ -126,7 +126,7 @@ defmodule PromptOn.Observability.Ingest.Record do
         deployment_revision: deployment_revision,
         prompt: prompt,
         prompt_version_id: prompt_version_id,
-        resolution_source: resolution_source,
+        resolution_source: source,
         finish_reason: finish_reason,
         stop_kind: stop_kind(record["stop_kind"], finish_reason),
         error_kind: error_kind,
@@ -156,7 +156,7 @@ defmodule PromptOn.Observability.Ingest.Record do
     end
   end
 
-  def normalize(_record, _now), do: {:error, "generation must be an object"}
+  def normalize(_record, _now), do: {:error, "log must be an object"}
 
   # ---------------------------------------------------------------------------
   # Field validators

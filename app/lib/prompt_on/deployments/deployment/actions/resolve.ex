@@ -1,20 +1,21 @@
 defmodule PromptOn.Deployments.Deployment.Actions.Resolve do
   @moduledoc """
-  Generic action `:resolve`: reads the Deployment with the actor's permissions (an ApiKey sees only
-  its own project, a member sees everything), assembles that environment's snapshot v3
+  Internal generic action `:resolve`: reads the Deployment with the actor's permissions (an ApiKey
+  sees only its own project, a member sees everything), assembles that environment's deployed
+  use-case document
   (`PromptOn.Deployments.Snapshot.build/2`, with this revision slotted into the live position), then
   delegates to `PromptOnSDK.Resolver.resolve/3`, so the server and the SDK run **the same code**
   (ADR 0007).
 
   Context conditions are gone, so the only argument is a single prompt name (`prompt`, default
   `"default"`). Passing a past revision id simulates that revision (it does not displace the live
-  revision). The result is a `%PromptOnSDK.Resolution{}` unpacked into a map.
+  revision). The result is a `%PromptOnSDK.UseCase{}` unpacked into a map.
   """
 
   use Ash.Resource.Actions.Implementation
 
   alias PromptOn.Deployments.{Deployment, Snapshot}
-  alias PromptOnSDK.{Resolver, SnapshotData}
+  alias PromptOnSDK.{Resolver, UseCaseDocument}
 
   @impl true
   def run(input, _opts, context) do
@@ -30,7 +31,7 @@ defmodule PromptOn.Deployments.Deployment.Actions.Resolve do
              deployment.environment_id,
              Keyword.put(opts, :override_deployments, [deployment])
            ),
-         {:ok, data, _warnings} <- SnapshotData.decode(snapshot.map),
+         {:ok, data, _warnings} <- UseCaseDocument.decode(snapshot.map),
          {:ok, key} <- use_case_key(snapshot.map, deployment.use_case_id),
          {:ok, resolution} <-
            Resolver.resolve(data, key, resolve_opts ++ [etag: snapshot.etag]) do

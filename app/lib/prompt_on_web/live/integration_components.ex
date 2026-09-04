@@ -11,15 +11,15 @@ defmodule PromptOnWeb.IntegrationComponents do
 
   1. `#integration-curl` — a curl that a **person** pastes as is. It is a **smoke test** that
      fetches this use case's deployed configuration (model, parameters, rendered prompt) verbatim
-     through `POST /api/v1/resolve`. It comes filled in with this project's real host, the chosen
-     environment, the prompt name this deployment pins, and example variables built from this use
+     through `POST /api/v1/use-cases/:key/prompt`. It comes filled in with this project's real host,
+     use case key, chosen environment, pinned prompt name, and example variables built from this use
      case's `input_schema`, so it runs unchanged. Only the key is an environment variable
      (`$PTN_API_KEY`); the raw key is never drawn on the screen again (the issue screen shows it
      once).
   2. `#integration-prompt` — a brief to hand to the **user's coding AI**. It contains one paragraph
-     on what PromptOn is, the two ways to fetch the configuration (`/resolve` vs `/snapshot` + a
-     local cache; the latter is recommended), where to call the provider directly, the envelope for
-     reporting monitoring logs (`POST /api/v1/generations`), this use case's real key, prompt names
+     on what PromptOn is, the SDK's deployed use-case document cache and the server-filled prompt
+     endpoint, where to call the provider directly, the envelope for
+     reporting monitoring logs (`POST /api/v1/logs`), this use case's real key, prompt names
      and variable table, an error table, and finally the "change it like this" instruction.
 
   The bodies are built by **pure functions** (`curl_snippet/1`, `ai_prompt/1`): they must be
@@ -61,13 +61,13 @@ defmodule PromptOnWeb.IntegrationComponents do
 
   @doc """
   curl snippet: a smoke test that fetches the deployed configuration verbatim through
-  `POST /api/v1/resolve`. Example variables use the declared `example` first and otherwise a
-  placeholder matching the type.
+  `POST /api/v1/use-cases/:key/prompt`. Example variables use the declared `example` first and
+  otherwise a placeholder matching the type.
 
       iex> PromptOnWeb.IntegrationComponents.curl_snippet(%{
       ...>   host: "https://app.example.com", use_case_key: "support_reply", kind: :chat,
       ...>   environment: "production", prompts: ["default"], variables: []
-      ...> }) =~ "https://app.example.com/api/v1/resolve"
+      ...> }) =~ "https://app.example.com/api/v1/use-cases/support_reply/prompt"
       true
   """
   @spec curl_snippet(spec()) :: String.t()
@@ -78,7 +78,7 @@ defmodule PromptOnWeb.IntegrationComponents do
       |> Jason.encode!(pretty: true)
 
     """
-    curl -sS -X POST #{spec.host}/api/v1/resolve \\
+    curl -sS -X POST #{spec.host}/api/v1/use-cases/#{spec.use_case_key}/prompt \\
       -H "Authorization: Bearer $PTN_API_KEY" \\
       -H "Content-Type: application/json" \\
       -d '#{body}'\
@@ -86,17 +86,12 @@ defmodule PromptOnWeb.IntegrationComponents do
   end
 
   @doc """
-  Example `POST /resolve` request. It is a `Jason.OrderedObject` because of **order**: if Jason
-  sorted the map keys, `use_case` would be pushed into the middle and the reader's eye would not
-  meet the head of the contract first.
+  Example `POST /use-cases/:key/prompt` request. It is a `Jason.OrderedObject` to keep environment,
+  prompt, and variables in the same readable order as the endpoint contract.
   """
   @spec request_example(spec()) :: Jason.OrderedObject.t()
   def request_example(spec) do
-    values =
-      [
-        {"use_case", spec.use_case_key},
-        {"environment", spec.environment}
-      ] ++ prompt_entry(spec) ++ variables_entry(spec)
+    values = [{"environment", spec.environment}] ++ prompt_entry(spec) ++ variables_entry(spec)
 
     %Jason.OrderedObject{values: values}
   end
@@ -150,7 +145,7 @@ defmodule PromptOnWeb.IntegrationComponents do
       iex> PromptOnWeb.IntegrationComponents.ai_prompt(%{
       ...>   host: "https://app.example.com", use_case_key: "support_reply", kind: :chat,
       ...>   environment: "production", prompts: ["default", "ko"], variables: []
-      ...> }) =~ ~s|"use_case": "support_reply"|
+      ...> }) =~ ~s|prompton.use_case("support_reply")|
       true
   """
   @spec ai_prompt(spec()) :: String.t()
@@ -175,16 +170,40 @@ defmodule PromptOnWeb.IntegrationComponents do
 
     Both use the same credential: `Authorization: Bearer $PTN_API_KEY`, read from the \
     environment. Never hard-code it and never ship it to a browser — both calls belong on the \
-    server side. The key is scoped: `resolve` covers config fetch, `logs` covers monitoring logs.
+    server side. The key is scoped: `read` covers config fetch, `logs` covers monitoring logs.
 
     All responses are JSON with snake_case keys. Every failure is \
     `{"error": {"code": "…", "message": "…", "details": {…}}}` with a standard HTTP status.
 
-    ## 1. Config fetch — two options
+    ## 1. Use the SDK
 
-    ### (a) `POST #{spec.host}/api/v1/resolve` — one call per resolution
+    The SDK polls `GET #{spec.host}/api/v1/use-cases?environment=#{spec.environment}` in the
+    background, keeps the last successful deployed use-case document in memory and on disk, and
+    falls back to a bundled `use-cases.#{spec.environment}.json` when PromptOn is unavailable.
 
-    PromptOn resolves the pin server-side and (if you send `variables`) renders the template for you.
+    ```python
+    use_case = prompton.use_case("#{spec.use_case_key}")
+    messages = use_case.messages({"question": question})
+
+    def call():
+        answer = client.chat.completions.create(
+            model=use_case.model, messages=messages, **use_case.params
+        )
+        return prompton.Result.from_openai(answer)
+
+    result = use_case.track(call, variables={"question": question})
+    return result.content
+    ```
+
+    Use `.text(variables, prompt=...)` instead of `.messages(...)` for a text use case. A kind
+    mismatch is an error. The SDK records `source` as `remote`, `disk`, or `bundle`, and batches
+    monitoring logs through `POST /api/v1/logs`.
+
+    ### Server-filled prompt — smoke tests and low-volume paths
+
+    `POST #{spec.host}/api/v1/use-cases/#{spec.use_case_key}/prompt`
+
+    PromptOn selects the pinned prompt server-side and (if you send `variables`) renders the template for you.
 
     ```json
     #{spec |> request_example() |> Jason.encode!(pretty: true)}
@@ -192,7 +211,6 @@ defmodule PromptOnWeb.IntegrationComponents do
 
     | field | required | meaning |
     |---|---|---|
-    | `use_case` | yes | `"#{spec.use_case_key}"` for this integration |
     | `environment` | no | environment slug, default `"production"` (this deployment: `"#{spec.environment}"`) |
     | `prompt` | no | which named prompt to use, default `"default"`#{prompt_note(spec.prompts)} |
     | `variables` | no | template variables; when present the response is **rendered**, when absent you get the raw template |
@@ -200,42 +218,43 @@ defmodule PromptOnWeb.IntegrationComponents do
     Response 200:
 
     ```json
-    {"use_case": "#{spec.use_case_key}", "kind": "#{spec.kind}",
+    {"key": "#{spec.use_case_key}", "kind": "#{spec.kind}",
      "deployment": {"id": "…", "revision": 12},
     #{resolve_prompt_line(spec)}
      "model_id": "…", "model": "openai/gpt-4o-mini", "provider": "openrouter",
-     "effective_params": {"temperature": 0.3},
-     "effective_provider_options": {"allow_fallbacks": false},
+     "params": {"temperature": 0.3},
+     "provider_options": {"allow_fallbacks": false}, "source": "remote",
     #{resolve_pin_lines(spec.kind)}
      "warnings": [], "etag": "sha256-…"}
     ```
 
-    Correct, but it puts a PromptOn round-trip in front of every generation — exactly what this \
+    Correct, but it puts a PromptOn round-trip in front of every provider call — exactly what this \
     architecture exists to avoid. Use it for smoke tests, prototypes and low-volume paths.
 
-    ### (b) `GET #{spec.host}/api/v1/snapshot?environment=#{spec.environment}` + a local cache — **use this in production**
+    The SDK-backed document cache above is the production path. If this language has no PromptOn
+    SDK, implement the following document poller locally:
 
-    One document holds every live deployment of that environment, so resolution becomes a map lookup \
+    One document holds every live deployment of that environment, so prompt selection becomes a map lookup \
     in this process. The response carries a strong `ETag`; poll on an interval (30–60s is plenty) \
-    with `If-None-Match: "<etag>"` and an unchanged snapshot answers `304` with no body.
+    with `If-None-Match: "<etag>"` and an unchanged document answers `304` with no body.
 
     ```
-    GET #{spec.host}/api/v1/snapshot?environment=#{spec.environment}
+    GET #{spec.host}/api/v1/use-cases?environment=#{spec.environment}
     Authorization: Bearer $PTN_API_KEY
     If-None-Match: "sha256-…"
     ```
 
     Keep the last successful document in memory, and also write it to disk so a cold start survives \
-    PromptOn being down. Never fail a generation because the poll failed — serve the cached document.
+    PromptOn being down. Never fail a provider call because the poll failed — serve the cached document.
 
     Resolve locally:
 
     ```
-    deployment = snapshot.deployments[use_case_key]        # missing => no live deployment
-    version    = snapshot.prompt_versions[deployment.prompt_pins[prompt_name]]
-    model      = snapshot.models[deployment.model_id]
+    deployment = document.deployments[use_case_key]        # missing => no live deployment
+    version    = document.prompt_versions[deployment.prompt_pins[prompt_name]]
+    model      = document.models[deployment.model_id]
 
-    params           = snapshot.use_cases[use_case_key].default_params <- deployment.params
+    params           = document.use_cases[use_case_key].default_params <- deployment.params
     provider_options = model.provider_options                          <- deployment.provider_options
     ```
 
@@ -247,20 +266,20 @@ defmodule PromptOnWeb.IntegrationComponents do
     ## 2. Call the provider yourself
 
     Render the pinned prompt with this call's variables, then call the provider named by \
-    `model.provider` with `model.model_id`, the effective params and the effective provider options, \
+    `model.provider` with `model.model_id`, params and provider options, \
     using **this app's** provider credentials. Measure the wall-clock latency and keep the token \
-    usage and cost the provider reports — step 3 wants them.
+    usage and cost the provider reports — the monitoring log wants them.
 
     #{kind_note(spec.kind)}
 
-    ## 3. Report monitoring logs
+    ## 3. Monitoring-log wire contract
 
-        POST #{spec.host}/api/v1/generations?environment=#{spec.environment}
+        POST #{spec.host}/api/v1/logs?environment=#{spec.environment}
         Authorization: Bearer $PTN_API_KEY
         Content-Type: application/json
 
     ```json
-    {"generations": [
+    {"logs": [
       {"id": "<UUIDv7 generated by this app>",
        "use_case": "#{spec.use_case_key}",
        "deployment_id": "…", "deployment_revision": 12,
@@ -287,8 +306,9 @@ defmodule PromptOnWeb.IntegrationComponents do
     - **Idempotency.** `id` is a **UUIDv7 this app generates** before the provider call, and it is the \
     idempotency key: resending the same id is absorbed as a duplicate, never a second row. Generate \
     it once, log it locally, and reuse it on every retry.
-    - **Batching.** Up to **200 records** and **5MB** per request; over either limit is `413`. Buffer \
-    records and flush on a size or time trigger rather than one HTTP call per generation.
+    - **Batching.** Up to **200 records** and **5MB** per request. More than 200 records is `400`; \
+    over 5MB is `413`. Buffer records and flush on a size or time trigger rather than one HTTP call \
+    per provider call.
     - **Partial acceptance.** `202 {"accepted": 98, "duplicates": 2, "rejected": [{"index": 5, "id": "…", "code": "…", "message": "…"}]}`. \
     One bad record never fails the batch — read `rejected`, fix or drop those, and do not resend the \
     accepted ones.
@@ -299,8 +319,8 @@ defmodule PromptOnWeb.IntegrationComponents do
     - **Freshness.** `started_at` must be within 5 minutes of the future and 7 days of the past.
     - **Size caps.** `context` ≤ 2KB and `metadata` ≤ 4KB or the record is rejected. `params` > 4KB and \
     `usage.raw` > 16KB are not rejected — the field is blanked and named in `metadata.truncated_fields`.
-    - **Truncate payloads before sending.** Relative to the use case's `payload_policy.max_bytes` \
-    (default 256KB, it travels in the snapshot): one message's `content` ≤ `max_bytes/8`; \
+    - **Truncate log content before sending.** Relative to the use case's `payload_policy.max_bytes` \
+    (default 256KB, it travels in the deployed use-case document): one message's `content` ≤ `max_bytes/8`; \
     `input.messages` and `input.text` and `input.variables` ≤ `max_bytes` each; `output.content` and \
     `output.tool_calls` ≤ `max_bytes/4`. Cut the middle, keep head and tail, and set \
     `"truncated": true` on that `input`/`output` object. The server re-checks with the same rules.
@@ -321,15 +341,15 @@ defmodule PromptOnWeb.IntegrationComponents do
     |---|---|---|
     | 400 | `invalid_request` | the request is wrong — a missing template variable is named in `details.missing_variable`. Fix the call; do not retry. |
     | 401 | `unauthorized` | the API key is missing, wrong, revoked, or its project is archived. |
-    | 403 | `forbidden` | the key lacks the scope this endpoint needs (`resolve` or `logs`). |
-    | 404 | `not_found` | unknown `use_case` or `environment`; no live deployment (`details.reason = "unresolved"`); or a `prompt` name that is not pinned (`details.reason = "unknown_prompt"`, `details.available_prompts` lists the ones that are). |
-    | 413 | `payload_too_large` | the batch is over 200 records or 5MB — split it in half and resend. |
-    | 503 | `unavailable` | PromptOn is degraded. Honour `Retry-After`. **Config fetch must fall back to the cached snapshot; a generation must never fail because PromptOn did.** |
+    | 403 | `forbidden` | the key lacks the scope this endpoint needs (`read` or `logs`). |
+    | 404 | `not_found` | unknown use-case key or `environment`; no live deployment (`details.reason = "unresolved"`); or a `prompt` name that is not pinned (`details.reason = "unknown_prompt"`, `details.prompt_names` lists the ones that are). |
+    | 413 | `payload_too_large` | the body is over 5MB — split the batch and resend. |
+    | 503 | `unavailable` | PromptOn is degraded. Honour `Retry-After`. **Config fetch must fall back to the cached document; a provider call must never fail because PromptOn did.** |
 
     ## Task
 
     Find where this codebase calls an LLM for "#{spec.use_case_key}" (or where that call should be \
-    added) and rework it as follows. Fetch the configuration from PromptOn — snapshot + local cache \
+    added) and rework it as follows. Fetch the configuration from PromptOn — deployed use-case document + local cache \
     with ETag polling unless the volume is genuinely trivial — and delete the hard-coded prompt text, \
     model name and parameters from this repo, building the `variables` from the data that used to be \
     interpolated into the prompt. Keep calling the provider from this app with its existing \
@@ -349,14 +369,14 @@ defmodule PromptOnWeb.IntegrationComponents do
   defp prompt_list(names), do: Enum.map_join(names, ", ", &"`#{&1}`")
 
   # An embedding use case pins no prompt, so there is no chosen name either.
-  defp resolve_prompt_line(%{kind: :embedding}), do: ~s| "prompts": [],|
+  defp resolve_prompt_line(%{kind: :embedding}), do: ~s| "prompt_names": [],|
 
   defp resolve_prompt_line(spec),
     do:
-      ~s| "prompt": "#{first_prompt(spec.prompts)}", "prompts": | <>
+      ~s| "prompt": "#{first_prompt(spec.prompts)}", "prompt_names": | <>
         Jason.encode!(spec.prompts) <> ","
 
-  # The lines of the `/resolve` response that differ per kind (chat has messages, text has text,
+  # The lines of the prompt response that differ per kind (chat has messages, text has text,
   # embedding has no prompt at all).
   defp resolve_pin_lines(:chat) do
     ~s| "prompt_version": {"id": "…", "number": 7},\n| <>
@@ -368,13 +388,13 @@ defmodule PromptOnWeb.IntegrationComponents do
 
   defp resolve_pin_lines(_kind), do: ~s| "prompt_version": null,|
 
-  # The line of the monitoring log example that points at the resolution source; an embedding use
+  # The line of the monitoring log example that points at the prompt source; an embedding use
   # case has no prompt.
-  defp log_pin_line(%{kind: :embedding}), do: ~s|   "resolution_source": "remote",|
+  defp log_pin_line(%{kind: :embedding}), do: ~s|   "source": "remote",|
 
   defp log_pin_line(spec) do
     ~s|   "prompt": "#{first_prompt(spec.prompts)}", "prompt_version_id": "…",\n| <>
-      ~s|   "resolution_source": "remote",|
+      ~s|   "source": "remote",|
   end
 
   defp kind_note(:chat),

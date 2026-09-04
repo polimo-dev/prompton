@@ -1,49 +1,49 @@
-defmodule PromptOnWeb.API.V1.ResolveController do
+defmodule PromptOnWeb.API.V1.UseCasePromptController do
   @moduledoc """
-  `POST /api/v1/resolve` - the reference implementation of resolution (plan.md §6.3, ADR 0007
-  revision 2026-09-01). Runs the **same code** as the SDK (`PromptOnSDK.Resolver`) on the server:
-  for non-SDK clients, debugging, and render-equivalence checks.
+  `POST /api/v1/use-cases/:key/prompt` - the reference implementation of prompt filling (plan.md
+  §6.3, ADR 0007 revision 2026-09-01). Runs the **same code** as the SDK
+  (`PromptOnSDK.Resolver`) on the server for non-SDK clients, debugging, and render-equivalence
+  checks.
 
-  Request `{"use_case"★, "environment": "production", "prompt": "default", "variables": {}}` -
-  with `variables` present the templates are rendered as well. With deployments turning from
-  routers into **pins**, `ctx`, `target_id`, and `subject_key` are gone - the only selection axis
-  is the prompt name.
+  Request `{"environment": "production", "prompt": "default", "variables": {}}` - with
+  `variables` present the templates are rendered as well. With deployments turning from routers
+  into **pins**, `ctx`, `target_id`, and `subject_key` are gone - the use case key is the URL
+  segment and the only remaining selection axis is the prompt name.
 
-  Response: `deployment{id,revision}`, `prompt`, `model`/`effective_params`/
-  `effective_provider_options`, `prompt_version{id,number}`, `messages` or `text`, `prompts[]` (the
+  Response: `key`, `deployment{id,revision}`, `prompt`, `model`/`params`/
+  `provider_options`, `prompt_version{id,number}`, `messages` or `text`, `prompt_names[]` (the
   names this deployment pinned), and `etag`.
 
-  Errors: missing `use_case` -> 400, unknown use_case/environment -> 404, no deployment -> 404
-  (`details.reason = "unresolved"`), a prompt name that is not pinned -> 404 (`details.reason =
-  "unknown_prompt"` + `details.available_prompts`), missing variable -> 400
-  (`details.missing_variable`).
+  Errors: unknown use case/environment -> 404, no deployment -> 404 (`details.reason =
+  "unresolved"`), a prompt name that is not pinned -> 404 (`details.reason = "unknown_prompt"` +
+  `details.prompt_names`), missing variable -> 400 (`details.missing_variable`).
 
-  This endpoint is **not cached** (unlike `GET /snapshot`): it is the smoke test a person hits right
+  This endpoint is **not cached** (unlike `GET /use-cases`): it is the smoke test a person hits right
   after deploying and the debugging window, so "the use case just created, the revision just
-  committed" must show up immediately. The side that pays the polling cost is the snapshot, and
-  only that side goes through `PromptOn.Deployments.SnapshotCache`.
+  committed" must show up immediately. The side that pays the polling cost is the use-case document,
+  and only that side goes through `PromptOn.Deployments.SnapshotCache`.
   """
 
   use PromptOnWeb, :controller
 
   alias PromptOn.Deployments.Snapshot
-  alias PromptOnSDK.{Resolver, SnapshotData, Template}
+  alias PromptOnSDK.{Resolver, Template, UseCaseDocument}
   alias PromptOnWeb.API.V1.RequestEnvironment
 
-  plug PromptOnWeb.Plugs.RequireScope, :resolve
+  plug PromptOnWeb.Plugs.RequireScope, :read
 
   action_fallback PromptOnWeb.API.V1.FallbackController
 
-  def create(conn, params) do
+  def create(conn, %{"key" => use_case_key} = params) do
     api_key = conn.assigns.api_key
 
-    with {:ok, use_case_key} <- fetch_use_case(params),
+    with {:ok, use_case_key} <- validate_use_case_key(use_case_key),
          {:ok, prompt} <- fetch_prompt(params),
          {:ok, variables} <- fetch_optional_map(params, "variables"),
          {:ok, environment} <- RequestEnvironment.fetch(conn, params),
          {:ok, snapshot} <-
            Snapshot.build(environment, actor: api_key, tenant: api_key.project_id),
-         {:ok, data, _warnings} <- SnapshotData.decode(snapshot.map),
+         {:ok, data, _warnings} <- UseCaseDocument.decode(snapshot.map),
          {:ok, resolution} <-
            resolve(data, use_case_key, prompt: prompt, etag: snapshot.etag),
          {:ok, rendered} <- render_templates(resolution, variables) do
@@ -55,8 +55,8 @@ defmodule PromptOnWeb.API.V1.ResolveController do
   # ---------------------------------------------------------------------------
   # params
 
-  defp fetch_use_case(%{"use_case" => key}) when is_binary(key) and key != "", do: {:ok, key}
-  defp fetch_use_case(_), do: {:error, {:invalid_request, "use_case is required"}}
+  defp validate_use_case_key(key) when is_binary(key) and key != "", do: {:ok, key}
+  defp validate_use_case_key(_), do: {:error, {:invalid_request, "use case key is required"}}
 
   defp fetch_prompt(params) do
     case Map.get(params, "prompt") do
@@ -83,7 +83,7 @@ defmodule PromptOnWeb.API.V1.ResolveController do
         {:ok, resolution}
 
       {:error, :unknown_use_case} ->
-        {:error, {:not_found, "unknown use case: #{use_case_key}", %{"use_case" => use_case_key}}}
+        {:error, {:not_found, "unknown use case: #{use_case_key}", %{"key" => use_case_key}}}
 
       {:error, :unresolved} ->
         {:error,
@@ -109,11 +109,16 @@ defmodule PromptOnWeb.API.V1.ResolveController do
 
     {:not_found,
      "the live deployment pins no prompt named #{inspect(name)}#{available_note(available)}",
-     %{"reason" => "unknown_prompt", "prompt" => name, "available_prompts" => available}}
+     %{
+       "reason" => "unknown_prompt",
+       "key" => use_case_key,
+       "prompt" => name,
+       "prompt_names" => available
+     }}
   end
 
   defp available_note([]), do: " (it pins no prompt at all)"
-  defp available_note(names), do: " — available prompts: " <> Enum.join(names, ", ")
+  defp available_note(names), do: " — pinned prompt names: " <> Enum.join(names, ", ")
 
   # No variables -> the raw templates as-is
   defp render_templates(resolution, nil),
@@ -154,19 +159,20 @@ defmodule PromptOnWeb.API.V1.ResolveController do
 
   defp response(use_case_key, resolution, rendered, prompts, etag) do
     base = %{
-      "use_case" => use_case_key,
+      "key" => use_case_key,
       "kind" => to_string(resolution.kind),
       "deployment" => %{
         "id" => resolution.deployment_id,
         "revision" => resolution.deployment_revision
       },
       "prompt" => resolution.prompt,
-      "prompts" => prompts,
+      "prompt_names" => prompts,
       "model_id" => resolution.model_id,
       "model" => resolution.model,
       "provider" => resolution.provider && to_string(resolution.provider),
-      "effective_params" => resolution.effective_params,
-      "effective_provider_options" => resolution.effective_provider_options,
+      "params" => resolution_params(resolution),
+      "provider_options" => resolution_provider_options(resolution),
+      "source" => resolution.source && to_string(resolution.source),
       "prompt_version" =>
         resolution.prompt_version_id &&
           %{"id" => resolution.prompt_version_id, "number" => resolution.prompt_version_number},
@@ -195,4 +201,12 @@ defmodule PromptOnWeb.API.V1.ResolveController do
 
   defp warning_string({tag, detail}), do: "#{tag}: #{detail}"
   defp warning_string(other), do: inspect(other)
+
+  defp resolution_params(resolution),
+    do: Map.get(resolution, :params) || %{}
+
+  defp resolution_provider_options(resolution),
+    do:
+      Map.get(resolution, :provider_options) ||
+        %{}
 end

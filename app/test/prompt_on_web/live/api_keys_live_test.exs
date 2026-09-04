@@ -35,14 +35,14 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
     end
 
     test "a row shows prefix, name, scope and last use", %{conn: conn, project: project} do
-      {key, _raw} = Fixtures.api_key_fixture(project, scopes: [:resolve], name: "Server key")
+      {key, _raw} = Fixtures.api_key_fixture(project, scopes: [:read], name: "Server key")
 
       {:ok, view, _html} = live(conn, ~p"/personal/acme/api-keys")
 
       row = view |> element("#key-row-#{key.id}") |> render()
       assert row =~ key.key_prefix
       assert row =~ "Server key"
-      assert row =~ "resolve"
+      assert row =~ "read"
       assert row =~ "used never"
       assert has_element?(view, "#copy-key-#{key.id}[data-copy='#{key.key_prefix}']")
 
@@ -60,10 +60,14 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
       {:ok, view, _html} = live(conn, ~p"/personal/acme/api-keys")
 
       config = view |> element("#sdk-config") |> render()
+      screen = render(view)
       assert config =~ "config :prompton_sdk"
       assert config =~ PromptOnWeb.Endpoint.url()
-      assert config =~ "priv/prompton/snapshot.json"
-      assert render(view) =~ "ETag polling every 30s"
+      assert config =~ "priv/prompton/use-cases.production.json"
+      assert screen =~ "ETag polling every 30s"
+      assert screen =~ "deployed use-case document"
+      refute screen =~ "whole snapshot"
+      refute screen =~ "resolves locally"
     end
   end
 
@@ -76,7 +80,7 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
 
       html =
         view
-        |> form("#issue-key-form", api_key: %{"scopes" => ["resolve", "logs"]})
+        |> form("#issue-key-form", api_key: %{"scopes" => ["read", "logs"]})
         |> render_submit()
 
       assert html =~ "This key will not be shown again."
@@ -101,12 +105,12 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
       assert has_element?(view, "#issue-key-name")
 
       view
-      |> form("#issue-key-form", api_key: %{"name" => "Server key", "scopes" => ["resolve"]})
+      |> form("#issue-key-form", api_key: %{"name" => "Server key", "scopes" => ["read"]})
       |> render_submit()
 
       {:ok, [key]} = Projects.list_api_keys(project.id, actor: user)
       assert key.name == "Server key"
-      assert key.scopes == [:resolve]
+      assert key.scopes == [:read]
       refute Map.has_key?(key, :environment_id)
     end
 
@@ -114,12 +118,12 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
       {:ok, view, _html} = live(conn, ~p"/personal/acme/api-keys?issue=1")
 
       view
-      |> form("#issue-key-form", api_key: %{"name" => "  ", "scopes" => ["resolve", "logs"]})
+      |> form("#issue-key-form", api_key: %{"name" => "  ", "scopes" => ["read", "logs"]})
       |> render_submit()
 
       {:ok, [key]} = Projects.list_api_keys(project.id, actor: user)
       assert key.name == "SDK key"
-      assert key.scopes == [:resolve, :logs]
+      assert key.scopes == [:read, :logs]
     end
 
     test "an issued key appears in the list and disappears when revoked", %{
@@ -130,13 +134,13 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
       {:ok, view, _html} = live(conn, ~p"/personal/acme/api-keys?issue=1")
 
       view
-      |> form("#issue-key-form", api_key: %{"scopes" => ["resolve"]})
+      |> form("#issue-key-form", api_key: %{"scopes" => ["read"]})
       |> render_submit()
 
       view |> element("#issue-done") |> render_click()
 
       {:ok, [key]} = Projects.list_api_keys(project.id, actor: user)
-      assert key.scopes == [:resolve]
+      assert key.scopes == [:read]
       assert has_element?(view, "#key-row-#{key.id}")
 
       view |> element("#revoke-key-#{key.id}") |> render_click()

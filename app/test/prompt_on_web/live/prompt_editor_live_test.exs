@@ -2558,8 +2558,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
       assert curl =~ "curl -sS -X POST"
 
-      # A human's smoke test is `/resolve`; there is no proxy mode (agent-first-spec §2).
-      assert curl =~ PromptOnWeb.Endpoint.url() <> "/api/v1/resolve"
+      assert curl =~ PromptOnWeb.Endpoint.url() <> "/api/v1/use-cases/#{use_case.key}/prompt"
       refute curl =~ "/api/v1/generate"
       assert curl =~ "Bearer $PTN_API_KEY"
       assert curl =~ use_case.key
@@ -2597,17 +2596,23 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert prompt =~ "not in your request path"
       refute prompt =~ "/api/v1/generate"
 
-      # (1) the two config-fetch routes: resolve, and snapshot + local cache (recommended)
-      assert prompt =~ "/api/v1/resolve"
-      assert prompt =~ "/api/v1/snapshot"
+      # (1) the SDK's document cache and the server-filled prompt endpoint
+      assert prompt =~ "/api/v1/use-cases/#{use_case.key}/prompt"
+      assert prompt =~ "/api/v1/use-cases"
       assert prompt =~ "If-None-Match"
-      assert prompt =~ "use this in production"
+      assert prompt =~ "production path"
+      assert prompt =~ "prompton.use_case"
+      assert prompt =~ "use_case.messages"
+      assert prompt =~ "prompton.Result.from_openai"
+      assert prompt =~ "use_case.track"
+      assert prompt =~ "source"
+      assert prompt =~ "remote"
 
       # (2) the app calls the provider itself with its own key
       assert prompt =~ "Call the provider yourself"
 
       # (3) the monitoring logs envelope
-      assert prompt =~ "/api/v1/generations"
+      assert prompt =~ "/api/v1/logs"
       assert prompt =~ "200 records"
       assert prompt =~ "UUIDv7"
       assert prompt =~ "payload_policy.max_bytes"

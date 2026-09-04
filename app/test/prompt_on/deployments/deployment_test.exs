@@ -422,7 +422,10 @@ defmodule PromptOn.Deployments.DeploymentTest do
       assert resolution.prompt == "default"
       assert resolution.prompt_version_id == ctx.version.id
       assert resolution.model_id == ctx.model.id
-      assert resolution.effective_params == %{"temperature" => 0.4}
+
+      assert Map.get(resolution, :params) == %{
+               "temperature" => 0.4
+             }
     end
 
     test "selects a named prompt and errors on an unpinned name", ctx do

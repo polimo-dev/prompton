@@ -1,15 +1,15 @@
 defmodule PromptOn.Deployments.SnapshotCache do
   @moduledoc """
-  In-memory cache (ETS) holding the **snapshot v3 body + decoded result** of one environment.
+  In-memory cache (ETS) holding the **use-cases schema v4 body + decoded result** of one environment.
 
-  Its reason to exist is the **polling path of config-fetch serving** (`GET /api/v1/snapshot`,
+  Its reason to exist is the **polling path of config-fetch serving** (`GET /api/v1/use-cases`,
   docs/api.md): PromptOn does not sit in the app's request path; instead, apps **poll** this
   endpoint. `Snapshot.build/2` is five round trips plus canonical JSON encoding, and
-  `PromptOnSDK.SnapshotData.decode/1` is CPU work that unpacks that map into structs. Doing both for
+  `PromptOnSDK.UseCaseDocument.decode/1` is CPU work that unpacks that map into structs. Doing both for
   every poll (including requests that end in 304 because nothing changed) makes the serving cost
   proportional to the polling interval.
 
-  **`POST /resolve` deliberately bypasses this cache.** It is the smoke test a person runs right
+  **`POST /use-cases/:key/prompt` deliberately bypasses this cache.** It is the smoke test a person runs right
   after deploying and a debugging entry point, so "the use case just created, the revision just
   committed" must show up immediately, and it is not the side that carries polling cost.
 
@@ -19,8 +19,8 @@ defmodule PromptOn.Deployments.SnapshotCache do
   ## Contract
 
   - The key is the **environment id**. The value is
-    `%{data: %PromptOnSDK.SnapshotData{}, etag: String.t(), body: binary(), last_modified: DateTime.t(), warnings: [term()]}`
-    where `body` is the exact canonical bytes that were hashed (`GET /snapshot` sends it as is).
+    `%{data: %PromptOnSDK.UseCaseDocument{}, etag: String.t(), body: binary(), last_modified: DateTime.t(), warnings: [term()]}`
+    where `body` is the exact canonical bytes that were hashed (`GET /use-cases` sends it as is).
   - Within the TTL a fetch is one ETS read (zero DB reads). Default 5 seconds; change it with
     `config :prompton, :snapshot_cache_ttl_ms`.
   - After the TTL it **revalidates**: the snapshot is assembled again (the only DB access), and if
@@ -36,7 +36,7 @@ defmodule PromptOn.Deployments.SnapshotCache do
     `PromptOnWeb.Plugs.ApiKeyAuth` reads the key's project and environment **on every request** and
     cuts off with 401 when archived; this cache does not stand in for that check.
   - Right after a deployment, an old revision may be served for at most the TTL (5 seconds). That
-    is the same property as `GET /snapshot` polling (the SDK path); call `invalidate/1` when
+    is the same property as `GET /use-cases` polling (the SDK path); call `invalidate/1` when
     immediate effect is needed.
   - Cache stampedes are not prevented: at the moment the TTL expires, N concurrent requests may
     each reassemble. That is N times per 5 seconds per environment with identical results (last
@@ -57,13 +57,13 @@ defmodule PromptOn.Deployments.SnapshotCache do
 
   alias PromptOn.Deployments.Snapshot
   alias PromptOn.Projects.Environment
-  alias PromptOnSDK.SnapshotData
+  alias PromptOnSDK.UseCaseDocument
 
   @table :prompton_snapshot_cache
   @default_ttl_ms 5_000
 
   @type entry :: %{
-          data: SnapshotData.t(),
+          data: UseCaseDocument.t(),
           etag: String.t(),
           body: binary(),
           last_modified: DateTime.t(),
@@ -174,7 +174,7 @@ defmodule PromptOn.Deployments.SnapshotCache do
   end
 
   defp decode_and_put(id, snapshot) do
-    case SnapshotData.decode(snapshot.map) do
+    case UseCaseDocument.decode(snapshot.map) do
       {:ok, data, warnings} ->
         entry = %{
           data: data,

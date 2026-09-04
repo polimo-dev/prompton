@@ -75,7 +75,7 @@ defmodule PromptOn.Evals.CalibrationSetTest do
       assert {:error, error} =
                Evals.sample_calibration_set(%{use_case_id: use_case.id}, scope(project))
 
-      assert Exception.message(error) =~ "at least 5 monitoring logs with stored payloads"
+      assert Exception.message(error) =~ "at least 5 monitoring logs with stored log content"
       assert Exception.message(error) =~ "has 3"
     end
 
@@ -98,7 +98,7 @@ defmodule PromptOn.Evals.CalibrationSetTest do
 
   describe "the sampler contract" do
     # `{:error, _}` collapsed into `[]` turns a read failure into the confident sentence "this use
-    # case has no logs with stored payloads". It has to stay distinguishable.
+    # case has no logs with stored log content". It has to stay distinguishable.
     test "eligible/2 returns ok or error, never a bare list", %{
       project: project,
       use_case: use_case

@@ -124,7 +124,7 @@ defmodule PromptOnWeb.API.V1.Management.OrgControllerTest do
         user
         |> cli_token_fixture()
         |> conn()
-        |> get(~p"/api/v1/snapshot")
+        |> get(~p"/api/v1/use-cases")
 
       assert %{"error" => %{"code" => "unauthorized"}} = json_response(conn, 401)
     end

@@ -202,7 +202,7 @@ defmodule PromptOn.Evals.EvaluationRunTest do
                  scope(project)
                )
 
-      assert Exception.message(error) =~ "no monitoring logs with stored payloads in staging"
+      assert Exception.message(error) =~ "no monitoring logs with stored log content in staging"
     end
 
     test "refuses to start without a provider key", %{project: project} do

@@ -115,7 +115,7 @@ defmodule PromptOn.Evals.EvaluationRun.Changes.SampleGenerations do
 
     invalid(
       :deployment_id,
-      "revision ##{revision} has no monitoring logs with stored payloads in #{environment}"
+      "revision ##{revision} has no monitoring logs with stored log content in #{environment}"
     )
   end
 

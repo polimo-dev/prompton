@@ -77,8 +77,9 @@ defmodule PromptOn.Application do
       {PromptOn.RateLimit, clean_period: :timer.minutes(10)},
       # Encryption vault (GenerationPayload / ProviderKey)
       PromptOn.Vault,
-      # ETS cache for config-fetch serving (`GET /snapshot`, `POST /resolve`) polling, so the
-      # snapshot is not reassembled and decoded on every poll.
+      # ETS cache for config-fetch serving (`GET /use-cases`,
+      # `POST /use-cases/:key/prompt`) polling, so the document is not reassembled and decoded on
+      # every poll.
       PromptOn.Deployments.SnapshotCache,
       # Decrypted BYOK key cache used by server-side LLM calls (arena, AI drafts, and later
       # auto-grading).

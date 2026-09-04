@@ -4,8 +4,8 @@ defmodule PromptOnWeb.API.V1.Management.JSON do
 
   The conventions are the same as the public API's (`docs/api.md`, common conventions): **keys are
   snake_case strings**, ids are UUID strings without a prefix, timestamps are ISO8601 (UTC), and
-  responses are **bare objects** with no wrapper like `{"data": …}` - `POST /resolve`,
-  `GET /snapshot`, and `POST /generations` already work this way, and two envelopes in one API
+  responses are **bare objects** with no wrapper like `{"data": …}` - `POST /use-cases/:key/prompt`,
+  `GET /use-cases`, and `POST /logs` already work this way, and two envelopes in one API
   would make the client (a coding AI) ask which one it is every time. A list is an object with a
   single plural key (`{"projects": [...]}`) - a top-level array leaves no room to add paging
   information later.
@@ -138,7 +138,7 @@ defmodule PromptOnWeb.API.V1.Management.JSON do
     }
   end
 
-  @doc "One message template line. `name` is included only when present (as in `POST /resolve`)."
+  @doc "One message template line. `name` is included only when present (as in `POST /use-cases/:key/prompt`)."
   def message(message) do
     base = %{"role" => to_string(message.role), "content" => message.content}
 
@@ -169,8 +169,9 @@ defmodule PromptOnWeb.API.V1.Management.JSON do
   end
 
   @doc """
-  Deployment revision = **pin**. `model_id` means the same as in snapshot v3 (the UUID of the
-  catalog Model), and `model` is that model's provider string (only when available).
+  Deployment revision = **pin**. `model_id` means the same as in the schema-v4 use-case document
+  (the UUID of the catalog Model), and `model` is that model's provider string (only when
+  available).
   """
   def deployment(deployment, environment_slug, model \\ nil) do
     base = %{

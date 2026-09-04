@@ -28,7 +28,7 @@ defmodule PromptOnWeb.API.V1.Management.ApiKeyControllerTest do
     body = json_response(conn, 201)
 
     assert body["name"] == "HeyDiary server"
-    assert body["scopes"] == ["resolve", "logs"]
+    assert body["scopes"] == ["read", "logs"]
     assert String.starts_with?(body["key"], "ptn_heydiary_")
     assert body["key_prefix"] == String.slice(body["key"], 0, 16)
 
@@ -98,10 +98,10 @@ defmodule PromptOnWeb.API.V1.Management.ApiKeyControllerTest do
       build_conn()
       |> put_req_header("authorization", "Bearer #{runtime_raw}")
       |> put_req_header("content-type", "application/json")
-      |> post(~p"/api/v1/resolve", Jason.encode!(%{use_case: "chat_response"}))
+      |> post(~p"/api/v1/use-cases/chat_response/prompt", Jason.encode!(%{}))
       |> json_response(200)
 
-    assert resolved["use_case"] == "chat_response"
+    assert resolved["key"] == "chat_response"
 
     assert %{"error" => %{"code" => "unauthorized"}} =
              json_response(api_get(runtime_raw, ~p"/api/v1/orgs/personal/projects"), 401)

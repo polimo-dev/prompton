@@ -21,7 +21,7 @@ defmodule PromptOn.LLM do
 
   `opts` are interpreted by the adapter (OpenRouter: `:api_key`, `:organization_id`,
   `:receive_timeout`, `:req_options`). The returned outcome uses the same vocabulary as
-  `PromptOnSDK.OpenRouter.outcome/1` (`stop_kind`, `cost_usd`, `model_used`) plus execution info
+  `PromptOnSDK.Result.from_openai/1` (`stop_kind`, `cost_usd`, `model_used`) plus execution info
   (`latency_ms`) in a thin map -- Generation storage (§5.7) can take it as is.
   """
 

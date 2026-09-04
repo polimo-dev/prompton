@@ -29,8 +29,8 @@ defmodule PromptOnWeb.ApiKeysLive do
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.SettingsComponents, as: SC
 
-  @scopes [:resolve, :logs]
-  @bundle_path "priv/prompton/snapshot.json"
+  @scopes [:read, :logs]
+  @bundle_path "priv/prompton/use-cases.production.json"
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
@@ -211,7 +211,7 @@ defmodule PromptOnWeb.ApiKeysLive do
           <SC.setting_card
             id="sdk-keys-card"
             title="SDK keys"
-            desc="One key covers the whole project — the request picks the environment (parameter environment, default production). Scopes split config fetching (resolve) from monitoring logs (logs)."
+            desc="One key covers the whole project — the request picks the environment (parameter environment, default production). Scopes split config fetching (read) from monitoring logs (logs)."
           >
             <div :if={@api_keys == []} style="font-size:13px;color:var(--tx-2);">
               No keys issued yet.
@@ -261,7 +261,7 @@ defmodule PromptOnWeb.ApiKeysLive do
           <SC.setting_card
             id="sdk-setup-card"
             title="SDK setup"
-            desc="Your app pulls the whole snapshot and resolves locally, then calls your provider itself — PromptOn is never in the request path. If PromptOn goes down, the app keeps running on its last snapshot."
+            desc="Your app pulls the deployed use-case document and selects prompts locally, then calls your provider itself — PromptOn is never in the request path. If PromptOn goes down, the app keeps running on its last document."
           >
             <div
               id="sdk-config"
@@ -342,8 +342,9 @@ defmodule PromptOnWeb.ApiKeysLive do
             />
           </div>
           <div style="font-size:12px;color:var(--tx-3);margin-top:7px;line-height:1.55;">
-            <span class="font-mono">resolve</span>
-            fetches the deployed config (snapshot / resolve). <span class="font-mono">logs</span>
+            <span class="font-mono">read</span>
+            fetches the deployed use-case document and server-filled prompt.
+            <span class="font-mono">logs</span>
             reports monitoring logs back to PromptOn.
           </div>
         </.form>

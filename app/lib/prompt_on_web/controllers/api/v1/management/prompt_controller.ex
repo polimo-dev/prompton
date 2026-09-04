@@ -81,7 +81,7 @@ defmodule PromptOnWeb.API.V1.Management.PromptController do
       nil ->
         {:error,
          {:not_found, "unknown prompt: #{name}",
-          %{"prompt" => name, "available_prompts" => prompt_names(scope, use_case)}}}
+          %{"prompt" => name, "prompt_names" => prompt_names(scope, use_case)}}}
 
       prompt ->
         {:ok, prompt}

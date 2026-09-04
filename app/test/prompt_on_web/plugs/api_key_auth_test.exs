@@ -57,7 +57,7 @@ defmodule PromptOnWeb.Plugs.ApiKeyAuthTest do
 
   test "401 once the key's project is archived (decision #11)", %{conn: conn} do
     project = project_fixture()
-    {_key, raw} = api_key_fixture(project, scopes: [:resolve, :logs])
+    {_key, raw} = api_key_fixture(project, scopes: [:read, :logs])
     refute call(conn, raw).halted
 
     {:ok, _} = Projects.archive_project(project, actor: system_actor())

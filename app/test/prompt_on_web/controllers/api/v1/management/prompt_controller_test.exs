@@ -180,7 +180,7 @@ defmodule PromptOnWeb.API.V1.Management.PromptControllerTest do
                json_response(conn, 404)
 
       assert details["prompt"] == "ja"
-      assert details["available_prompts"] == ["default"]
+      assert details["prompt_names"] == ["default"]
     end
 
     test "another organization's key cannot commit here", %{raw: _raw} do

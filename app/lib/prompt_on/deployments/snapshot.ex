@@ -1,8 +1,8 @@
 defmodule PromptOn.Deployments.Snapshot do
   @moduledoc """
-  Assembles the **snapshot v3** of one environment (ADR 0007 revised 2026-09-01, plan.md §6.2
-  `GET /snapshot`): every live Deployment of that environment + the PromptVersions/Models the pins
-  reference + UseCase metadata. It is a derived read result, not a resource.
+  Assembles the **use-cases schema v4** of one environment (ADR 0007 revised 2026-09-01, plan.md
+  §6.2 `GET /use-cases`): every live Deployment of that environment + the PromptVersions/Models
+  the pins reference + UseCase metadata. It is a derived read result, not a resource.
 
   What changed from v2 is **the shape of a deployment entry**: rules, conditions and targets are
   gone, and each use_case key holds one
@@ -10,7 +10,7 @@ defmodule PromptOn.Deployments.Snapshot do
   (context dimensions themselves were deleted). Normalization, canonical JSON, ETag and the polling
   contract are inherited unchanged.
 
-  - The map contract is what `PromptOnSDK.SnapshotData.decode/1` reads without warnings (string
+  - The map contract is what `PromptOnSDK.UseCaseDocument.decode/1` reads without warnings (string
     keys, enum values as strings).
   - `prompt_versions/models` are normalized (deduplicated) by id at the top level. Only what the
     pins and models of live Deployments point at is included.
@@ -27,7 +27,7 @@ defmodule PromptOn.Deployments.Snapshot do
     `status` field is included): if a deprecated (or, defensively, archived) model were missing,
     the SDK would resolve `model: nil`.
   - `override_deployments: [%Deployment{}]` slots those Deployments into the live position of the
-    same UseCase (past-revision simulation, `Deployment.:resolve`).
+    same UseCase (past-revision simulation, internal `Deployment.:resolve`).
   """
 
   require Ash.Query
@@ -40,7 +40,7 @@ defmodule PromptOn.Deployments.Snapshot do
   alias PromptOn.Projects.Environment
   alias PromptOn.Prompts.{PromptVersion, UseCase}
 
-  @schema_version 3
+  @schema_version 4
 
   @type result :: %{
           map: map(),

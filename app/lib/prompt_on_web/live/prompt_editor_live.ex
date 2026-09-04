@@ -1660,11 +1660,11 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   defp apply_ai_result(socket, {:ok, {:error, reason}}) do
-    assign(socket, ai_stage: :error, ai_error: "Generation failed: #{inspect(reason)}")
+    assign(socket, ai_stage: :error, ai_error: "Model call failed: #{inspect(reason)}")
   end
 
   defp apply_ai_result(socket, {:exit, reason}) do
-    assign(socket, ai_stage: :error, ai_error: "Generation was interrupted: #{inspect(reason)}")
+    assign(socket, ai_stage: :error, ai_error: "Model call was interrupted: #{inspect(reason)}")
   end
 
   defp decode_messages(params, current) when is_map(params) do

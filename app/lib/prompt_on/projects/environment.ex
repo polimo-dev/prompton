@@ -1,8 +1,9 @@
 defmodule PromptOn.Projects.Environment do
   @moduledoc """
-  Deployment target separation (`production`, `staging`, ...). Deployments are per env, and an
-  ApiKey belongs to an env (plan.md §5.4). The `:config_snapshot` generic action (snapshot assembly)
-  is filled in by the Deployments domain: `PromptOn.Deployments.Snapshot`.
+  Deployment target separation (`production`, `staging`, ...). Deployments are per environment;
+  runtime API keys are project-scoped and each request chooses an environment. The internal
+  `:config_snapshot` generic action is filled in by the Deployments domain:
+  `PromptOn.Deployments.Snapshot`.
   """
 
   use Ash.Resource,
@@ -41,7 +42,7 @@ defmodule PromptOn.Projects.Environment do
 
     action :config_snapshot, :map do
       description """
-      Assembles this environment's snapshot v3 (plan.md §6.2) via
+      Assembles this environment's schema-v4 use-case document (plan.md §6.2) via
       `PromptOn.Deployments.Snapshot.build/2`. Result:
       `%{map, body(canonical JSON), etag("sha256-…"), last_modified}`. Environment visibility is
       enforced by the actor's policies.
@@ -79,7 +80,7 @@ defmodule PromptOn.Projects.Environment do
     end
 
     policy [PromptOn.Checks.ApiKeyActor, action(:config_snapshot)] do
-      authorize_if {PromptOn.Checks.ApiKeyScope, scope: :resolve}
+      authorize_if {PromptOn.Checks.ApiKeyScope, scope: :read}
     end
 
     policy action(:config_snapshot) do

@@ -68,7 +68,7 @@ defmodule PromptOnWeb.Router do
   # organization.
   # ===========================================================================
 
-  # Unauthenticated health checks (for the LB). Smoke-test an API key with GET /api/v1/snapshot.
+  # Unauthenticated health checks (for the LB). Smoke-test an API key with GET /api/v1/use-cases.
   scope "/", PromptOnWeb do
     get "/health", HealthController, :index
     get "/health/ready", HealthController, :ready
@@ -85,13 +85,13 @@ defmodule PromptOnWeb.Router do
   scope "/api/v1", PromptOnWeb.API.V1 do
     pipe_through :api
 
-    # config-fetch (scope `:resolve`) — the app receives its config and calls the provider directly
+    # config-fetch (scope `:read`) — the app receives its config and calls the provider directly
     # with its own provider key.
-    get "/snapshot", SnapshotController, :show
-    post "/resolve", ResolveController, :create
+    get "/use-cases", SnapshotController, :show
+    post "/use-cases/:key/prompt", UseCasePromptController, :create
 
     # monitoring logs (scope `:logs`) — the app sends call results in batches.
-    post "/generations", GenerationController, :create
+    post "/logs", LogController, :create
   end
 
   # Device login (agent-first-spec batch ③, docs/management-api.md §2). Two unauthenticated
@@ -115,7 +115,8 @@ defmodule PromptOnWeb.Router do
   #
   # Lives **under the same `/api/v1` as the public API above, on different paths**: a runtime key
   # (`ptn_<project_slug>_…`) opens none of the paths here (the plug accepts only CLI session
-  # tokens), and conversely a CLI token opens none of `/snapshot`, `/resolve`, `/generations`. Two
+  # tokens), and conversely a CLI token opens none of `/use-cases`, `/use-cases/:key/prompt`,
+  # `/logs`. Two
   # layers, two pipelines.
   #
   # **The credential is a person** (2026-09-02, management keys deleted). That is why the path has

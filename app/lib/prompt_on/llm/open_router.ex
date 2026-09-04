@@ -5,7 +5,7 @@ defmodule PromptOn.LLM.OpenRouter do
 
   For "experiment result = production result" to hold, the server must send the **same body** the
   SDK sends from the app and read the **same fields** (plan.md §11.3). So response parsing reuses
-  `PromptOnSDK.OpenRouter.outcome/1` (= `effective_cost/2` + `StopKind.normalize/1`) as is, and the
+  `PromptOnSDK.Result.from_openai/1` (= cost extraction + `StopKind.normalize/1`) as is, and the
   request body is assembled by the same rules:
 
       %{"model" => …, "messages" => […],
@@ -42,7 +42,7 @@ defmodule PromptOn.LLM.OpenRouter do
   @behaviour PromptOn.LLM
 
   alias PromptOn.Accounts
-  alias PromptOnSDK.{OpenRouter, Params, StopKind}
+  alias PromptOnSDK.{Params, Result, StopKind}
 
   require Logger
 
@@ -116,10 +116,10 @@ defmodule PromptOn.LLM.OpenRouter do
     |> Keyword.merge(Keyword.get(opts, :req_options, []))
   end
 
-  # Keep only the fields the server uses from the `PromptOnSDK.OpenRouter.outcome/1` result and add
+  # Keep only the fields the server uses from the `PromptOnSDK.Result.from_openai/1` result and add
   # `latency_ms`. Re-normalizing `stop_kind` is idempotent (`StopKind`), so it is safe.
   defp outcome(response, latency_ms) do
-    parsed = OpenRouter.outcome(response)
+    parsed = Result.from_openai(response)
 
     %{
       content: parsed.content,

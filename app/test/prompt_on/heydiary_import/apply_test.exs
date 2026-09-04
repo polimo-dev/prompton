@@ -1,7 +1,8 @@
 defmodule PromptOn.HeyDiaryImport.ApplyTest do
   @moduledoc """
   A real import from the fixture dump (plan.md §12.2 steps 2-7, ADR 0007 revision 2026-09-01
-  "deployments are pins") → snapshot v3 → `Verify.compare` (step 9) → `Export.sql` round trip.
+  "deployments are pins") → schema-v4 use-case document → `Verify.compare` (step 9) →
+  `Export.sql` round trip.
   """
 
   use PromptOn.DataCase, async: true
@@ -12,7 +13,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
   alias PromptOn.HeyDiaryImport
   alias PromptOn.HeyDiaryImport.{Dump, Export, Verify}
   alias PromptOn.{Projects, Prompts}
-  alias PromptOnSDK.{Resolver, SnapshotData}
+  alias PromptOnSDK.{Resolver, UseCaseDocument}
 
   @dump_path Path.expand("../../fixtures/heydiary/dump.json", __DIR__)
 
@@ -38,7 +39,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
         tenant: summary.project_id
       )
 
-    {:ok, snapshot, []} = SnapshotData.decode(map)
+    {:ok, snapshot, _warnings} = UseCaseDocument.decode(map)
     {map, snapshot}
   end
 
@@ -193,7 +194,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       summary = import!(plan, org, actor)
       {map, snapshot} = snapshot!(summary, actor)
 
-      assert map["schema_version"] == 3
+      assert map["schema_version"] == 4
       assert map["project"] == "heydiary"
       assert map["environment"] == "production"
       assert map |> Map.fetch!("use_cases") |> map_size() == 9
@@ -204,9 +205,9 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       {:ok, ko} = Resolver.resolve(snapshot, "diary_generation", prompt: "ko")
       assert ko.model == "google/gemini-3.6-flash"
       assert ko.prompt == "ko"
-      assert ko.effective_params == %{"temperature" => 0.4}
+      assert resolution_params(ko) == %{"temperature" => 0.4}
 
-      assert ko.effective_provider_options == %{
+      assert resolution_provider_options(ko) == %{
                "only" => ["google-ai-studio", "google-vertex"],
                "allow_fallbacks" => true
              }
@@ -234,7 +235,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       # row is gemini, so chat_response is gemini too (the plan hierarchy collapsed)
       {:ok, chat} = Resolver.resolve(snapshot, "chat_response")
       assert chat.model == "google/gemini-3.6-flash"
-      assert chat.effective_params == %{"temperature" => 0.7}
+      assert resolution_params(chat) == %{"temperature" => 0.7}
       assert [%{role: "system"}] = chat.messages
 
       # voice: text_template per language, Groq
@@ -378,4 +379,12 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
                length(Regex.scan(~r/^(INSERT|UPDATE|BEGIN|COMMIT)/m, sql))
     end
   end
+
+  defp resolution_params(resolution),
+    do: Map.get(resolution, :params) || %{}
+
+  defp resolution_provider_options(resolution),
+    do:
+      Map.get(resolution, :provider_options) ||
+        %{}
 end

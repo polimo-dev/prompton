@@ -110,7 +110,7 @@ defmodule PromptOn.Fixtures do
         %{
           project_id: project.id,
           name: Keyword.get(opts, :name, "test key"),
-          scopes: Keyword.get(opts, :scopes, [:resolve, :logs])
+          scopes: Keyword.get(opts, :scopes, [:read, :logs])
         },
         actor: system_actor()
       )
@@ -495,7 +495,7 @@ defmodule PromptOn.Fixtures do
   # Observability
 
   @doc """
-  A §6.4 Generation payload map (string keys). The first argument is a UseCase or a use_case key
+  A §6.4 Log payload map (string keys). The first argument is a UseCase or a use_case key
   string. Defaults: chat, ok, `stop`, 100/20 tokens, provider cost 0.001, 2 rendered messages +
   output, current time. `attrs` (string or atom keys) is shallowly merged on top (nested maps such
   as `"usage"`, `"input"` and `"error"` are replaced whole).
@@ -515,7 +515,7 @@ defmodule PromptOn.Fixtures do
         "model_used" => "anthropic/claude-sonnet-4",
         "provider" => "openrouter",
         "upstream_provider" => "Anthropic",
-        "resolution_source" => "remote",
+        "source" => "remote",
         "context" => %{"language" => "ko", "plan" => "pro"},
         "params" => %{"temperature" => 0.5},
         "input" => %{
@@ -542,7 +542,7 @@ defmodule PromptOn.Fixtures do
         "sequence" => 1,
         "end_user_ref" => "u_1",
         "metadata" => %{"job_id" => 1},
-        "sdk" => %{"name" => "prompton_sdk", "version" => "0.1.0"}
+        "sdk" => %{"name" => "prompton_sdk", "version" => "0.2.0"}
       },
       Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
     )
@@ -554,7 +554,7 @@ defmodule PromptOn.Fixtures do
   default `"production"`): the request decides it, not the key (2026-09-01). Returns
   `%{accepted:, duplicates:, rejected:}`.
   """
-  def ingest_fixture(project, generations, opts \\ []) when is_list(generations) do
+  def ingest_fixture(project, logs, opts \\ []) when is_list(logs) do
     api_key =
       Keyword.get_lazy(opts, :api_key, fn ->
         {key, _raw} = api_key_fixture(project, scopes: [:logs])
@@ -564,7 +564,7 @@ defmodule PromptOn.Fixtures do
     env = environment(project, Keyword.get(opts, :env, "production"))
 
     {:ok, result} =
-      Observability.Ingest.ingest(generations,
+      Observability.Ingest.ingest(logs,
         actor: api_key,
         tenant: project.id,
         environment_id: env.id
@@ -612,8 +612,8 @@ defmodule PromptOn.Fixtures do
     %{accepted: ^count} = ingest_fixture(project, payloads, opts)
 
     Enum.map(payloads, fn payload ->
-      {:ok, generation} = Observability.get_generation(payload["id"], scope(project))
-      generation
+      {:ok, log} = Observability.get_generation(payload["id"], scope(project))
+      log
     end)
   end
 

@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Prompton.ImportHeydiary do
 
   Order: load dump → print plan (`PromptOn.HeyDiaryImport.plan/2`) → confirm warnings → apply
   (SystemActor, one transaction) → summary (+ verification). Afterwards, run `mix prompton.export`
-  in the HeyDiary repo to refresh `priv/prompton/snapshot.json`.
+  in the HeyDiary repo to refresh `priv/prompton/use-cases.production.json`.
 
   **Deployments are pins** (ADR 0007 revision 2026-09-01) — one model per use case plus one version
   per prompt name. HeyDiary's per-plan model hierarchy cannot be represented, so it collapses to the
@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Prompton.ImportHeydiary do
     info("")
 
     info(
-      "Next: in the HeyDiary repo run `mix prompton.export` to refresh priv/prompton/snapshot.json."
+      "Next: in the HeyDiary repo run `mix prompton.export` to refresh priv/prompton/use-cases.production.json."
     )
   end
 

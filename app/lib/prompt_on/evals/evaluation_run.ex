@@ -17,7 +17,7 @@ defmodule PromptOn.Evals.EvaluationRun do
   thousand logs say 3.1 — and all three are true statements about different measurements. A column
   can hold only the last one and silently loses which rubric and which window produced it.
   `Deployment` is also immutable by contract (it has no update action) and sits on the
-  `GET /snapshot` hot path, where an ApiKey reads it. So `PromptOn.Deployments` does not know that
+  `GET /use-cases` hot path, where an ApiKey reads it. So `PromptOn.Deployments` does not know that
   `PromptOn.Evals` exists; the badge is read through `:latest_for_deployments`, one query per
   screen.
   """

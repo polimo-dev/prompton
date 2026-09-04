@@ -11,7 +11,7 @@ defmodule PromptOnWeb.API.V1.Management.ApiKeyController do
   This is the last step of onboarding (agent-first-spec §3.5): once the coding AI has finished
   provisioning, this is where it gets the key to put into the app's environment variables. This key
   is a **different layer** from the CLI session token - it is bound to a single project, its scopes
-  are only `resolve` (config-fetch) and `logs` (monitoring logs), and it cannot provision.
+  are only `read` (config-fetch) and `logs` (monitoring logs), and it cannot provision.
 
   **The raw key appears exactly once, in the `key` of the issue response.** Only the sha256 hash is
   stored, so it cannot be seen again in the listing - only `key_prefix` remains. Keys are not bound
@@ -71,7 +71,7 @@ defmodule PromptOnWeb.API.V1.Management.ApiKeyController do
     end
   end
 
-  # The meaning of the values (`resolve`/`logs`) is enforced by the `one_of` on `ApiKey.scopes` -
+  # The meaning of the values (`read`/`logs`) is enforced by the `one_of` on `ApiKey.scopes` -
   # only the shape is checked here.
   defp fetch_scopes(params) do
     case Map.get(params, "scopes") do

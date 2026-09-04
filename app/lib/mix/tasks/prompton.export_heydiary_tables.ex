@@ -1,12 +1,13 @@
 defmodule Mix.Tasks.Prompton.ExportHeydiaryTables do
-  @shortdoc "Live snapshot (v3) → HeyDiary ai_tasks/ai_models/plan_ai_models UPSERT SQL (rollback, lossy, plan.md §12.2)"
+  @shortdoc "Live use-case document → HeyDiary table UPSERT SQL (rollback, lossy)"
 
   @moduledoc """
       mix prompton.export_heydiary_tables --org <org slug> --project heydiary --env production --out heydiary_tables.sql
       mix prompton.export_heydiary_tables --user <email> --project heydiary --env production
 
   Builds HeyDiary table UPSERT SQL (`PromptOn.HeyDiaryImport.Export`) from the project/environment's
-  **snapshot v3** (`PromptOn.Projects.config_snapshot` — every live Deployment). When, during the
+  **schema-v4 use-case document** (`PromptOn.Projects.config_snapshot` — every live Deployment).
+  When, during the
   parallel-run period, edits happened only in PromptOn and you roll back to the HeyDiary DB path,
   bring the tables up to date with `psql -f heydiary_tables.sql`.
 

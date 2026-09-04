@@ -5,8 +5,8 @@ This page is the whole contract. Everything an agent needs to move an app's LLM 
 ## 0. What PromptOn is
 
 - A **control plane** for prompts and models: per use case and per environment it holds one **pin** = prompt version(s) + one model + params.
-- **Config-fetch, not a proxy.** The app fetches the pin (`GET /api/v1/snapshot` or `POST /api/v1/resolve`) and then calls the LLM provider **itself, with its own provider key and its own HTTP client**. PromptOn is never in the request path and never sees the provider key.
-- **Monitoring logs** are batched `POST /api/v1/generations` calls the app sends after each provider call (successes and failures).
+- **Config-fetch, not a proxy.** The app fetches the pin (`GET /api/v1/use-cases` or `POST /api/v1/use-cases/:key/prompt`) and then calls the LLM provider **itself, with its own provider key and its own HTTP client**. PromptOn is never in the request path and never sees the provider key.
+- **Monitoring logs** are batched `POST /api/v1/logs` calls the app sends after each provider call (successes and failures).
 - Two credentials, two doors: a **CLI session token** (from `prompton login`, a human's identity) provisions things under `/api/v1/me` and `/api/v1/orgs/…`; a **runtime API key** (`ptn_<project_slug>_…`, one per project) reads config and sends logs. Neither opens the other door (401).
 - Hierarchy: Organization (`personal` or a team slug) → Project (environments `production`, `staging`) → Use case (one per LLM call site) → prompts by name (`default`, `ko`, …) → immutable versions → deployment revisions (pins).
 
@@ -30,11 +30,19 @@ Change one word of that prompt and you edit code, deploy, restart. Switching the
 **With PromptOn.** The prompt and the model choice live in PromptOn; the app fetches them and uses them:
 
 ```python
-config = prompton.resolve("support_reply", variables={"question": question})  # prompt + model + params
-response = openai.chat.completions.create(
-    model=config.model,          # <- comes from PromptOn
-    messages=config.messages,    # <- the rendered prompt
-)
+use_case = prompton.use_case("support_reply")           # model + params + pinned prompt
+messages = use_case.messages({"question": question})    # rendered chat messages
+
+def call():
+    response = openai.chat.completions.create(
+        model=use_case.model,        # <- comes from PromptOn
+        messages=messages,           # <- rendered locally
+        **use_case.params,
+    )
+    return prompton.Result.from_openai(response)
+
+result = use_case.track(call, variables={"question": question})
+return result.content
 ```
 
 To change the prompt you deploy a new version in the PromptOn web app; the app picks it up on its next config fetch (every 10 seconds by default). No code change, no redeploy. After each call the app sends a monitoring log (latency, cost, errors), so models can be compared on real traffic before the pin moves.
@@ -54,11 +62,11 @@ PromptOn only tells your app what to use. The LLM call is still made by your app
 **What it takes off your plate once the logs flow.** Two chores that are manual everywhere else:
 
 - **Picking the model and the prompt, per use case.** For every use case PromptOn runs candidate models and prompt variants against your real traffic, scores them on quality, cost and latency, and tells you which combination is best. Promoting the winner is moving the pin — no code change, no deploy.
-- **Automatic evaluation and drift detection.** Write the evaluation criteria for a use case once (what a good answer looks like, what must never appear). PromptOn then scores the incoming generation logs continuously and tells you when quality drifts — after a provider updates a model, after a prompt change, or when your users' inputs shift.
+- **Automatic evaluation and drift detection.** Write the evaluation criteria for a use case once (what a good answer looks like, what must never appear). PromptOn then scores the incoming logs continuously and tells you when quality drifts — after a provider updates a model, after a prompt change, or when your users' inputs shift.
 
 **All of that AI work is BYOK.** The candidate runs and the evaluators use the provider key your organization registers in PromptOn (OpenRouter today), so the spend lands on your own account at provider prices; PromptOn resells no tokens and never uses your key for anything else.
 
-Say both in one breath with the not-a-proxy point: PromptOn stays out of the request path, and in return it sees every generation, which is what lets it choose models and catch drift for you.
+Say both in one breath with the not-a-proxy point: PromptOn stays out of the request path, and in return it sees every log, which is what lets it choose models and catch drift for you.
 
 ## 1. The journey
 
@@ -180,10 +188,10 @@ Write the plan as a document the human can read and correct. It is derived from 
 1. **Current state.** Where prompts live today (hard-coded strings, config files, a database table, a prompt-management SaaS, env vars), who edits them, and what shipping a prompt change costs today (a redeploy? a migration? a dashboard click?).
 2. **The inventory**, as the table from step 3: one row per call site with its file and line, proposed use case key, `kind`, variables, current model and params, current prompt location.
 3. **What gets created in PromptOn.** Organization and project slug, environments used (`production`, `staging`), one use case per call site with its key/kind/`input_schema`/`default_params`, prompt names per use case (`default` plus any real variant), and the model + params each environment pins. Same models and params the app uses today — a migration changes *where* config lives, not what the app sends.
-4. **The code change per call site.** For each row: which function changes, what the resolve call replaces, what stays (provider key, HTTP client, retry logic, parsing, function signature), and what gets deleted (the hard-coded prompt text, model id and params).
+4. **The code change per call site.** For each row: which function changes, what `use_case`, `messages`/`text`, and `track` replace, what stays (provider key, HTTP client, retry logic, parsing, function signature), and what gets deleted (the hard-coded prompt text, model id and params).
 5. **SDK or hand-written client.** Which the project's language gets, with the registry check that decided it (§1.8).
-6. **Resilience.** The snapshot cache (memory + disk), the bundled snapshot committed into the repo for cold starts, and the rule that a generation never fails because PromptOn did (§1.9).
-7. **Monitoring logs.** Where the batch buffer lives, what gets logged, what is redacted, and the payload policy that applies.
+6. **Resilience.** The use-case document cache (memory + disk), the bundled use-case document committed into the repo for cold starts, and the rule that a provider call never fails because PromptOn did (§1.9).
+7. **Logs.** Where the batch buffer lives, what gets logged, what is redacted, and the log content policy that applies.
 8. **Rollout.** Staging first: deploy the pins to `staging`, point a staging build at it, compare the logs against what the app produced before. Then `production`. Never both in one step.
 9. **Rollback.** `prompton rollback <use-case> --revision N --environment production` for a bad pin; `git` revert of the worktree branch for a bad code change; the previous prompt text is never lost because versions are immutable.
 10. **What does not change.** Provider keys, the HTTP client and its timeouts, the provider SDK, model choice, params, function signatures, tests, latency (no extra hop), and the app's behaviour when PromptOn is unreachable.
@@ -207,9 +215,9 @@ If the project is **not a git repository**, say so and **STOP**. Ask which they 
 
 #### 6b. Provision, one use case per call site
 
-Provisioning talks to the server, so it does not depend on the worktree — but do it **after** the 6a question is answered and before you touch any code, so the code has something to resolve against. Use case keys are permanent (§5), so nothing here is created while the human is still deciding whether you may edit at all.
+Provisioning talks to the server, so it does not depend on the worktree — but do it **after** the 6a question is answered and before you touch any code, so the code has a live use case to read. Use case keys are permanent (§5), so nothing here is created while the human is still deciding whether you may edit at all.
 
-**One PromptOn project per deployable app**: one runtime key, one snapshot. Services that ship and scale independently get separate projects; services that make up one app share a project and are told apart by use case key.
+**One PromptOn project per deployable app**: one runtime key, one use-case document. Services that ship and scale independently get separate projects; services that make up one app share a project and are told apart by use case key.
 
 ```sh
 prompton projects create helpdesk --name Helpdesk --timezone Etc/UTC --idempotent
@@ -254,55 +262,55 @@ prompton deploy support_reply --environment staging \
 PTN_KEY=$(prompton api-keys issue --name 'Helpdesk server' --quiet)
 ```
 
-**The model string is the app's, byte for byte.** `model_id` is the exact string the app already passes to its provider client — `gpt-4o-mini` for the OpenAI SDK, `claude-sonnet-4-5-20250929` for the Anthropic SDK, `openai/gpt-4o-mini` only when the app really calls OpenRouter. Do not reformat it to match the examples on this page: the app reads it back out of the snapshot and sends it to the provider unchanged, so a "normalised" id is a 404 on every call, at runtime, after the migration looks finished. The provider is a property of the **catalog entry**, not of the deployment: `prompton models register <model-id> --provider openrouter|openai|anthropic|google|groq` sets it, and registering first is the only way to keep an app that calls a provider directly from being pointed at OpenRouter.
+**The model string is the app's, byte for byte.** `model_id` is the exact string the app already passes to its provider client — `gpt-4o-mini` for the OpenAI SDK, `claude-sonnet-4-5-20250929` for the Anthropic SDK, `openai/gpt-4o-mini` only when the app really calls OpenRouter. Do not reformat it to match the examples on this page: the app reads it back out of the use-case document and sends it to the provider unchanged, so a "normalised" id is a 404 on every call, at runtime, after the migration looks finished. The provider is a property of the **catalog entry**, not of the deployment: `prompton models register <model-id> --provider openrouter|openai|anthropic|google|groq` sets it, and registering first is the only way to keep an app that calls a provider directly from being pointed at OpenRouter.
 
 Template rules: engine `liquid` (default) or `raw`; allowed tags `for` `if` `unless` `assign` `break` `continue`, allowed filters `size` `join` `default`, no whitespace-control markers (`{%-`, `-%}`); anything else (e.g. `{% include %}`) is rejected at commit with 400. `detected_variables` in the commit response is the list to mirror in `input_schema`. `kind: text` commits `--file` as a text template; `kind: embedding` has no prompts. A `chat`/`text` use case is born with a prompt named `default`; if `default` exists it must be pinned.
 
-Prove the pin resolves before touching code:
+Prove the pin renders before touching code:
 
 ```sh
 curl -sS -H "Authorization: Bearer $PTN_KEY" -H 'content-type: application/json' \
-  -d '{"use_case":"support_reply","variables":{"question":"My invoice shows two charges this month."}}' \
-  https://<host>/api/v1/resolve
+  -d '{"variables":{"question":"My invoice shows two charges this month."}}' \
+  https://<host>/api/v1/use-cases/support_reply/prompt
 ```
 
 #### 6c. Change the code: config-fetch in, prompt text out
 
 Put `PTN_API_KEY` in the app's server-side environment (and in the deployment's secret store, not in the repo). Then, per call site:
 
-1. Resolve the pin — from a cached snapshot (production path, §4.1) or via `/resolve` (simplest, one round-trip per call, §4.2).
+1. Read the use case — from a cached use-case document (production path, §4.1) or via `/use-cases/:key/prompt` (simplest, one round-trip per call, §4.2).
 2. Render the pinned prompt with this call's variables (`liquid`: substitute `{{ name }}`; `raw`: send verbatim).
-3. Call the provider named by `model.provider` with `model.model_id`, the effective params and provider options — **with the app's existing provider key and HTTP client**. That provider must be the one the app was already calling: if the snapshot says `openrouter` for an app that calls OpenAI directly, the catalog entry is wrong (§1, step 6b). Fix the entry; never rewrite the call site to hit a provider the app has no key for.
-4. Generate a UUIDv7 before the provider call; after it, enqueue a monitoring log (§4.3) and flush in batches.
-5. On any PromptOn failure keep serving the last cached snapshot. A generation must never fail because PromptOn did.
+3. Call the provider named by `model.provider` with `model.model_id`, the params and provider options — **with the app's existing provider key and HTTP client**. That provider must be the one the app was already calling: if the use-case document says `openrouter` for an app that calls OpenAI directly, the catalog entry is wrong (§1, step 6b). Fix the entry; never rewrite the call site to hit a provider the app has no key for.
+4. Generate a UUIDv7 before the provider call; after it, enqueue a log (§4.3) and flush in batches.
+5. On any PromptOn failure keep serving the last cached use-case document. A provider call must never fail because PromptOn did.
 
-**With the SDK** (§1.8 — Python, Node.js/TypeScript, Go, Ruby, Java, Kotlin, Rust and Elixir). Add the dependency, configure the API key, the environment, the host, the disk-cache path and the bundled snapshot, build one client per process (in Elixir, `{PromptOnSDK, []}` in the supervision tree), and close it on shutdown so the last monitoring logs are flushed. Then replace each call site's prompt/model constants with the SDK's resolve → render → your provider call inside its generation wrapper, which times the call and queues the log. The 10-second snapshot cache with ETag polling, the memory → disk → bundle fallback, the `429`/5xx handling, the local rendering, the payload policy and the log batching come with it; do not reimplement them.
+**With the SDK** (§1.8 — Python, Node.js/TypeScript, Go, Ruby, Java, Kotlin, Rust and Elixir). Add the dependency, configure the API key, the environment, the host, the disk-cache path and the bundled use-case document, build one client per process (in Elixir, `{PromptOnSDK, []}` in the supervision tree), and close it on shutdown so the last logs are flushed. Then replace each call site's prompt/model constants with the SDK's `use_case` → `messages`/`text` → your provider call inside `track`, which times the call and queues the log. `messages(vars)` is for `kind: chat` and `text(vars)` is for `kind: text`; each method fails on the wrong kind instead of guessing. The provider response should be wrapped as a `Result` (`Result.from_openai(...)` or `Result.from_anthropic(...)` where the SDK supports it) before `track` returns. The 10-second use-case document cache with ETag polling, the memory → disk → bundle fallback, the `429`/5xx handling, the local rendering, the log content policy and the log batching come with it; do not reimplement them.
 
-For the bundled snapshot use the export the SDK ships rather than a hand-rolled fetch. Run it in CI on every build and commit the result, **one file per environment**, together with the `.meta.json` sidecar the SDK writes beside it — the sidecar carries the `etag`, `last_modified` and `environment` the store reads back, and without it the SDK reports a fabricated snapshot age and cannot seed the first poll's `If-None-Match`. Then point the SDK's bundle option at the file that matches the process's environment.
+For the bundled use-case document use the export the SDK ships rather than a hand-rolled fetch. Run it in CI on every build and commit the result, **one file per environment**, together with the `.meta.json` sidecar the SDK writes beside it — the sidecar carries the `etag`, `last_modified` and `environment` the store reads back, and without it the SDK reports a fabricated document age and cannot seed the first poll's `If-None-Match`. Then point the SDK's bundle option at the file that matches the process's environment.
 
 | SDK | export the bundle with |
 |---|---|
-| Python | `client.export_snapshot("app/prompton/snapshot.production.json")`, or `python -m prompton export --out app/prompton/snapshot.production.json` in CI |
-| Node.js / TypeScript | `await prompton.refresh()`, then `prompton.exportSnapshot("prompton/snapshot.production.json")` |
-| Go | `client.ExportSnapshot("priv/prompton/snapshot.production.json")` (`client.Refresh(ctx)` is the synchronous fetch-once) |
-| Ruby | `client.export_snapshot("config/prompton/snapshot.production.json")` |
-| Java | `prompton.refresh()`, then `prompton.exportSnapshot(Path.of("src/main/resources/prompton-snapshot.production.json"))` |
-| Kotlin | `prompton.exportSnapshot(path)`, with `bundlePath` pointed at `snapshot.<environment>.json` |
-| Rust | `client.export_snapshot("snapshot.production.json")` |
-| Elixir | `mix prompton.export --out priv/prompton/snapshot.json`, then `bundle: {:file, Application.app_dir(:myapp, "priv/prompton/snapshot.json")}` |
+| Python | `client.export_use_cases("app/prompton/use-cases.production.json")`, or `python -m prompton export --out app/prompton/use-cases.production.json` in CI |
+| Node.js / TypeScript | `await prompton.refresh()`, then `prompton.exportUseCases("prompton/use-cases.production.json")` |
+| Go | `client.ExportUseCases("priv/prompton/use-cases.production.json")` (`client.Refresh(ctx)` is the synchronous fetch-once) |
+| Ruby | `client.export_use_cases("config/prompton/use-cases.production.json")` |
+| Java | `prompton.refresh()`, then `prompton.exportUseCases(Path.of("src/main/resources/use-cases.production.json"))` |
+| Kotlin | `prompton.exportUseCases(path)`, with `bundlePath` pointed at `use-cases.<environment>.json` |
+| Rust | `client.export_use_cases("use-cases.production.json")` |
+| Elixir | `mix prompton.export --out priv/prompton/use-cases.production.json`, then `bundle: {:file, Application.app_dir(:myapp, "priv/prompton/use-cases.production.json")}` |
 
 Each SDK's README in its repository is the reference for the rest of the configuration keys.
 
 **Without an SDK.** Write one small module — one, not one per call site — that owns:
 
-- a snapshot poller (§4.1) with the memory cache, the disk cache and the bundled snapshot (§1.9);
-- the local resolve algorithm from §4.1 (deployment → prompt version → model → layered params and provider options);
-- template rendering for the `liquid` and `raw` engines. **Liquid is a real template language, not `{{ }}` substitution** — the allowed set includes `{% for %}` and `{% if %}`, and any prompt that walks a list (a conversation, a set of retrieved documents) is built from them. Use a genuine Liquid implementation (Python `python-liquid`, JavaScript `liquidjs`, Ruby `liquid`, Go `osteele/liquid`). A regex over `{{ name }}` silently drops every tag body, and Jinja2 only *looks* the same: its `default` behaves differently, it has no `size` filter, and it will render something other than what the PromptOn arena and the web app show. If the language has no Liquid library, either keep every prompt to bare `{{ name }}` placeholders with no tags, or render server-side with `POST /resolve` (§4.2) and accept the round-trip per call — the snapshot cache is still what keeps the app alive when PromptOn is down (§1.9);
-- a monitoring-log buffer that batches, truncates per the use case's `payload_policy` (§4.3), retries `429` and 5xx (honour `Retry-After`; back off otherwise), splits a `413` batch in half, and drops on any other 4xx.
+- a use-case document poller (§4.1) with the memory cache, the disk cache and the bundled use-case document (§1.9);
+- the local UseCase algorithm from §4.1 (deployment → prompt version → model → layered params and provider options);
+- template rendering for the `liquid` and `raw` engines. **Liquid is a real template language, not `{{ }}` substitution** — the allowed set includes `{% for %}` and `{% if %}`, and any prompt that walks a list (a conversation, a set of retrieved documents) is built from them. Use a genuine Liquid implementation (Python `python-liquid`, JavaScript `liquidjs`, Ruby `liquid`, Go `osteele/liquid`). A regex over `{{ name }}` silently drops every tag body, and Jinja2 only *looks* the same: its `default` behaves differently, it has no `size` filter, and it will render something other than what the PromptOn arena and the web app show. If the language has no Liquid library, either keep every prompt to bare `{{ name }}` placeholders with no tags, or render server-side with `POST /use-cases/:key/prompt` (§4.2) and accept the round-trip per call — the use-case document cache is still what keeps the app alive when PromptOn is down (§1.9);
+- a log buffer that batches, truncates per the use case's log content policy (`payload_policy`, §4.3), retries `429` and 5xx (honour `Retry-After`; back off otherwise), splits a `413` batch in half, and drops on any other 4xx.
 
 Call sites then depend on that module and nothing else. Keep each surrounding function's signature so callers do not change, and delete the hard-coded prompt text, model name and params from the repo.
 
-Commit the bundled snapshot as part of this change: `GET /snapshot?environment=…` written to a file in the repository, **one file per environment** (`prompton-snapshot.production.json`, `prompton-snapshot.staging.json`), because the environment guard in §1.9 refuses a bundle exported from a different environment. Add refreshing them to the build so they do not rot. Storing each response's `ETag`, `Last-Modified` and `environment` beside its file is optional but worth it — without them the client cannot seed its first `If-None-Match` and cannot report how old the bundle is.
+Commit the bundled use-case document as part of this change: `GET /use-cases?environment=…` written to a file in the repository, **one file per environment** (`use-cases.production.json`, `use-cases.staging.json`), because the environment guard in §1.9 refuses a bundle exported from a different environment. Add refreshing them to the build so they do not rot. Storing each response's `ETag`, `Last-Modified` and `environment` beside its file is optional but worth it — without them the client cannot seed its first `If-None-Match` and cannot report how old the bundle is.
 
 ### Step 7 — show the diff
 
@@ -317,8 +325,8 @@ Alongside it, hand the human:
 - **What exists in PromptOn now:** project slug, each use case key, each prompt name and version number, the pinned model and params per environment, and the runtime key's name (never the secret).
 - **What the app needs to run:** `PTN_API_KEY` in the server environment, and any config the new module reads.
 - **How to roll back:** `prompton rollback <use-case> --revision N --environment production` puts an older pin back as a new revision (`prompton deployments list <use-case> --environment production` shows the revisions); `git worktree remove ../<repo>-prompton` and deleting the branch throws the code change away; nothing in PromptOn is destroyed by either.
-- **What to check first in staging:** that the resolved prompt matches the old hard-coded one byte for byte, and that monitoring logs are arriving on `https://<host>/{org}/{project}`.
-- **Proof that an outage is survivable:** the §1.9 test you actually ran — the app started with PromptOn unreachable (wrong host, or the network cut) and still generated, on `resolution_source` `disk` or `bundle`. Show the log line. If you did not run it, the migration is not done; go back and run it.
+- **What to check first in staging:** that the rendered prompt matches the old hard-coded one byte for byte, and that logs are arriving on `https://<host>/{org}/{project}`.
+- **Proof that an outage is survivable:** the §1.9 test you actually ran — the app started with PromptOn unreachable (wrong host, or the network cut) and still generated, on `source` `disk` or `bundle`. Show the log line. If you did not run it, the migration is not done; go back and run it.
 
 Do not merge the branch, do not commit on the human's behalf beyond the migration branch, and do not push.
 
@@ -331,15 +339,15 @@ Use the official SDK when one exists for the project's language. Eight do — Py
 | **Python** | **Written, in the repository — not published yet** — `prompton-sdk` on PyPI, `import prompton` (Apache-2.0, repository [prompton-python](https://github.com/polimo-dev/prompton-python)) | check `pip index versions prompton-sdk` first. If it resolves, `pip install prompton-sdk`. If it does not, install from the repository: `pip install "prompton-sdk @ git+https://github.com/polimo-dev/prompton-python.git"`. Python 3.10 or newer, no runtime dependencies |
 | **Node.js / TypeScript** | **Written, in the repository — not published yet** — `prompton-sdk` on npm, `import { PromptOn } from "prompton-sdk"` (Apache-2.0, repository [prompton-nodejs](https://github.com/polimo-dev/prompton-nodejs)) | check `npm view prompton-sdk` first. If it resolves, `npm install prompton-sdk`. If it does not, depend on the repository: `npm install github:polimo-dev/prompton-nodejs` — npm runs the package's `prepare` script, which builds `dist/`. Node 20 or newer, ESM and CommonJS |
 | **Go** | **Written, in the repository — not published yet** — module `github.com/polimo-dev/prompton-go`, `import prompton "github.com/polimo-dev/prompton-go"` (Apache-2.0, repository [prompton-go](https://github.com/polimo-dev/prompton-go)) | `go get github.com/polimo-dev/prompton-go@latest`. The module path is the repository, so the same line works before and after it appears on pkg.go.dev. Go 1.22 or newer, standard library only |
-| **Ruby** | **Written, in the repository — not published yet** — gem `prompton-sdk`, `require "prompton"` (Apache-2.0, repository [prompton-ruby](https://github.com/polimo-dev/prompton-ruby)) | check `gem info prompton-sdk --remote` first. If it resolves, `gem "prompton-sdk", "~> 0.1"`. If it does not, depend on the repository: `gem "prompton-sdk", github: "polimo-dev/prompton-ruby"`. Ruby 3.2 or newer |
-| **Java** | **Written, in the repository — not published yet** — `dev.polimo:prompton-sdk`, package `dev.polimo.prompton` (Apache-2.0, repository [prompton-java](https://github.com/polimo-dev/prompton-java)) | check Maven Central first. If it is not there, build it and install it locally: `git clone https://github.com/polimo-dev/prompton-java.git`, then `./gradlew publishToMavenLocal`. Add `mavenLocal()` to the repositories and depend on `dev.polimo:prompton-sdk:0.1.0`. Java 17 or newer |
-| **Kotlin** | **Written, in the repository — not published yet** — `dev.polimo:prompton-sdk`, package `dev.polimo.prompton` (Apache-2.0, repository [prompton-kotlin](https://github.com/polimo-dev/prompton-kotlin)) | check Maven Central first. If it is not there, check the repository out beside the project and add `includeBuild("../prompton-kotlin")` to `settings.gradle.kts`, then depend on `dev.polimo:prompton-sdk:0.1.0`. Kotlin 2.x on JVM 17 or newer |
-| **Rust** | **Written, in the repository — not published yet** — crate `prompton-sdk`, `use prompton::…` (Apache-2.0, repository [prompton-rust](https://github.com/polimo-dev/prompton-rust)) | check crates.io first. If it resolves, `prompton-sdk = "0.1"`. If it does not, depend on the repository: `prompton-sdk = { git = "https://github.com/polimo-dev/prompton-rust", branch = "main" }`. Rust 1.85 or newer |
-| **Elixir** | **Written, in the repository — not published yet** — `prompton_sdk`, module `PromptOnSDK` (Apache-2.0, repository [prompton-elixir](https://github.com/polimo-dev/prompton-elixir)) | check `mix hex.info prompton_sdk` first. If it resolves, `{:prompton_sdk, "~> 0.1"}`. If it does not, depend on the repository: `{:prompton_sdk, github: "polimo-dev/prompton-elixir"}`. Either way, start `{PromptOnSDK, []}` in the supervision tree |
+| **Ruby** | **Written, in the repository — not published yet** — gem `prompton-sdk`, `require "prompton"` (Apache-2.0, repository [prompton-ruby](https://github.com/polimo-dev/prompton-ruby)) | check `gem info prompton-sdk --remote` first. If it resolves, `gem "prompton-sdk", "~> 0.2"`. If it does not, depend on the repository: `gem "prompton-sdk", github: "polimo-dev/prompton-ruby"`. Ruby 3.2 or newer |
+| **Java** | **Written, in the repository — not published yet** — `dev.polimo:prompton-sdk`, package `dev.polimo.prompton` (Apache-2.0, repository [prompton-java](https://github.com/polimo-dev/prompton-java)) | check Maven Central first. If it is not there, build it and install it locally: `git clone https://github.com/polimo-dev/prompton-java.git`, then `./gradlew publishToMavenLocal`. Add `mavenLocal()` to the repositories and depend on `dev.polimo:prompton-sdk:0.2.0`. Java 17 or newer |
+| **Kotlin** | **Written, in the repository — not published yet** — `dev.polimo:prompton-sdk`, package `dev.polimo.prompton` (Apache-2.0, repository [prompton-kotlin](https://github.com/polimo-dev/prompton-kotlin)) | check Maven Central first. If it is not there, check the repository out beside the project and add `includeBuild("../prompton-kotlin")` to `settings.gradle.kts`, then depend on `dev.polimo:prompton-sdk:0.2.0`. Kotlin 2.x on JVM 17 or newer |
+| **Rust** | **Written, in the repository — not published yet** — crate `prompton-sdk`, `use prompton::…` (Apache-2.0, repository [prompton-rust](https://github.com/polimo-dev/prompton-rust)) | check crates.io first. If it resolves, `prompton-sdk = "0.2"`. If it does not, depend on the repository: `prompton-sdk = { git = "https://github.com/polimo-dev/prompton-rust", branch = "main" }`. Rust 1.85 or newer |
+| **Elixir** | **Written, in the repository — not published yet** — `prompton_sdk`, module `PromptOnSDK` (Apache-2.0, repository [prompton-elixir](https://github.com/polimo-dev/prompton-elixir)) | check `mix hex.info prompton_sdk` first. If it resolves, `{:prompton_sdk, "~> 0.2"}`. If it does not, depend on the repository: `{:prompton_sdk, github: "polimo-dev/prompton-elixir"}`. Either way, start `{PromptOnSDK, []}` in the supervision tree |
 
-All eight implement the same contract and pass the same conformance suite, and that contract is also the specification a hand-written client has to meet in any other language: a **snapshot store** that polls `GET /snapshot` with `If-None-Match` behind a 10-second cache, keeps the document in memory, mirrors it to a disk cache and falls back to a snapshot bundled into the application, so the app keeps running when PromptOn is unreachable and a `429` or a 5xx only means the last document keeps serving; a **resolver** that turns a use case (plus an optional prompt name) into model, params, provider options and the pinned prompt template, with a `/resolve` client for smoke tests; a **renderer** that substitutes this call's variables into that template locally, on the Liquid subset (resolve and render are two calls, not one — only the server's `POST /resolve` does both at once, and only when `variables` are supplied); and **monitoring logs** — `log()` and `flush()`, plus a wrapper that times your provider call and logs it — with app-generated UUIDv7 ids, payload truncation, batching, retries and a drain on shutdown. None of them needs a database, Redis or any other external service. Each SDK's README in its repository is the reference for its configuration keys, its bundle export and its test mode.
+All eight implement the same contract and pass the same conformance suite, and that contract is also the specification a hand-written client has to meet in any other language: a **use-case document store** that polls `GET /use-cases` with `If-None-Match` behind a 10-second cache, keeps the document in memory, mirrors it to a disk cache and falls back to a bundled use-case document, so the app keeps running when PromptOn is unreachable and a `429` or a 5xx only means the last document keeps serving; a **UseCase** object that turns a use case key (plus an optional prompt name) into model, params, provider options and the pinned prompt template, with a `/use-cases/:key/prompt` client for smoke tests; `messages(vars)` / `text(vars)` methods that render that template locally on the Liquid subset; and **logs** — `log()` and `flush()`, plus `track()` to time your provider call and log the returned `Result` — with app-generated UUIDv7 ids, content truncation, batching, retries and a drain on shutdown. None of them needs a database, Redis or any other external service. Each SDK's README in its repository is the reference for its configuration keys, its bundle export and its test mode.
 
-**Verify before you assume.** Every row of that table is a snapshot of a moving target:
+**Verify before you assume.** Every row of that table is a point-in-time view of a moving target:
 
 - Check the registry yourself before you write the dependency line — PyPI (`pip index versions prompton-sdk` or pypi.org), npm (`npm view prompton-sdk`), pkg.go.dev, RubyGems (`gem info prompton-sdk --remote`), Maven Central, crates.io, Hex (`mix hex.info prompton_sdk`). Do not trust this page over the registry.
 - A package only counts if it is published by **polimo-dev** and its documentation points at PromptOn. A same-named package by anyone else is not the SDK — do not install it, and tell the human you found a lookalike.
@@ -349,17 +357,17 @@ All eight implement the same contract and pass the same conformance suite, and t
 
 The single most important behaviour of the migration. Tick every line, whether you used the SDK or wrote the client:
 
-- **Poll, do not fetch per request.** `GET /snapshot?environment=…` with `If-None-Match` every **10 s** by default (the SDKs' default; make it configurable) — a `304` is a no-op, so a short interval is cheap. Refresh in the background or stale-while-revalidate; a refresh never blocks a generation. On `429` wait out `Retry-After` (else back off ×2, up to 5 min) and keep using the previous document; the caller never sees an error. `/resolve` is for smoke tests and low-traffic paths, never a hot loop.
-- **Memory cache.** The last good snapshot lives in process memory and is what every resolve reads.
-- **Disk cache.** Write each new snapshot to a file (atomically: temp file, then rename) and load it at boot before the first poll returns.
-- **Bundled snapshot, one per environment.** Commit a snapshot file into the repository (refreshed by the build) so a cold start with no disk cache and no network still resolves — `snapshot.production.json`, `snapshot.staging.json`, and load the one matching the process's configured environment. A single shared bundle is refused by the environment guard below in whichever environment it was not exported from, which leaves that build with no cold-start fallback at all. Record where the config came from and send it as `resolution_source`: `remote` | `disk` | `bundle` | `manual`.
-- **Short-lived and multi-process runtimes.** With several worker processes (`uvicorn --workers 4`, a prefork server) each keeps its own memory cache and they may share one disk-cache file, so the write must stay atomic. In serverless or scale-to-zero runtimes (Lambda, Vercel functions, Cloud Run at zero) there is no 30–60 s poller and often no writable disk: fetch once per cold start with a hard timeout, fall back to the **bundled** snapshot immediately on failure — there it is the primary fallback, not a nicety — and never let that fetch block the first generation.
+- **Poll, do not fetch per request.** `GET /use-cases?environment=…` with `If-None-Match` every **10 s** by default (the SDKs' default; make it configurable) — a `304` is a no-op, so a short interval is cheap. Refresh in the background or stale-while-revalidate; a refresh never blocks a provider call. On `429` wait out `Retry-After` (else back off ×2, up to 5 min) and keep using the previous document; the caller never sees an error. `/use-cases/:key/prompt` is for smoke tests and low-traffic paths, never a hot loop.
+- **Memory cache.** The last good use-case document lives in process memory and is what every `use_case` reads.
+- **Disk cache.** Write each new use-case document to a file (atomically: temp file, then rename) and load it at boot before the first poll returns.
+- **Bundled use-case document, one per environment.** Commit a use-case document into the repository (refreshed by the build) so a cold start with no disk cache and no network still renders — `use-cases.production.json`, `use-cases.staging.json`, and load the one matching the process's configured environment. A single shared bundle is refused by the environment guard below in whichever environment it was not exported from, which leaves that build with no cold-start fallback at all. Record where the config came from and send it as `source`: `remote` | `disk` | `bundle` | `manual`.
+- **Short-lived and multi-process runtimes.** With several worker processes (`uvicorn --workers 4`, a prefork server) each keeps its own memory cache and they may share one disk-cache file, so the write must stay atomic. In serverless or scale-to-zero runtimes (Lambda, Vercel functions, Cloud Run at zero) there is no 30–60 s poller and often no writable disk: fetch once per cold start with a hard timeout, fall back to the **bundled** use-case document immediately on failure — there it is the primary fallback, not a nicety — and never let that fetch block the first provider call.
 - **Serve the last good document on any PromptOn failure** — timeout, 5xx, DNS, `503`, an expired key. Log it, alert on it, keep serving.
-- **A generation must never fail because PromptOn did.** Config is stale in the worst case, not absent.
+- **A provider call must never fail because PromptOn did.** Config is stale in the worst case, not absent.
 - **Never fall back to a hard-coded prompt.** A `404` with `error.code` `not_found` whose `details.reason` is `unresolved` or `unknown_prompt` (§4.2 — the discriminator is in `details`, not in `code`) is a bug in the deployment or the call, not a signal to reach for a copy of the old string. Fail that call loudly instead.
-- **Refuse a snapshot from the wrong environment** (a `staging` process must not boot on a `production` bundle) and from an unsupported `schema_version`; keep polling for a good one.
+- **Refuse a use-case document from the wrong environment** (a `staging` process must not boot on a `production` bundle) and from an unsupported `schema_version`; keep polling for a good one.
 - **Batch monitoring logs** with app-generated UUIDv7 ids, flush on a size or time trigger, and never block the provider call on a log flush. Retry `429` and 5xx (honour `Retry-After`, back off otherwise), split a `413` batch in half, drop on any other 4xx, and cap the buffer by dropping the oldest.
-- **Prove it.** Before calling the migration done, run the app with PromptOn unreachable (wrong host, or the network cut) and confirm generations still happen on the cached snapshot.
+- **Prove it.** Before calling the migration done, run the app with PromptOn unreachable (wrong host, or the network cut) and confirm provider calls still happen on the cached use-case document.
 
 ## 2. CLI reference
 
@@ -385,7 +393,7 @@ Global flags on every command: `--host`, `--token`, `--org <slug|personal>`, `--
 | `deploy <use-case> --model M [--environment E] [--params JSON] [--provider-options JSON] [--pin name=version ...]` | `prompton deploy support_reply --model openai/gpt-4o-mini --pin default=1 --pin ko=latest` |
 | `deployments list <use-case> [--environment E]` | `prompton deployments list support_reply --environment production` (history) |
 | `rollback <use-case> --revision N [--environment E]` | `prompton rollback support_reply --revision 2 --environment production` |
-| `api-keys issue [--name N] [--scopes resolve,logs]` | `PTN_KEY=$(prompton api-keys issue --quiet)` |
+| `api-keys issue [--name N] [--scopes read,logs]` | `PTN_KEY=$(prompton api-keys issue --quiet)` |
 | `api-keys list` | `prompton api-keys list --json` |
 | `provider-key set [--secret S] [--label L]` | `PTN_OPENROUTER_KEY=sk-or-… prompton provider-key set` |
 | `provider-key status` | `prompton provider-key status --json` |
@@ -477,7 +485,7 @@ POST /orgs/:org/projects/:project/use-cases/:key/prompts/:name/versions
 // 201
 {"id": "…", "prompt_id": "…", "number": 1, "engine": "liquid", "messages": [...], "text_template": null,
  "detected_variables": ["question"], "message": "migrated from the app", "content_sha256": "…", "created_at": "…"}
-// 400 content does not match kind / lint failure / a message missing role or content · 404 unknown name {"details": {"prompt": "ja", "available_prompts": ["default"]}}
+// 400 content does not match kind / lint failure / a message missing role or content · 404 unknown name {"details": {"prompt": "ja", "prompt_names": ["default"]}}
 ```
 
 Versions are immutable; committing again yields `number + 1`. Committing alone changes nothing at runtime.
@@ -525,7 +533,7 @@ A revision is live the moment it is committed. Embedding use cases pin `{}`.
 ```jsonc
 GET  /orgs/:org/projects/:project/api-keys      // {"api_keys": [{"id","name","key_prefix","scopes","last_used_at","created_at"}]} — no secret
 POST /orgs/:org/projects/:project/api-keys
-     {"name": "Helpdesk server", "scopes": ["resolve", "logs"]}    // name defaults to "CLI key"; scopes default to both
+     {"name": "Helpdesk server", "scopes": ["read", "logs"]}    // name defaults to "CLI key"; scopes default to both
 // 201 {"id","name","key_prefix","scopes","last_used_at","created_at","key": "ptn_helpdesk_…"}  ← the only time "key" is returned
 // 400 unknown scope or non-list scopes
 
@@ -537,20 +545,20 @@ The provider key is optional: PromptOn uses it only where PromptOn itself calls 
 
 ## 4. Runtime contract
 
-Base `https://<host>/api/v1`, header `Authorization: Bearer ptn_<project_slug>_…`. Scopes: `resolve` → `GET /snapshot`, `POST /resolve`; `logs` → `POST /generations`. Missing scope → 403 `forbidden`; missing/revoked key or archived project → 401 `unauthorized`. The key is project-wide; the **environment is a request parameter** (`environment`, default `production`); unknown environment → 404 `{"details": {"environment": "canary"}}`, blank → 400. Body limit 5 MB (413 `payload_too_large`). `GET /health` and `GET /health/ready` need no auth. The full reference is the [runtime API](https://docs.prompton.ai/api).
+Base `https://<host>/api/v1`, header `Authorization: Bearer ptn_<project_slug>_…`. Scopes: `read` → `GET /use-cases`, `POST /use-cases/:key/prompt`; `logs` → `POST /logs`. Missing scope → 403 `forbidden`; missing/revoked key or archived project → 401 `unauthorized`. The key is project-wide; the **environment is a request parameter** (`environment`, default `production`); unknown environment → 404 `{"details": {"environment": "canary"}}`, blank → 400. Body limit 5 MB (413 `payload_too_large`). `GET /health` and `GET /health/ready` need no auth. The full reference is the [runtime API](https://docs.prompton.ai/api).
 
-### 4.1 `GET /snapshot?environment=production` — production path
+### 4.1 `GET /use-cases?environment=production` — production path
 
 ```text
-GET /api/v1/snapshot?environment=production
+GET /api/v1/use-cases?environment=production
 Authorization: Bearer $PTN_API_KEY
 If-None-Match: "sha256-…"          → 304 with an empty body when unchanged
 ```
 
-Response headers: `ETag: "sha256-<hex>"` (sha256 of the canonical body), `Last-Modified`, `Cache-Control: max-age=30`. Body (schema v3):
+Response headers: `ETag: "sha256-<hex>"` (sha256 of the canonical body), `Last-Modified`, `Cache-Control: max-age=30`. Body (schema v4):
 
 ```jsonc
-{"schema_version": 3, "project": "helpdesk", "environment": "production",
+{"schema_version": 4, "project": "helpdesk", "environment": "production",
  "use_cases": {
    "support_reply": {"id": "…", "kind": "chat",
      "input_schema": [{"name": "question", "type": "string", "required": true},
@@ -569,44 +577,44 @@ Response headers: `ETag: "sha256-<hex>"` (sha256 of the canonical body), `Last-M
      "metadata": {}, "provider_options": {"only": ["OpenAI"]}, "capabilities": ["tools"], "status": "active"}}}
 ```
 
-Resolve locally (`<-` = shallow merge, right side wins):
+Read locally (`<-` = shallow merge, right side wins):
 
 ```text
-deployment       = snapshot.deployments[use_case]          # absent → no live deployment (error, not fallback)
-version          = snapshot.prompt_versions[deployment.prompt_pins[prompt_name or "default"]]   # name not in prompt_pins → error
-model            = snapshot.models[deployment.model_id]
-params           = snapshot.use_cases[use_case].default_params <- deployment.params
+deployment       = document.deployments[use_case]          # absent → no live deployment (error, not fallback)
+version          = document.prompt_versions[deployment.prompt_pins[prompt_name or "default"]]   # name not in prompt_pins → error
+model            = document.models[deployment.model_id]
+params           = document.use_cases[use_case].default_params <- deployment.params
 provider_options = model.provider_options <- deployment.provider_options
 ```
 
-Poll every 10 s by default with `If-None-Match` (a `304` costs nothing); keep the last good document in memory and on disk; serve it when the poll fails or returns `429` (§1.9). A use case with no live deployment is simply absent from `deployments`; an environment with none is `{"deployments": {}, "prompt_versions": {}}`, not an error. The server caches the snapshot per environment for about 5 s, so a fresh deployment can lag that long here (never on `/resolve`).
+Poll every 10 s by default with `If-None-Match` (a `304` costs nothing); keep the last good document in memory and on disk; serve it when the poll fails or returns `429` (§1.9). A use case with no live deployment is simply absent from `deployments`; an environment with none is `{"deployments": {}, "prompt_versions": {}}`, not an error. The server caches the use-case document per environment for about 5 s, so a fresh deployment can lag that long here (never on `/use-cases/:key/prompt`).
 
-### 4.2 `POST /resolve` — reference implementation and smoke test
+### 4.2 `POST /use-cases/:key/prompt` — server-side prompt filling and smoke test
 
 ```jsonc
 // request
-{"use_case": "support_reply",             // required
- "environment": "production",             // default production
+{"environment": "production",             // default production
  "prompt": "ko",                          // default "default"; the only selection axis
  "variables": {"question": "My invoice shows two charges this month."}}   // present → rendered; absent → raw template
 // 200
-{"use_case": "support_reply", "kind": "chat",
+{"key": "support_reply", "kind": "chat",
  "deployment": {"id": "…", "revision": 3},
- "prompt": "ko", "prompts": ["default", "ko"],
+ "prompt": "ko", "prompt_names": ["default", "ko"],
  "model_id": "<catalog uuid>", "model": "openai/gpt-4o-mini", "provider": "openrouter",
- "effective_params": {"temperature": 0.3},
- "effective_provider_options": {"only": ["OpenAI"], "allow_fallbacks": false},
+ "params": {"temperature": 0.3},
+ "provider_options": {"only": ["OpenAI"], "allow_fallbacks": false},
+ "source": "remote",
  "prompt_version": {"id": "…", "number": 1},
- "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…rendered…"}],   // kind text: "text": "…"; embedding: neither, prompt null, prompts [], prompt_version null
+ "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…rendered…"}],   // kind text: "text": "…"; embedding: neither, prompt null, prompt_names [], prompt_version null
  "warnings": [], "etag": "sha256-…"}
 ```
 
-Errors: 400 `invalid_request` — `use_case` missing, `variables` not an object, `prompt` not a non-empty string, environment not a string, or a required variable missing (`{"details": {"missing_variable": "question"}}`); 404 `not_found` — unknown `use_case`, no live deployment (`{"details": {"reason": "unresolved"}}`), unpinned prompt name (`{"details": {"reason": "unknown_prompt", "prompt": "ja", "available_prompts": ["default", "ko"]}}`), unknown environment. Not cached: a just-committed revision shows immediately.
+Errors: 400 `invalid_request` — `variables` not an object, `prompt` not a non-empty string, environment not a string, or a required variable missing (`{"details": {"missing_variable": "question"}}`); 404 `not_found` — unknown use case (`{"details": {"key": "nope"}}`), no live deployment (`{"details": {"reason": "unresolved"}}`), unpinned prompt name (`{"details": {"reason": "unknown_prompt", "key": "support_reply", "prompt": "ja", "prompt_names": ["default", "ko"]}}`), unknown environment. Not cached: a just-committed revision shows immediately.
 
-### 4.3 `POST /generations?environment=production` — monitoring logs
+### 4.3 `POST /logs?environment=production` — monitoring logs
 
 ```jsonc
-{"generations": [
+{"logs": [
   {"id": "<UUIDv7 made by the app>",         // required — idempotency key
    "use_case": "support_reply",              // required (unknown keys are stored, not rejected)
    "model": "openai/gpt-4o-mini",            // required — provider model string
@@ -614,7 +622,7 @@ Errors: 400 `invalid_request` — `use_case` missing, `variables` not an object,
    "started_at": "2026-09-01T09:12:03.123Z", // required — ISO 8601; ≤ 5 min in the future, ≤ 7 days in the past
    "kind": "chat",                           // chat (default) | text | embedding
    "deployment_id": "…", "deployment_revision": 3, "prompt": "default", "prompt_version_id": "…", "model_id": "<catalog uuid>",
-   "resolution_source": "remote",            // remote | disk | bundle | manual
+   "source": "remote",            // remote | disk | bundle | manual
    "provider": "openrouter", "model_used": "…", "upstream_provider": "OpenAI",
    "params": {"temperature": 0.3},           // > 4 KB → blanked, listed in metadata.truncated_fields
    "input": {"variables": {...}, "messages": [{"role": "system", "content": "…"}], "truncated": false},   // or {"text": "…"}
@@ -634,21 +642,21 @@ Errors: 400 `invalid_request` — `use_case` missing, `variables` not an object,
 
 Rules:
 
-- ≤ 200 records per request (more → 400 `invalid_request`), ≤ 5 MB body (→ 413). Batch on a size or time trigger; never one HTTP call per generation.
+- ≤ 200 records per request (more → 400 `invalid_request`), ≤ 5 MB body (→ 413). Batch on a size or time trigger; never one HTTP call per log.
 - `id` is the idempotency key: a resend is counted in `duplicates`, never stored twice. An `id` already owned by another project is `rejected` with `code: "conflict"`.
 - Partial acceptance: one bad record never fails the batch. Read `rejected`, do not resend accepted ones.
 - The `environment` query parameter is forced on the whole batch; send one batch per environment.
 - `503 unavailable` + `Retry-After` is the one status PromptOn itself asks you to retry — resend the same batch with the same ids. Be robust to whatever sits in front of it too: retry `429` and any 5xx (honour `Retry-After`, back off otherwise), split a `413` batch in half, and drop on any other 4xx.
 - Send failures too (`status: "error"` + `error`); error rates and truncation rates are meaningless without them.
-- Payload storage follows the use case's `payload_policy` from the snapshot: `mode` `full` stores `input`/`output` (encrypted at rest), sampled by `sample_rate` on a hash of `id` — errors and `stop_kind: "length"` are always kept; `hash` keeps only sha256 + byte size; `none` drops it. A client may pre-hash by sending `input`/`output` as `{"sha256": "<64 hex>", "bytes": n}`.
+- Log content storage follows the use case's log content policy (`payload_policy`) from the use-case document: `mode` `full` stores `input`/`output` (encrypted at rest), sampled by `sample_rate` on a hash of `id` — errors and `stop_kind: "length"` are always kept; `hash` keeps only sha256 + byte size; `none` drops it. A client may pre-hash by sending `input`/`output` as `{"sha256": "<64 hex>", "bytes": n}`.
 - Truncate before sending, relative to `max_bytes` (default 262144): one message `content` ≤ `max_bytes/8`; `input.messages`, `input.text`, `input.variables` ≤ `max_bytes` each; `output.content` and `output.tool_calls` ≤ `max_bytes/4`. Keep head and tail, set `"truncated": true`. The server re-checks with the same rules. Strings with NUL bytes or invalid UTF-8 are rejected per record.
 - Retention is per plan and per use case: Free keeps the most recent 1,000 logs of each use case for at most 7 days, Team 100,000 for 30 days, Pro 100,000 for 90 days. Older logs and their payloads are purged nightly; ingest is never refused for retention. Free also caps an organization at 2 projects and a project at 10 use cases — creates beyond that fail with a clear message naming the plan.
 
 ## 5. Do / don't
 
-- **Do** keep the provider key and the HTTP call in the app. **Never** route generations through PromptOn — there is no proxy endpoint.
-- **Do** treat `production` as the default environment everywhere (`/snapshot`, `/resolve`, `/generations`, `deploy`); name `staging` explicitly.
-- **Do** cache the snapshot (memory + disk) and poll with `If-None-Match`; **don't** call `/resolve` per request in a hot path.
+- **Do** keep the provider key and the HTTP call in the app. **Never** route provider calls through PromptOn — there is no proxy endpoint.
+- **Do** treat `production` as the default environment everywhere (`/use-cases`, `/use-cases/:key/prompt`, `/logs`, `deploy`); name `staging` explicitly.
+- **Do** cache the use-case document (memory + disk) and poll with `If-None-Match`; **don't** call `/use-cases/:key/prompt` per request in a hot path.
 - **Do** treat a 404 `unknown_prompt` / `unresolved` as a bug in the app or the deployment, **never** as a signal to fall back to a hard-coded prompt.
 - **Do** batch monitoring logs with app-generated UUIDv7 ids; **don't** retry on 4xx.
 - **Don't** log secrets: no provider keys, no `PTN_API_KEY`, no user PII beyond `end_user_ref`, in `input`, `output`, `context` or `metadata`.
@@ -663,10 +671,10 @@ Rules:
 | symptom | meaning | action |
 |---|---|---|
 | 401 `unauthorized` on `/api/v1/orgs…` or `/me` | no token, wrong token, revoked session (logout, device list, "Sign out everywhere" on `/account`), or a **runtime key** used on the management door | `prompton login` again (`--host https://<host>` if not the default host) |
-| 401 on `/snapshot`, `/resolve`, `/generations` | runtime key missing/wrong/revoked, its project archived, or a **CLI token** used on the runtime door | issue a key: `prompton api-keys issue` |
-| 403 `forbidden` on the runtime API | key lacks the scope (`resolve` or `logs`) | issue a key with both scopes |
+| 401 on `/use-cases`, `/use-cases/:key/prompt`, `/logs` | runtime key missing/wrong/revoked, its project archived, or a **CLI token** used on the runtime door | issue a key: `prompton api-keys issue` |
+| 403 `forbidden` on the runtime API | key lacks the scope (`read` or `logs`) | issue a key with both scopes |
 | 404 `not_found` with `details.organization` / `details.project` | you are not a member, or it does not exist — non-members get 404, never 403 | `prompton orgs list`, `prompton projects list`; check `--org` |
-| 404 with `details.use_case` / `details.prompt` + `available_prompts` / `details.environment` | wrong name; the details list what exists | fix the name; open the prompt with `prompts open` |
+| 404 with `details.key` / `details.prompt` + `prompt_names` / `details.environment` | wrong name; the details list what exists | fix the name; open the prompt with `prompts open` |
 | 404 `details.reason = "unresolved"` | the use case has no live deployment in that environment | `prompton deploy <use-case> --environment <env> --model …` |
 | 404 `details.reason = "unknown_prompt"` | the requested `prompt` is not pinned by the live revision | pin it (`--pin name=latest`) and redeploy, or send a pinned name |
 | 400 `details.missing_variable` | template needs a variable the call did not send | send it; mirror `detected_variables` in `input_schema` |
@@ -677,7 +685,7 @@ Rules:
 | `access_denied` | the human pressed Deny | stop; ask the human |
 | 400 `no committed prompt version` on deploy | nothing to pin yet | `prompton prompts commit … --file …` first |
 | CLI exit 2 `no organization selected` | scope not set | `prompton use --org <slug|personal>` or `--org` |
-| 413 `payload_too_large` on `/generations` | batch over 5 MB | halve the batch and resend |
-| 503 `unavailable` | PromptOn degraded | honour `Retry-After`; keep serving the cached snapshot |
+| 413 `payload_too_large` on `/logs` | batch over 5 MB | halve the batch and resend |
+| 503 `unavailable` | PromptOn degraded | honour `Retry-After`; keep serving the cached use-case document |
 
 Programs should fetch this page as raw markdown from `https://docs.prompton.ai/agent.md`.

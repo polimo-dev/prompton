@@ -643,7 +643,9 @@ defmodule PromptOnWeb.EvalsPanel do
 
   # `:revise` and `:rescore` both need a rubric on screen. The buttons only exist when there is
   # one; this is the same answer for an event that arrives without it.
-  defp guard_rubric(%{assigns: %{rubric: nil}}), do: {:error, "There is no rubric to work from."}
+  defp guard_rubric(%{assigns: %{rubric: nil}}),
+    do: {:error, "There are no criteria to work from."}
+
   defp guard_rubric(socket), do: guard_ai(socket)
 
   defp criteria_attrs(params) do
@@ -724,7 +726,7 @@ defmodule PromptOnWeb.EvalsPanel do
   end
 
   defp rescore_flash(%{scored: scored, unparsable: unparsable, failed: failed}) do
-    base = "Scored #{scored} sample(s) with this rubric."
+    base = "Scored #{scored} sample(s) with these criteria."
 
     case unparsable + failed do
       0 -> base
@@ -733,7 +735,7 @@ defmodule PromptOnWeb.EvalsPanel do
   end
 
   defp async_error_message(:no_scored_samples), do: "Score the samples first."
-  defp async_error_message(:no_calibration_set), do: "This rubric has no calibration set."
+  defp async_error_message(:no_calibration_set), do: "These criteria have no calibration set."
   defp async_error_message({:unparsable, _raw}), do: "The judge did not answer with JSON."
   defp async_error_message(%Ash.Error.Invalid{} = error), do: ErrorText.message(error)
   defp async_error_message(reason), do: EditorTestRun.llm_error_message(reason)
@@ -822,7 +824,7 @@ defmodule PromptOnWeb.EvalsPanel do
   defp evaluate_blocker(assigns) do
     cond do
       current_rubric(assigns) == nil ->
-        "Draft a rubric first — an evaluation needs one."
+        "Draft criteria first — an evaluation needs them."
 
       not assigns.judge? ->
         EditorTestRun.llm_error_message(:no_provider_key)
@@ -840,7 +842,7 @@ defmodule PromptOnWeb.EvalsPanel do
         "Could not read the monitoring logs of this revision. Reload and try again."
 
       assigns.evaluate_count == 0 ->
-        "No logs with stored payloads for this revision yet."
+        "No logs with stored log content for this revision yet."
 
       true ->
         nil
@@ -984,7 +986,7 @@ defmodule PromptOnWeb.EvalsPanel do
           phx-click="sample"
           phx-target={@myself}
           disabled={@eligible_count < 5}
-          title={@eligible_count < 5 && "Fewer than five logs with stored payloads."}
+          title={@eligible_count < 5 && "Fewer than five logs with stored log content."}
         >
           Sample again
         </DS.btn>
@@ -995,7 +997,7 @@ defmodule PromptOnWeb.EvalsPanel do
         id="evals-empty"
         icon="flask"
         title="Evaluate this use case"
-        sub="Score 10 real logs → the AI writes the rubric → check it agrees with you → evaluate a whole revision."
+        sub="Score 10 real logs → the AI writes the criteria → check they agree with you → evaluate a whole revision."
       >
         <:action>
           <DS.btn
@@ -1014,7 +1016,7 @@ defmodule PromptOnWeb.EvalsPanel do
         :if={is_nil(@set) and @eligible_ok? and @eligible_count < 5}
         id="evals-no-logs"
         icon="database"
-        title="No monitoring logs with stored payloads yet"
+        title="No monitoring logs with stored log content yet"
         sub="Evals score real traffic. Send monitoring logs from your app with the PromptOn SDK, then come back."
       >
         <:action>
@@ -1062,7 +1064,7 @@ defmodule PromptOnWeb.EvalsPanel do
                 disabled={@draft_blocker != nil}
                 title={@draft_blocker}
               >
-                {if @stage == :running, do: "Working…", else: "Draft rubric with AI"}
+                {if @stage == :running, do: "Working…", else: "Draft criteria with AI"}
               </DS.btn>
               <span
                 :if={@draft_blocker}
@@ -1083,7 +1085,7 @@ defmodule PromptOnWeb.EvalsPanel do
     ~H"""
     <div id="evals-rubric" style="display:flex;flex-direction:column;gap:10px;min-width:0;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span class="mono-label">Rubric</span>
+        <span class="mono-label">Criteria</span>
         <DS.seg
           :if={length(@rubrics) > 1}
           id="rubric-versions"
@@ -1172,7 +1174,7 @@ defmodule PromptOnWeb.EvalsPanel do
           disabled={not @judge? or @stage == :running}
           title={not @judge? && EditorTestRun.llm_error_message(:no_provider_key)}
         >
-          Re-score with this rubric
+          Re-score with these criteria
         </DS.btn>
         <DS.btn_link
           id="revise-rubric"
@@ -1223,7 +1225,7 @@ defmodule PromptOnWeb.EvalsPanel do
       id="revise-modal"
       on_close={evals_path(assigns, %{"revise" => nil})}
       width={560}
-      title={"Revise rubric v#{@rubric.number}"}
+      title={"Revise criteria v#{@rubric.number}"}
       icon="sparkles"
     >
       <form id="revise-form" phx-change="revise_change" phx-submit="revise" phx-target={@myself}>
@@ -1266,7 +1268,7 @@ defmodule PromptOnWeb.EvalsPanel do
       id="rubric-editor-modal"
       on_close={evals_path(assigns, %{"edit_rubric" => nil})}
       width={640}
-      title="Edit rubric"
+      title="Edit criteria"
       icon="note"
     >
       <.form
@@ -1356,7 +1358,7 @@ defmodule PromptOnWeb.EvalsPanel do
 
         <div style="display:flex;flex-direction:column;gap:2px;">
           <DS.kv label="revision">{revision_line(@live)}</DS.kv>
-          <DS.kv label="rubric">{rubric_line(current_rubric(assigns))}</DS.kv>
+          <DS.kv label="criteria">{rubric_line(current_rubric(assigns))}</DS.kv>
           <DS.kv label="samples">{@evaluate_count}</DS.kv>
           <DS.kv label="judge">{Judge.model(current_rubric(assigns), @organization)}</DS.kv>
         </div>
@@ -1413,11 +1415,12 @@ defmodule PromptOnWeb.EvalsPanel do
       Calendar.strftime(deployment.inserted_at, "%Y-%m-%d %H:%M")
   end
 
-  defp eligible_line(0, _organization), do: "No logs with stored payloads for this revision yet."
+  defp eligible_line(0, _organization),
+    do: "No logs with stored log content for this revision yet."
 
   defp eligible_line(count, organization) do
     limit = Entitlements.limit(organization, :evaluation_sample_limit)
 
-    "#{count} of the last #{Entitlements.number(limit)} logs of this revision have stored payloads."
+    "#{count} of the last #{Entitlements.number(limit)} logs of this revision have stored log content."
   end
 end
