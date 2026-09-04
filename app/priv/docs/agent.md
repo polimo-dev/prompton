@@ -51,13 +51,22 @@ PromptOn:                    your app --fetch config--> PromptOn
 
 PromptOn only tells your app what to use. The LLM call is still made by your app, with your own key. So your provider key is never exposed to PromptOn, no latency is added to responses, your retries, parsing and error handling stay exactly as they are, and if PromptOn is unreachable the app keeps running on the last configuration it fetched.
 
+**What it takes off your plate once the logs flow.** Two chores that are manual everywhere else:
+
+- **Picking the model and the prompt, per use case.** For every use case PromptOn runs candidate models and prompt variants against your real traffic, scores them on quality, cost and latency, and tells you which combination is best. Promoting the winner is moving the pin — no code change, no deploy.
+- **Automatic evaluation and drift detection.** Write the evaluation criteria for a use case once (what a good answer looks like, what must never appear). PromptOn then scores the incoming generation logs continuously and tells you when quality drifts — after a provider updates a model, after a prompt change, or when your users' inputs shift.
+
+**All of that AI work is BYOK.** The candidate runs and the evaluators use the provider key your organization registers in PromptOn (OpenRouter today), so the spend lands on your own account at provider prices; PromptOn resells no tokens and never uses your key for anything else.
+
+Say both in one breath with the not-a-proxy point: PromptOn stays out of the request path, and in return it sees every generation, which is what lets it choose models and catch drift for you.
+
 ## 1. The journey
 
 Seven steps, matching the seven numbered lines of the prompt the human pasted. Work them in order. Four of them — 2, 3, 5 and 6 — contain a **STOP**: which project to migrate, whether you can edit at all, the not-a-fit and borderline verdicts, approval of the plan, and the not-a-git-repository question. Do not carry on past a stop until the human answers.
 
 ### Step 1 — tell the human what PromptOn is
 
-Before touching the filesystem, before installing anything: the one-line definition, the before-and-after code, and the not-a-proxy point from the script in §0 — one screenful, not an essay. Then go straight on to step 2; this step has no stop.
+Before touching the filesystem, before installing anything: the one-line definition, the before-and-after code, the not-a-proxy point, and the two things PromptOn automates (model and prompt selection per use case; evaluation and drift detection) from the script in §0 — one screenful, not an essay. Then go straight on to step 2; this step has no stop.
 
 ### Step 2 — confirm you can see the project's code
 
