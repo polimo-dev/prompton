@@ -49,11 +49,66 @@ written in English.
   commit message field, and the immutable `PromptVersion` is minted **only at the moment of Deploy**
   (if the draft equals the latest version, that version is reused). `?v=` is a read-only preview
   plus "Restore this version to draft".
+- **ADR 0010 (2026-09-04, "manual evals and plan entitlements", `../docs/adr/0010-manual-evals-and-plan-entitlements.md`)** — three things landed together:
+  - **`PromptOn.Evals`** (`lib/prompt_on/evals/`): CalibrationSet · CalibrationSample · Rubric
+    (+ the embedded RubricCriteria) · CalibrationScore · EvaluationRun · EvaluationResult, all
+    `fragments: [PromptOn.ProjectScoped]`. Evals are **console-only**, so ApiKey is a *policy*
+    `forbid_if always()` and **not** a bypass (a bypass short-circuits to allow; here we deny).
+    A **Rubric is immutable and numbered** exactly like PromptVersion — "revise" is a create
+    (`Changes.AssignNumber` locks the use case row `FOR UPDATE`), there is no update action, and
+    agreement (mean absolute error / within ±1 / exact) is **aggregates over CalibrationScore**,
+    never a stored field. `EvaluationRun` is the only `AshStateMachine` resource in the domain.
+    **Deployment is untouched** — no column, no `has_many`: a revision is measured many times, and
+    Deployment is immutable (ADR 0007) and on the `/snapshot` hot path. A screen reads the number
+    with `PromptOn.Evals.scores_for_deployments/2`.
+  - **Attribution is derived, not accepted**: `sampled_by` · `scored_by` · `authored_by` ·
+    `requested_by` are written by `PromptOn.Evals.Changes.SetActorId` from `context.actor` (nil for
+    the SystemActor). Do not add an argument for them. (`Deployment.:commit` still accepts
+    `committed_by`; that is the older convention and is not the one to copy in evals.)
+  - **`PromptOn.Evals.Judge` is the only module in the domain that builds a prompt or calls a
+    model** (`PromptOn.LLM` with `organization_id:` — BYOK, exactly like the arena). Payload text is
+    fenced (`<<<INPUT>>> … <<<END INPUT>>>`) and the system prompts forbid obeying what is inside:
+    an end user of the *customer's* app must not be able to move a revision's score. **Nothing in
+    `Judge`/`PayloadText`/`Calibration`/`RunJudge` passes payload text, prompt text or a rationale to
+    `Logger`.** The `error_message` columns are **not** encrypted, so only the *shape* of a failure
+    goes in them (`"HTTP 429"`, `"request failed"`, `"the judge did not answer with JSON"`) — never a
+    provider body, never a raw model answer.
+  - **One active run per deployment revision** is guarded by the partial unique identity
+    `:one_active_run_per_deployment` (+ `identity_wheres_to_sql` in the `postgres` block), not by
+    `Validations.NoActiveRun` alone: a plain `validate` runs before the transaction and takes no
+    lock. Same rule generally — a "no two of these at once" invariant needs a database constraint;
+    the validation is only there to name the offender.
+  - Jobs: Oban queue **`evals: 4`** (the ceiling on concurrent judge calls). `:start` enqueues its
+    own jobs with `AshOban.build_trigger/3` + `Oban.insert_all/1` in chunks; the `*/2` scheduler is
+    the safety net, and `EvaluationResult.:scorable` (`status == :pending`) is what makes a duplicate
+    job harmless.
+- **`PromptOn.Entitlements` is the single home of plans and limits** (`Organization.plan` =
+  `:free | :team | :pro`, written only by the system-actor-only `Organization.:set_plan` /
+  `mix prompton.set_plan`). Never hard-code a number, a plan name or "available on Team/Pro" copy in
+  a resource, a screen or a doc — read `limit/2`, `allows?/2`, `limits/1`, `label/1`, and derive the
+  copy. A refusal is `Ash.Error.Changes.InvalidAttribute.exception(field: :plan, message: …)` so
+  `PromptOnWeb.ErrorText.message/1` renders `"plan: …"`. `config :prompton,
+  :entitlements_plan_override` overrides every organization (self-hosting).
+  `plan_for_project/1` falls back to `:free` when it cannot read the plan — safe for a *creation*
+  gate and destructive for anything that **deletes**; a deleting caller uses
+  `plan_for_project_result/1` and skips what it cannot resolve.
+- **Retention is two separate rules and both must keep running**: `Generation.:purge_over_retention`
+  (AshOban schedule `40 3 * * *`, `maintenance` queue) deletes whole log rows outside the plan's day
+  window **and** beyond the plan's per-`use_case_key` count, cascading to their payloads;
+  `GenerationPayload.:purge_expired` (03:10) is the narrower project-policy rule that expires only
+  the stored input/output. The plan window can never be extended by `payload_policy.retention_days`,
+  and the ingest endpoint is unchanged — PromptOn trims, it never rejects a log for being over quota.
+  A retention query that walks a new column needs a matching `custom_indexes` entry on Generation
+  (`concurrently: true`, ADR 0005) — `generations` is the hot ingest table.
+- **A plan gate is a `validate` module on the write action** (`Project.:create`, `UseCase.:define`,
+  `Organization.:create`, `Membership.:add`). A team organization inherits its creator's plan in
+  `Organization.Changes.AddCreatorAsOwner`, because the member limit reads the *new* row.
 - **Name identities explicitly**; an upsert specifies `upsert_identity` + `upsert_fields` (empty
   list = DO NOTHING).
 - Only resources that need a state machine get `AshStateMachine` + an explicit
   **`state_machine do state_attribute :status end`** (no P0 resource has one — immutable revisions
-  stand in for state).
+  stand in for state; `PromptOn.Evals.EvaluationRun` is the one resource that does, because a batch
+  job really does move queued → running → completed | failed | cancelled).
 - **Tenant = `project_id`**: project-scoped resources use `use Ash.Resource, otp_app: :prompton,
   domain: ..., fragments: [PromptOn.ProjectScoped]` (the fragment supplies the multitenancy
   attribute, `belongs_to :project` and the repo; the resource itself has only
@@ -159,8 +214,12 @@ written in English.
   (project-scoped), `scope(project, actor)` → `[tenant:, actor:]`, `deployment_fixture/4`
   (`%{model_id:, params:, provider_options:, prompt_pins:}`) and `simple_deployment_fixture/3`,
   `ingest_fixture/3` (`env:` picks the environment), `heydiary_project_fixture/1` (only
-  `diary_generation` has two prompts — `default`/`ko`). Fixtures for a new domain are **added** to
-  this module.
+  `diary_generation` has two prompts — `default`/`ko`), `stored_generations_fixture/4` and
+  `set_plan/2`. Fixtures for a new domain are **added** to this module — the one exception is
+  `PromptOn.EvalsFixtures` (`test/support/evals_fixtures.ex`), which holds the evals fixtures and
+  the `PromptOn.LLM.Fake` judge planters (`plant_judge/1`, `plant_rubric_answer/1`,
+  `plant_score_answer/2`); a test that plants a judge answer is `async: false`, because the fake
+  adapter is configured through the application environment.
 - Policy tests use three actors: member, non-member and ApiKey.
 - Migrations are generated only with `mix ash.codegen <name>` (never written by hand).
   `mix ash.setup`, then `mix test`.
@@ -282,8 +341,21 @@ written in English.
   the overview screen.
 - `design/mockup/` is a **visual reference**, not a pixel contract — follow its colors and spacing,
   but do not build a screen just because the mockup has it.
+- **The evals tab is `?tab=evals` of the use case hub** (ADR 0010 §5) — no route of its own. The
+  whole tab is `PromptOnWeb.EvalsPanel`, a **LiveComponent**, so the hub file stays readable;
+  `?set=` `?rubric=` `?revise=1` `?edit_rubric=1` `?evaluate=1` `?run=` and the shared `?env=` are
+  its state. `put_flash/3` inside a LiveComponent reaches the parent's tray only when the component
+  also patches or navigates, so the panel sends `{:evals_flash, kind, message}` to the LiveView,
+  which puts it. A run in flight is followed by a 2-second `Process.send_after` tick +
+  `send_update`, not PubSub.
 - **Do not build UI for features the backend does not support (dead buttons, session-only state,
-  columns that are always `—`)** — attach the UI when the feature arrives.
+  columns that are always `—`)** — attach the UI when the feature arrives. A gated control is a
+  **real disabled control with the reason beside it** (the Continuous-evaluation card is a disabled
+  checkbox), and the reason names the plan `PromptOn.Entitlements` actually says has the feature.
+- **An error that no rendered input owns still has to reach the user.** `AshPhoenix.Form` renders an
+  error next to its field, so a plan refusal (`field: :plan`) on a form that renders only `:key`
+  vanishes and the button looks broken: the `{:error, form}` branch flashes every error whose field
+  the modal does not render (`PromptOnWeb.UseCasesLive.flash_unbound_errors/2`).
 
 ## Zero-downtime deployment discipline (ADR 0005 — hard rules)
 - **expand/contract is still the rule.** A destructive migration was allowed exactly once, for the

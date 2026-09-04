@@ -22,6 +22,9 @@ defmodule PromptOn.Observability do
       define :list_generations, action: :list_for_project
       define :generations_for_trace, action: :for_trace, args: [:trace_id]
       define :generations_for_end_user, action: :for_end_user, args: [:end_user_ref]
+
+      # Plan retention (ADR 0010 §3.2) — a sibling of the payload purge below, not a replacement.
+      define :purge_generations_over_retention, action: :purge_over_retention
     end
 
     resource PromptOn.Observability.GenerationPayload do

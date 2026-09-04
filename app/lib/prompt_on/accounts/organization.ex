@@ -15,6 +15,11 @@ defmodule PromptOn.Accounts.Organization do
   Personal→team promotion is `:claim_slug` (the moment it gets a slug, `personal?` is switched
   off). Team organization creation is in the UI (`/{org}?new_org=1`); invitations do not exist
   yet.
+
+  The organization also carries the **entitlement tier** `plan` (`:free | :team | :pro`, ADR
+  0010 §2.8). It is written only by `:set_plan`, which nothing but the `SystemActor` may run, and
+  it is read exclusively through `PromptOn.Entitlements` — no call site turns a plan into a number
+  on its own.
   """
 
   use Ash.Resource,
@@ -46,6 +51,7 @@ defmodule PromptOn.Accounts.Organization do
       accept [:name, :slug]
       validate present(:slug), message: "is required for a team organization"
       validate PromptOn.Accounts.Organization.Validations.SlugNotReserved
+      validate PromptOn.Accounts.Organization.Validations.TeamOrganizationsAllowed
       change set_attribute(:personal?, false)
       change PromptOn.Accounts.Organization.Changes.AddCreatorAsOwner
     end
@@ -63,6 +69,25 @@ defmodule PromptOn.Accounts.Organization do
 
     update :rename do
       accept [:name]
+    end
+
+    update :set_plan do
+      description """
+      Sets the entitlement tier. **System actor only** — the private admin app (and
+      `mix prompton.set_plan`) flips it; there is no billing and no self-serve change
+      (ADR 0010 §2.8).
+      """
+
+      accept [:plan]
+    end
+
+    update :set_judge_model do
+      description """
+      The organization's default judge model for evals. `nil` falls back to
+      `config :prompton, :judge_model`. Members set it from organization settings.
+      """
+
+      accept [:judge_model]
     end
 
     update :claim_slug do
@@ -121,7 +146,12 @@ defmodule PromptOn.Accounts.Organization do
       authorize_if PromptOn.Checks.OrganizationMember
     end
 
-    policy action([:rename, :claim_slug]) do
+    policy action(:set_plan) do
+      description "Plans are not self-serve: only the SystemActor bypass above gets through."
+      forbid_if always()
+    end
+
+    policy action([:rename, :claim_slug, :set_judge_model]) do
       authorize_if PromptOn.Checks.OrganizationMember
     end
 
@@ -165,6 +195,28 @@ defmodule PromptOn.Accounts.Organization do
       allow_nil? false
       public? true
       default false
+    end
+
+    attribute :plan, :atom do
+      description """
+      Entitlement tier. Set by the system actor only (the private admin app /
+      `mix prompton.set_plan`) — there is no billing and no self-serve change.
+      `PromptOn.Entitlements` is the single place that turns this value into limits.
+      """
+
+      allow_nil? false
+      public? true
+      default :free
+      constraints one_of: [:free, :team, :pro]
+    end
+
+    attribute :judge_model, :string do
+      description """
+      Organization default judge model for evals (ADR 0010 §4.4). nil falls back to
+      `config :prompton, :judge_model`.
+      """
+
+      public? true
     end
 
     create_timestamp :inserted_at

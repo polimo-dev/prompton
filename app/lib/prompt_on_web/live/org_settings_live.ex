@@ -4,7 +4,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
   | URL | Screen |
   |---|---|
-  | `?tab=general` | rename · (team) slug change · (personal) convert to team organization |
+  | `?tab=general` | plan + limits · judge model · rename · (team) slug change · (personal) convert to team organization |
   | `?tab=providers` | BYOK OpenRouter key |
   | `?tab=providers&add-provider=openrouter` | key registration modal |
   | `?tab=providers&rotate-provider=<id>` | key rotation modal |
@@ -44,6 +44,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Accounts
+  alias PromptOn.Entitlements
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.OrgComponents, as: OC
   alias PromptOnWeb.SettingsComponents, as: SC
@@ -71,6 +72,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
        form: nil,
        name_form: name_form(socket.assigns.organization),
        slug_form: slug_form(socket.assigns.organization),
+       judge_form: judge_form(socket.assigns.organization),
        provider_key: nil
      )}
   end
@@ -99,6 +101,9 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
   defp slug_form(organization),
     do: to_form(%{"slug" => organization.slug || "", "name" => organization.name}, as: :claim)
+
+  defp judge_form(organization),
+    do: to_form(%{"judge_model" => organization.judge_model || ""}, as: :judge)
 
   # ---------------------------------------------------------------------------
   # Data
@@ -171,6 +176,10 @@ defmodule PromptOnWeb.OrgSettingsLive do
     {:noreply, assign(socket, :slug_form, to_form(params, as: :claim))}
   end
 
+  def handle_event("validate_judge", %{"judge" => params}, socket) do
+    {:noreply, assign(socket, :judge_form, to_form(params, as: :judge))}
+  end
+
   def handle_event("validate_form", params, socket) do
     {:noreply, assign(socket, :form, restore_form(socket.assigns.form, params))}
   end
@@ -189,6 +198,25 @@ defmodule PromptOnWeb.OrgSettingsLive do
          socket
          |> assign(organization: organization, name_form: name_form(organization))
          |> put_flash(:info, "Organization saved")}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+    end
+  end
+
+  # The judge model is the only plan-adjacent field a member may change: the plan itself is
+  # system-actor-only (`Organization.:set_plan`), so the card above the form has no button.
+  def handle_event("save_judge_model", %{"judge" => params}, socket) do
+    attrs = %{judge_model: blank_to_nil(params["judge_model"])}
+
+    case Accounts.set_organization_judge_model(socket.assigns.organization, attrs,
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, organization} ->
+        {:noreply,
+         socket
+         |> assign(organization: organization, judge_form: judge_form(organization))
+         |> put_flash(:info, "Judge model saved")}
 
       {:error, error} ->
         {:noreply, put_flash(socket, :error, ErrorText.message(error))}
@@ -334,6 +362,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
           organization={@organization}
           name_form={@name_form}
           slug_form={@slug_form}
+          judge_form={@judge_form}
         />
         <.providers_tab
           :if={@tab == "providers"}
@@ -357,10 +386,15 @@ defmodule PromptOnWeb.OrgSettingsLive do
   attr :organization, :map, required: true
   attr :name_form, :map, required: true
   attr :slug_form, :map, required: true
+  attr :judge_form, :map, required: true
 
   defp general_tab(assigns) do
+    assigns = assign(assigns, :plan, Entitlements.plan(assigns.organization))
+
     ~H"""
     <div id="org-settings-general">
+      <.plan_card plan={@plan} judge_form={@judge_form} />
+
       <SC.setting_card
         id="org-general-card"
         title="General"
@@ -406,6 +440,100 @@ defmodule PromptOnWeb.OrgSettingsLive do
     </div>
     """
   end
+
+  # Every number here is rendered from `Entitlements.limits/1` — the plan card must never carry a
+  # second copy of the limits table. There is no button: plans are set by the system actor
+  # (`mix prompton.set_plan`, later the admin app), so a self-serve control would be a dead one.
+  attr :plan, :atom, required: true
+  attr :judge_form, :map, required: true
+
+  # The plan window and the payload window are two different rules. The log **row** lives for the
+  # plan's `log_retention_days`; the stored input/output inside it expires at
+  # `received_at + payload_policy.retention_days` (default 30, `PromptOn.Observability.PayloadPolicy`)
+  # and is swept separately. Saying only the plan number would promise 90 days of readable payloads
+  # on Pro, which is not what a Pro customer gets.
+  defp retention_line(limits) do
+    payload_days = PromptOn.Observability.PayloadPolicy.default().retention_days
+
+    if limits.log_retention_days > payload_days do
+      "#{limits.log_retention_days} days · stored input/output #{payload_days} days by default"
+    else
+      "#{limits.log_retention_days} days"
+    end
+  end
+
+  defp plan_card(assigns) do
+    assigns = assign(assigns, :limits, Entitlements.limits(assigns.plan))
+
+    ~H"""
+    <SC.setting_card
+      id="org-plan-card"
+      title="Plan"
+      desc="What this organization may create, and how long its monitoring logs are kept."
+    >
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;">
+        <DS.badge id="org-plan-badge" tone={plan_tone(@plan)}>
+          {Entitlements.label(@plan)}
+        </DS.badge>
+        <span style="font-size:12.5px;color:var(--tx-2);">
+          Plans are not self-serve yet. Contact us to change your plan.
+        </span>
+      </div>
+
+      <div id="org-plan-limits" style="max-width:420px;">
+        <DS.kv label="Projects" w={190}>{@limits.projects_per_organization}</DS.kv>
+        <DS.kv label="Use cases per project" w={190}>{@limits.use_cases_per_project}</DS.kv>
+        <DS.kv label="Monitoring logs" w={190}>
+          {Entitlements.number(@limits.log_count_per_use_case)} per use case
+        </DS.kv>
+        <DS.kv label="Log retention" w={190}>{retention_line(@limits)}</DS.kv>
+        <DS.kv label="Members" w={190}>{@limits.members_per_organization}</DS.kv>
+        <DS.kv label="Automatic evaluation" w={190}>
+          {if @limits.automatic_evaluation, do: "included", else: "—"}
+        </DS.kv>
+      </div>
+
+      <SC.retention_note id="org-plan-retention" plan={@plan} />
+
+      <div class="mono-label" style="margin:16px 0 7px;">judge model</div>
+      <form id="org-judge-form" phx-submit="save_judge_model" phx-change="validate_judge">
+        <DS.ds_input
+          id="org-judge-model"
+          field={@judge_form[:judge_model]}
+          mono
+          placeholder={default_judge_model()}
+        />
+      </form>
+      <div style="font-size:12px;color:var(--tx-3);margin-top:6px;line-height:1.5;">
+        Model used to score evaluations. Runs on your OpenRouter key.
+      </div>
+      <:footer>
+        <DS.btn id="save-judge-model" variant="solid" form="org-judge-form" type="submit">
+          Save judge model
+        </DS.btn>
+      </:footer>
+    </SC.setting_card>
+    """
+  end
+
+  @doc """
+  The app-wide judge model fallback, shown as the placeholder when the organization has not set
+  one (`config :prompton, :judge_model`).
+  """
+  @spec default_judge_model() :: String.t()
+  def default_judge_model,
+    do: Application.get_env(:prompton, :judge_model, "openai/gpt-4o-mini")
+
+  @doc """
+  Badge tone of a plan: free is neutral, team accented, pro the success tone.
+
+      iex> PromptOnWeb.OrgSettingsLive.plan_tone(:pro)
+      :ok
+  """
+  @spec plan_tone(atom()) :: atom()
+  def plan_tone(:team), do: :accent
+  def plan_tone(:pro), do: :ok
+  def plan_tone(_plan), do: :neutral
 
   defp kind_label(%{personal?: true}), do: "Personal organization"
   defp kind_label(_organization), do: "Team organization"

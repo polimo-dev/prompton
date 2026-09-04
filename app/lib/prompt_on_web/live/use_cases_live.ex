@@ -76,7 +76,31 @@ defmodule PromptOnWeb.UseCasesLive do
          )}
 
       {:error, form} ->
-        {:noreply, assign(socket, :form, form)}
+        {:noreply, socket |> assign(:form, form) |> flash_unbound_errors(form)}
+    end
+  end
+
+  # The fields the modal actually renders a `<.field_error>` for. An error on anything else has
+  # nowhere to appear, so it goes to the flash instead of vanishing — which is what happened to the
+  # plan entitlement error (`field: :plan`), leaving the button looking broken at the limit.
+  @rendered_fields [:key]
+
+  defp flash_unbound_errors(socket, form) do
+    form
+    |> AshPhoenix.Form.errors()
+    |> Enum.reject(fn {field, _message} -> field in @rendered_fields end)
+    |> case do
+      [] ->
+        socket
+
+      errors ->
+        put_flash(
+          socket,
+          :error,
+          Enum.map_join(errors, " · ", fn {field, message} ->
+            "#{field}: #{message}"
+          end)
+        )
     end
   end
 

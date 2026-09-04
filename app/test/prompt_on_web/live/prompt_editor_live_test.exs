@@ -28,6 +28,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
   alias PromptOn.Catalog
   alias PromptOn.Deployments
+  alias PromptOn.EvalsFixtures
   alias PromptOn.Fixtures
   alias PromptOn.Prompts
 
@@ -146,6 +147,41 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     do: hub_path(project, use_case, [tab: "arena"] ++ params)
 
   defp scope(project), do: Fixtures.scope(project)
+
+  # A finished evaluation of one revision: eligible logs, a rubric, a run, and the frozen counters
+  # the tally writes. Enough for the score badge, which reads nothing else.
+  defp evaluate(project, use_case, deployment) do
+    Fixtures.stored_generations_fixture(project, use_case, 5, %{
+      "deployment_id" => deployment.id,
+      "deployment_revision" => deployment.revision
+    })
+
+    with_key(project)
+    rubric = EvalsFixtures.rubric_fixture(use_case)
+    run = EvalsFixtures.evaluation_run_fixture(use_case, deployment, %{rubric: rubric})
+    opts = [tenant: project.id, actor: Fixtures.system_actor()]
+
+    {:ok, tallied} =
+      run
+      |> Ash.Changeset.for_update(
+        :record_tally,
+        %{
+          scored_count: 5,
+          unparsable_count: 0,
+          failed_count: 0,
+          average_score: Decimal.new("4.20"),
+          score_distribution: %{"4" => 4, "5" => 1},
+          cost_usd: Decimal.new("0.01")
+        },
+        opts
+      )
+      |> Ash.update()
+
+    {:ok, completed} =
+      tallied |> Ash.Changeset.for_update(:complete, %{}, opts) |> Ash.update()
+
+    completed
+  end
 
   defp two_models(project) do
     {Fixtures.model_fixture(project, %{model_id: "m/a", display_name: "Model A"}),
@@ -2393,6 +2429,27 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       refute html =~ "conditions"
     end
 
+    # ADR 0010 §5.4: an evaluated revision carries its average wherever the revision is shown, and a
+    # revision nobody evaluated carries nothing — not a dash, not an empty column.
+    test "an evaluated revision shows a score badge and an unevaluated one shows none", %{
+      conn: conn,
+      project: project,
+      use_case: use_case,
+      first: first
+    } do
+      evaluate(project, use_case, first)
+
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, tab: "deployments"))
+
+      assert view |> element("#revision-1-score") |> render() =~ "4.2"
+      refute has_element?(view, "#revision-2-score")
+      # The live pin is revision 2, which nobody has evaluated.
+      refute has_element?(view, "#pin-score")
+
+      {:ok, pinned, _html} = live(conn, hub_path(project, use_case, tab: "deployments", rev: 1))
+      assert pinned |> element("#pin-score") |> render() =~ "4.2"
+    end
+
     test "picking a past revision shows that revision's pin", %{
       conn: conn,
       project: project,
@@ -2661,6 +2718,41 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   # The use case's own settings: name and description (`describe`), default parameters
   # (`set_default_params`), the raw payload policy (`set_payload_policy`), archive (`archive`).
   # All of them are existing domain actions.
+  describe "Evals tab (?tab=evals)" do
+    test "the tab strip has Evals and the panel is only mounted there", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+
+      assert has_element?(view, "#tab-evals")
+      refute has_element?(view, "#evals-panel")
+
+      view |> element("#tab-evals") |> render_click()
+
+      assert_patch(view, hub_path(project, use_case, tab: "evals"))
+      assert has_element?(view, "#evals-panel")
+    end
+
+    # ADR 0010 §5.2: the Evals tab reuses the Deployments tab's `?env=`, so moving between them
+    # keeps the environment you were looking at.
+    test "switching between Deployments and Evals keeps ?env=", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, view, _html} =
+        live(conn, hub_path(project, use_case, tab: "deployments", env: "staging"))
+
+      view |> element("#tab-evals") |> render_click()
+      assert_patch(view, hub_path(project, use_case, tab: "evals", env: "staging"))
+
+      view |> element("#tab-deployments") |> render_click()
+      assert_patch(view, hub_path(project, use_case, tab: "deployments", env: "staging"))
+    end
+  end
+
   describe "access control" do
     test "a user from another organization cannot open it", %{
       project: project,

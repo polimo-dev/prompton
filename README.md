@@ -111,6 +111,8 @@ project must set these itself (compile-time `config/config.exs` unless noted):
 | `config :swoosh, api_client: false` | Swoosh's default API client is Hackney, which the server does not depend on — without this the `swoosh` application fails to start (`missing hackney dependency`). Use `Swoosh.ApiClient.Req` instead only if you actually send mail. |
 | `config :prompton, ecto_repos: [PromptOn.Repo]` | Optional — only for `mix ecto.*` tasks from the consuming project. |
 
+| `config :prompton, :entitlements_plan_override` | Optional. `nil` (default) applies the organization's own plan; `:free \| :team \| :pro` makes `PromptOn.Entitlements` report that plan for every organization — the switch for a self-hosted install where per-organization plan limits (projects, use cases, log retention, members) should not apply. |
+
 Optional, only when the corresponding feature is called: `config :prompton, :llm_adapter` and
 `:openrouter_api_key` (arena / AI draft), `config :prompton, PromptOn.Mailer` and `:mail_from`
 (sign-in emails). Rate-limited flows (sign-in codes, device login) belong to the server and are not

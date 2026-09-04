@@ -295,6 +295,40 @@ defmodule PromptOnWeb.UseCasesLiveTest do
 
       assert has_element?(view, "#define-use-case-modal")
     end
+
+    # The plan entitlement error is an `InvalidAttribute` on `:plan`, and `:plan` is not an input on
+    # this form — without the flash it renders nowhere at all and the button looks broken.
+    test "at the plan limit the plan sentence reaches the flash", %{
+      conn: conn,
+      project: project,
+      user: user
+    } do
+      # three use cases already exist in the fixture; take the project to the Free limit
+      for n <- 4..PromptOn.Entitlements.limit(:free, :use_cases_per_project) do
+        Fixtures.use_case_fixture(project, %{key: "filler_#{n}", kind: :chat})
+      end
+
+      {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases?#{[new: 1]}")
+
+      html =
+        view
+        |> form("#define-use-case-form", %{
+          "use_case" => %{"key" => "one_too_many", "kind" => "chat"}
+        })
+        |> render_submit()
+
+      assert has_element?(view, "#define-use-case-modal")
+
+      assert html =~
+               "plan: the Free plan allows 10 use cases per project. " <>
+                 "Archive a use case, or upgrade the organization to Team."
+
+      assert {:error, _error} =
+               PromptOn.Prompts.define_use_case(%{key: "one_too_many", kind: :chat},
+                 tenant: project.id,
+                 actor: user
+               )
+    end
   end
 
   describe "permissions" do

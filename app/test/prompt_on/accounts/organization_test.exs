@@ -192,8 +192,11 @@ defmodule PromptOn.Accounts.OrganizationTest do
 
     # Organization creation was opened up to the UI (2026-09-01). Unless the creator becomes the
     # first owner member, the read policy (member filter) hides the just-created organization.
-    test "any signed-in user creates a team organization and becomes its first owner" do
+    # Since ADR 0010 the creator's own plan has to allow team organizations (the refusal itself is
+    # `PromptOn.EntitlementsEnforcementTest`).
+    test "a signed-in user on a paid plan creates a team organization and becomes its first owner" do
       user = user_fixture()
+      set_plan(organization_for(user), :team)
 
       assert {:ok, org} =
                Accounts.create_organization(%{name: "Mine", slug: "mine-now"}, actor: user)

@@ -14,6 +14,7 @@ defmodule PromptOnWeb.SettingsComponents do
 
   use Phoenix.Component
 
+  alias PromptOn.Entitlements
   alias PromptOnWeb.DS
   alias PromptOnWeb.DSIcons
 
@@ -131,6 +132,43 @@ defmodule PromptOnWeb.SettingsComponents do
       </span>
     </div>
     """
+  end
+
+  @doc """
+  The one sentence that tells people how long monitoring logs live (ADR 0010 §6). Nothing is shown
+  at deletion time — the purge is a background job — so this line is the only warning, and it is
+  built from `PromptOn.Entitlements.limits/1` rather than written out, so a plan change never
+  leaves stale copy behind.
+
+      <SC.retention_note plan={@plan} />
+  """
+  attr :plan, :atom, required: true
+  attr :id, :string, default: nil
+
+  def retention_note(assigns) do
+    ~H"""
+    <p id={@id} style="font-size:12px;color:var(--tx-3);margin:6px 0 0;line-height:1.5;">
+      {retention_sentence(@plan)}
+    </p>
+    """
+  end
+
+  @doc """
+  The retention sentence itself, for a screen that needs the text without the paragraph.
+
+  Both halves are ceilings, not alternatives — "or" read as a choice, which is the opposite of what
+  the nightly purge does.
+
+      iex> PromptOnWeb.SettingsComponents.retention_sentence(:free)
+      "Logs are kept for 7 days, and at most the most recent 1,000 per use case — whichever comes first (Free plan)."
+  """
+  @spec retention_sentence(atom()) :: String.t()
+  def retention_sentence(plan) do
+    limits = Entitlements.limits(plan)
+
+    "Logs are kept for #{limits.log_retention_days} days, and at most the most recent " <>
+      "#{Entitlements.number(limits.log_count_per_use_case)} per use case — whichever comes " <>
+      "first (#{Entitlements.label(Entitlements.plan(plan))} plan)."
   end
 
   @doc """

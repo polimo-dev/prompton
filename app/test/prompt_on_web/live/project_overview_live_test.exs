@@ -64,6 +64,24 @@ defmodule PromptOnWeb.ProjectOverviewLiveTest do
     end
   end
 
+  describe "retention note" do
+    test "says how long the logs on this screen are kept, from the plan", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/personal/acme")
+
+      assert view |> element("#overview-retention-note") |> render() =~
+               "Logs are kept for 7 days, and at most the most recent 1,000 per use case — whichever comes first (Free plan)."
+    end
+
+    test "a paid organization sees its own numbers", %{conn: conn, user: user} do
+      Fixtures.set_plan(Fixtures.organization_for(user), :pro)
+
+      {:ok, view, _html} = live(conn, ~p"/personal/acme")
+
+      assert view |> element("#overview-retention-note") |> render() =~
+               "Logs are kept for 90 days, and at most the most recent 100,000 per use case — whichever comes first (Pro plan)."
+    end
+  end
+
   describe "honest numbers" do
     test "with no generations it is 0 (not glossed over as —)", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/personal/acme")

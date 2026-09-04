@@ -62,6 +62,8 @@ defmodule PromptOnWeb.API.V1.Management.OrgControllerTest do
     test "a team organization a member joined later is reachable too" do
       owner = user_fixture()
       org = team_org_fixture(%{user: owner, slug: "acme-two"})
+      # a second member is a paid-plan organization (ADR 0010 §6.4)
+      set_plan(org, :team)
       member = user_fixture()
 
       {:ok, _membership} =

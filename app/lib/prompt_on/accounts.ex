@@ -40,6 +40,11 @@ defmodule PromptOn.Accounts do
       define :rename_organization, action: :rename
       define :claim_organization_slug, action: :claim_slug
 
+      # Entitlement tier (ADR 0010). `:set_plan` is system-actor only; the judge model is a
+      # member-editable organization setting.
+      define :set_organization_plan, action: :set_plan
+      define :set_organization_judge_model, action: :set_judge_model
+
       # Resolves `/{org_slug}`: team organizations only. Personal organizations have no slug and
       # resolve via `/personal`.
       define :get_organization_by_slug, action: :by_slug, args: [:slug], not_found_error?: false

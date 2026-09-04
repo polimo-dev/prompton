@@ -18,10 +18,19 @@ config :prompton, :mail_from, "PromptOn <noreply@prompton.ai>"
 # (`test/prompt_on_web/controllers/sign_in_logging_test.exs`).
 config :phoenix, :filter_parameters, ["password", "token", "code"]
 
+# `evals: 4` is the concurrency ceiling on judge calls per node (ADR 0010 §3.1): one Oban job per
+# scored sample, so a 1,000-item run is ≈ 12 minutes and never more than four concurrent requests
+# against one organization's OpenRouter key.
+#
+# The queue is global, so one organization's batch occupies the node's whole eval capacity while it
+# runs and another organization's batch waits behind it. That is accepted for now — there is no
+# per-tenant fairness and no admission control. `NoActiveRun` plus the partial unique index on
+# `EvaluationRun` cap it at one run per deployment revision; a per-organization cap on concurrently
+# active runs is the next lever if a tenant ever holds the queue too long.
 config :prompton, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  queues: [default: 10, maintenance: 1],
+  queues: [default: 10, maintenance: 1, evals: 4],
   repo: PromptOn.Repo,
   plugins: [{Oban.Plugins.Cron, []}]
 
@@ -86,8 +95,18 @@ config :prompton,
     PromptOn.Catalog,
     PromptOn.Prompts,
     PromptOn.Deployments,
-    PromptOn.Observability
+    PromptOn.Observability,
+    PromptOn.Evals
   ]
+
+# Evals (ADR 0010).
+#
+# `:judge_model` is the last fallback of the judge model chain (rubric → organization → this key).
+# `:entitlements_plan_override`, when set to `:free | :team | :pro`, makes `PromptOn.Entitlements`
+# report that plan for every organization — the one switch a self-hosted operator needs so that
+# plan limits do not apply to a single-tenant install (README "Embedding").
+config :prompton, :judge_model, "openai/gpt-4o-mini"
+config :prompton, :entitlements_plan_override, nil
 
 # The channel through which the server calls LLMs directly (Playground/Experiment/judge only,
 # plan.md §11.2). The test environment overrides it with `PromptOn.LLM.Fake`.

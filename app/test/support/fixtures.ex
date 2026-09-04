@@ -55,6 +55,23 @@ defmodule PromptOn.Fixtures do
   end
 
   @doc """
+  Sets an organization's entitlement plan (`:free | :team | :pro`). `Organization.:set_plan` is
+  system-actor only, so this is the only way a test reaches a paid plan. Accepts an organization
+  record, an organization id, or a project (its owning organization).
+  """
+  def set_plan(organization, plan) do
+    record =
+      Ash.get!(PromptOn.Accounts.Organization, organization_id(organization),
+        actor: system_actor()
+      )
+
+    {:ok, updated} =
+      Accounts.set_organization_plan(record, %{plan: plan}, actor: system_actor())
+
+    updated
+  end
+
+  @doc """
   Project (with the default production/staging environments). Creates a new user when `attrs.user`
   is absent. `attrs.organization` picks the organization (default: the user's personal
   organization); project slugs are unique **per organization**, so use it to test slug collisions
@@ -554,6 +571,50 @@ defmodule PromptOn.Fixtures do
       )
 
     result
+  end
+
+  @doc """
+  `count` monitoring logs of one use case **with their raw payloads stored** — the shape every
+  evals and retention test needs and that `generation_payload_fixture/2` (one payload map) does
+  not provide on its own.
+
+  Ingests through the real path (`Observability.Ingest`), so `payload_state` and the encrypted
+  `GenerationPayload` rows are produced exactly as a live SDK batch would produce them. Log `i` is
+  `started_at = now - (count - i) minutes`, so the list comes back **oldest first** and the newest
+  log is the last element.
+
+  `attrs` is merged into every payload map (`generation_payload_fixture/2` semantics); the two
+  fixture-only keys are `:env` (environment slug, default `"production"`) and `:api_key`.
+  """
+  def stored_generations_fixture(project, use_case, count, attrs \\ %{})
+      when is_integer(count) and count > 0 do
+    {env, attrs} = Map.pop(attrs, :env, "production")
+    {api_key, attrs} = Map.pop(attrs, :api_key)
+    now = DateTime.utc_now()
+
+    payloads =
+      for i <- 1..count do
+        started = DateTime.add(now, -(count - i) * 60, :second)
+
+        generation_payload_fixture(
+          use_case,
+          Map.merge(
+            %{
+              "id" => Ash.UUIDv7.generate(),
+              "started_at" => DateTime.to_iso8601(started)
+            },
+            Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
+          )
+        )
+      end
+
+    opts = [env: env] ++ if(api_key, do: [api_key: api_key], else: [])
+    %{accepted: ^count} = ingest_fixture(project, payloads, opts)
+
+    Enum.map(payloads, fn payload ->
+      {:ok, generation} = Observability.get_generation(payload["id"], scope(project))
+      generation
+    end)
   end
 
   # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
   alias PromptOn.Fixtures
 
   doctest PromptOnWeb.OrgComponents, import: true
+  doctest PromptOnWeb.OrgSettingsLive
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
@@ -259,6 +260,74 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
 
       assert html =~ "org-settings-providers"
       refute has_element?(view, "#rotate-provider-modal")
+    end
+  end
+
+  describe "General: plan" do
+    test "the plan card shows the plan and its limits, rendered from Entitlements", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/personal/settings")
+
+      assert has_element?(view, "#org-plan-card")
+      assert view |> element("#org-plan-badge") |> render() =~ "Free"
+
+      limits = view |> element("#org-plan-limits") |> render()
+      assert limits =~ "Projects"
+      assert limits =~ "2"
+      assert limits =~ "Use cases per project"
+      assert limits =~ "10"
+      assert limits =~ "1,000 per use case"
+      assert limits =~ "7 days"
+
+      # no self-serve control anywhere: the plan is set by the system actor
+      assert html =~ "Plans are not self-serve yet"
+      refute has_element?(view, "button[phx-click='change_plan']")
+    end
+
+    test "a paid organization shows its own numbers", %{conn: conn, user: user} do
+      org = Fixtures.team_org_fixture(%{user: user, slug: "paid-inc"})
+      Fixtures.set_plan(org, :pro)
+
+      {:ok, view, _html} = live(conn, ~p"/paid-inc/settings")
+
+      assert view |> element("#org-plan-badge") |> render() =~ "Pro"
+
+      limits = view |> element("#org-plan-limits") |> render()
+      assert limits =~ "90 days"
+      assert limits =~ "100,000 per use case"
+      assert limits =~ "included"
+
+      # The plan window and the payload window are two rules. Stored input/output expires at
+      # `received_at + payload_policy.retention_days` (default 30), so a bare "90 days" would
+      # promise 90 days of readable payloads that Pro does not get.
+      assert limits =~ "stored input/output 30 days by default"
+    end
+
+    test "the plan card carries the one-line retention rule", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/personal/settings")
+
+      assert view |> element("#org-plan-retention") |> render() =~
+               "Logs are kept for 7 days, and at most the most recent 1,000 per use case — " <>
+                 "whichever comes first (Free plan)."
+    end
+
+    test "the judge model field saves and clears", %{conn: conn, user: user} do
+      {:ok, view, html} = live(conn, ~p"/personal/settings")
+
+      assert html =~ "openai/gpt-4o-mini"
+
+      view
+      |> form("#org-judge-form", judge: %{"judge_model" => "openai/gpt-4.1-mini"})
+      |> render_submit()
+
+      assert render(view) =~ "Judge model saved"
+
+      assert {:ok, %{judge_model: "openai/gpt-4.1-mini"}} =
+               Accounts.personal_organization_for(user.id, actor: user)
+
+      view |> form("#org-judge-form", judge: %{"judge_model" => "  "}) |> render_submit()
+
+      assert {:ok, %{judge_model: nil}} =
+               Accounts.personal_organization_for(user.id, actor: user)
     end
   end
 

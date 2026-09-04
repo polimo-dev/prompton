@@ -44,6 +44,7 @@ defmodule PromptOn.Prompts.UseCase do
         :tags
       ]
 
+      validate PromptOn.Prompts.UseCase.Validations.WithinPlanLimit
       change PromptOn.Prompts.UseCase.Changes.CreateDefaultPrompt
     end
 

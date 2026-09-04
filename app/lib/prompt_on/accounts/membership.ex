@@ -24,8 +24,14 @@ defmodule PromptOn.Accounts.Membership do
     defaults [:read]
 
     create :add do
-      description "Creates the owner membership in the sign-up flow (system only)."
+      description """
+      Creates the owner membership in the sign-up flow (system only). Beyond the first member an
+      organization has to be on a paid plan (ADR 0010 §6.4) — see `Validations.WithinPlanLimit`
+      for why that does not break sign-up.
+      """
+
       accept [:organization_id, :user_id, :role]
+      validate PromptOn.Accounts.Membership.Validations.WithinPlanLimit
     end
 
     destroy :remove do

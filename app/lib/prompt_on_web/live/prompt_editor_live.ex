@@ -119,6 +119,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   alias PromptOnSDK.Template
   alias PromptOnWeb.EditorTestRun
   alias PromptOnWeb.ErrorText
+  alias PromptOnWeb.EvalsComponents
   alias PromptOnWeb.IntegrationComponents
   alias PromptOnWeb.ProviderCatalog
 
@@ -136,17 +137,22 @@ defmodule PromptOnWeb.PromptEditorLive do
     "newest" => "Newest",
     "context" => "Context"
   }
-  @tabs ~w(editor arena deployments)
+  @tabs ~w(editor arena deployments evals)
 
   @tab_labels %{
     "editor" => "Editor",
     "arena" => "Arena",
-    "deployments" => "Deployments"
+    "deployments" => "Deployments",
+    "evals" => "Evals"
   }
 
   # Only the default tab (editor) leaves the URL empty; the other tabs must ride along on every
   # patch link.
-  @sticky_tabs ~w(arena deployments)
+  @sticky_tabs ~w(arena deployments evals)
+
+  # The Evals tab's own query parameters (ADR 0010 §5.2). They are handed to
+  # `PromptOnWeb.EvalsPanel` as one map; the panel, not this module, decides what they mean.
+  @eval_params ~w(set rubric revise edit_rubric evaluate run env)
 
   @var_types ~w(string number boolean list map)
 
@@ -221,6 +227,9 @@ defmodule PromptOnWeb.PromptEditorLive do
            dep_live: nil,
            dep_revision: nil,
            dep_confirm: nil,
+           dep_scores: %{},
+           eval_params: %{},
+           env_slug: nil,
            prompt_versions: nil,
            version_index: %{}
          )
@@ -251,8 +260,28 @@ defmodule PromptOnWeb.PromptEditorLive do
      |> apply_variable(params["var"])
      |> apply_picker(params["models"], params["msort"])
      |> apply_deploy(params["deploy"])
-     |> apply_deployments_tab(params)}
+     |> apply_env_slug(params)
+     |> apply_deployments_tab(params)
+     |> apply_evals_tab(params)}
   end
+
+  # `?env=` belongs to the Deployments tab, and the Evals tab reuses it (ADR 0010 §5.2). Resolving
+  # it on **every** tab is what makes switching between the two keep the environment you were
+  # looking at; an absent or unknown slug stays nil, so the Editor and Arena tabs keep clean URLs.
+  defp apply_env_slug(socket, %{"env" => slug}) when is_binary(slug) do
+    case Enum.find(socket.assigns.envs, &(&1.slug == slug)) do
+      nil -> assign(socket, :env_slug, nil)
+      env -> assign(socket, :env_slug, env.slug)
+    end
+  end
+
+  defp apply_env_slug(socket, _params), do: assign(socket, :env_slug, nil)
+
+  # The Evals tab keeps its whole state in one map; the panel is a LiveComponent, so it reads them
+  # in `update/2` (the panel is only rendered while the tab is open, so nothing is loaded until
+  # then).
+  defp apply_evals_tab(socket, params),
+    do: assign(socket, :eval_params, Map.take(params, @eval_params))
 
   defp tab_param(%{"tab" => tab}) when tab in @tabs, do: tab
   defp tab_param(_params), do: hd(@tabs)
@@ -1554,6 +1583,22 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   # ---------------------------------------------------------------------------
+  # Messages
+
+  # The Evals tab polls its own runs while a batch is in flight (ADR 0010 §5.3). The timer lives in
+  # the LiveView process, so the tick lands here and is handed straight back to the component.
+  @impl Phoenix.LiveView
+  def handle_info({:evals_refresh, id}, socket) do
+    send_update(PromptOnWeb.EvalsPanel, id: id, refresh: :runs)
+    {:noreply, socket}
+  end
+
+  # The Evals panel is a LiveComponent, and a component's flash only reaches this tray when it also
+  # navigates. It therefore hands its messages over instead of putting them itself.
+  def handle_info({:evals_flash, kind, message}, socket),
+    do: {:noreply, put_flash(socket, kind, message)}
+
+  # ---------------------------------------------------------------------------
   # Async
 
   # The task key carries **which message the draft is for**: moving to another message's modal
@@ -2084,9 +2129,19 @@ defmodule PromptOnWeb.PromptEditorLive do
     |> ensure_prompt_versions()
     |> load_dep_history()
     |> assign_dep_revision(params["rev"])
+    |> load_dep_scores()
   end
 
   defp apply_deployments_tab(socket, _params), do: assign(socket, :dep_confirm, nil)
+
+  # The evaluated average of every revision on screen, in **one** query (ADR 0010 §2.7): the score
+  # is a relationship, never a column on `Deployment`, so `PromptOn.Deployments` does not learn
+  # that `PromptOn.Evals` exists. A revision nobody evaluated is simply missing from the map, and
+  # the badge then renders nothing.
+  defp load_dep_scores(socket) do
+    ids = Enum.map(socket.assigns.dep_history, & &1.id)
+    assign(socket, :dep_scores, PromptOn.Evals.scores_for_deployments(ids, scope(socket)))
+  end
 
   defp dep_env_param(socket, %{"env" => slug}),
     do: Enum.find(socket.assigns.envs, &(&1.slug == slug)) || default_dep_env(socket)
@@ -2306,7 +2361,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     query =
       [
         {"tab", "deployments"},
-        {"env", assigns.dep_env && assigns.dep_env.slug},
+        {"env", (assigns.dep_env && assigns.dep_env.slug) || assigns.env_slug},
         {"rev", assigns.dep_revision && to_string(assigns.dep_revision.revision)},
         {"deploy", if(assigns.deploy?, do: "1")},
         {"confirm", assigns.dep_confirm}
@@ -2525,6 +2580,20 @@ defmodule PromptOnWeb.PromptEditorLive do
         </div>
 
         <.deployments_tab :if={@tab == "deployments"} {assigns} />
+
+        <.live_component
+          :if={@tab == "evals"}
+          module={PromptOnWeb.EvalsPanel}
+          id="evals-panel"
+          org_slug={@org_slug}
+          project={@project}
+          organization={@organization}
+          use_case={@use_case}
+          envs={@envs}
+          current_user={@current_user}
+          deployments={@deployments || %{}}
+          params={@eval_params}
+        />
       </DS.screen>
 
       <.versions_drawer
@@ -2650,7 +2719,14 @@ defmodule PromptOnWeb.PromptEditorLive do
         version_index={@version_index}
         live?={live_revision?(@dep_revision, @dep_live)}
         committer={committer_label(@dep_revision, @current_user)}
-      />
+      >
+        <:score_badge>
+          <EvalsComponents.score_badge
+            id="pin-score"
+            run={Map.get(@dep_scores, @dep_revision.id)}
+          />
+        </:score_badge>
+      </.pin_card>
 
       <div id="history" style="display:flex;flex-direction:column;gap:7px;">
         <span class="mono-label">Revisions</span>
@@ -2670,7 +2746,14 @@ defmodule PromptOnWeb.PromptEditorLive do
               do: dep_path(assigns, %{"confirm" => deployment.id})
             )
           }
-        />
+        >
+          <:score_badge>
+            <EvalsComponents.score_badge
+              id={"revision-#{deployment.revision}-score"}
+              run={Map.get(@dep_scores, deployment.id)}
+            />
+          </:score_badge>
+        </.revision_row>
       </div>
 
       <IntegrationComponents.integration_section
@@ -2736,8 +2819,20 @@ defmodule PromptOnWeb.PromptEditorLive do
         patch: editor_path(assigns, tab: nil, v: assigns.selected_number)
       },
       %{id: "arena", label: @tab_labels["arena"], patch: editor_path(assigns, tab: "arena")},
-      %{id: "deployments", label: @tab_labels["deployments"], patch: dep_path(assigns, %{})}
+      %{id: "deployments", label: @tab_labels["deployments"], patch: dep_path(assigns, %{})},
+      %{id: "evals", label: @tab_labels["evals"], patch: evals_path(assigns)}
     ]
+  end
+
+  # The Evals tab link. It carries `?env=` when the URL named one, so coming from the Deployments
+  # tab lands on the same environment (ADR 0010 §5.2).
+  defp evals_path(assigns) do
+    query =
+      Enum.reject([{"tab", "evals"}, {"env", assigns.env_slug}], fn {_key, value} ->
+        is_nil(value)
+      end)
+
+    ~p"/#{assigns.org_slug}/#{assigns.project.slug}/use-cases/#{assigns.use_case.key}/prompt?#{query}"
   end
 
   # The header sub says only "how many of what exist, and what is running now".

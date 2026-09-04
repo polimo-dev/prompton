@@ -26,16 +26,22 @@ defmodule PromptOn.Observability.Generation do
   - `truncated?` = `stop_kind == :length` (**`tool_call` is not truncation**) -- the truncation
     rate, evaluators, and alerts share this definition.
   - `metadata` carries `model_used`/`upstream_provider`/`http_status` (§6.4; not columns).
-  - No destroy (the retention job deletes only payloads). Policy: an ApiKey with the `:logs` scope
-    may only run the `:ingest` action; members may only read.
+  - The only deletion is retention (ADR 0010 §3.2): the daily `:purge_over_retention` scheduled
+    action drops rows past the organization plan's `log_retention_days` or beyond its
+    `log_count_per_use_case` newest rows per use case key, through `destroy :purge` (which cascades
+    to `GenerationPayload`). It is a **sibling** of the payload purge, not a replacement: that one
+    is about a project's storage policy and deletes only the heavy side table. Policy: an ApiKey
+    with the `:logs` scope may only run the `:ingest` action; members may only read; both purge
+    actions are SystemActor only.
   """
 
   use Ash.Resource,
     otp_app: :prompton,
     domain: PromptOn.Observability,
-    fragments: [PromptOn.ProjectScoped]
+    fragments: [PromptOn.ProjectScoped],
+    extensions: [AshOban]
 
-  alias PromptOn.Observability.Generation.Changes
+  alias PromptOn.Observability.Generation.{Actions, Changes}
 
   @raw_string [allow_empty?: true, trim?: false]
 
@@ -68,6 +74,14 @@ defmodule PromptOn.Observability.Generation do
 
       index [:project_id, :trace_id], name: "generations_project_trace_index"
 
+      # The nightly retention count pass (`Actions.PurgeOverRetention`) walks `use_case_key` and
+      # then reads `(received_at desc, id desc)` within each key. Without this index every key of
+      # every tenant is a seq scan plus a sort over the hot ingest table. Built `concurrently`
+      # (ADR 0005) so the deploy that adds it does not lock `generations`.
+      index [:project_id, :use_case_key, {:desc, :received_at}, {:desc, :id}],
+        name: "generations_project_use_case_key_received_index",
+        concurrently: true
+
       index [:project_id, :end_user_ref, {:desc, :started_at}],
         name: "generations_project_end_user_started_index",
         where: "end_user_ref IS NOT NULL"
@@ -76,6 +90,21 @@ defmodule PromptOn.Observability.Generation do
         name: "generations_received_at_brin",
         using: "BRIN",
         all_tenants?: true
+    end
+  end
+
+  oban do
+    scheduled_actions do
+      # 03:40 -- thirty minutes after the payload purge (`GenerationPayload.:purge_expired`, 03:10),
+      # so most payload volume is already gone and the FK cascade has less to do.
+      schedule :purge_generations_over_retention, "40 3 * * *" do
+        action :purge_over_retention
+        queue :maintenance
+        worker_module_name PromptOn.Observability.Generation.Workers.PurgeOverRetention
+        list_tenants PromptOn.Observability.ProjectTenants
+        default_actor(%PromptOn.SystemActor{})
+        max_attempts 1
+      end
     end
   end
 
@@ -223,6 +252,32 @@ defmodule PromptOn.Observability.Generation do
       filter expr(end_user_ref == ^arg(:end_user_ref))
       prepare build(sort: [started_at: :desc, id: :desc])
     end
+
+    destroy :purge do
+      description """
+      Physical deletion of a log row, for retention only. Deleting the Generation cascades to its
+      `GenerationPayload` (`reference :generation, on_delete: :delete`). System actor only -- the
+      `:purge_over_retention` action and mix tasks. Members still cannot delete a log by hand.
+      """
+    end
+
+    action :purge_over_retention, :map do
+      description """
+      Deletes the tenant's logs that exceed the organization plan's retention rule
+      (`PromptOn.Entitlements`): older than `log_retention_days` (by the server-authoritative
+      `received_at`), or beyond the most recent `log_count_per_use_case` rows of a use case key.
+      Without a tenant it walks every project. Returns `%{by_age: n, by_count: m, plan: plan}`.
+      """
+
+      argument :batch_size, :integer, default: 5_000, constraints: [min: 1, max: 50_000]
+      argument :max_batches, :integer, default: 200, constraints: [min: 1]
+
+      # AshOban's generated worker always passes this, so the action must accept it or every
+      # scheduled run is a `NoSuchInput` error (same as `GenerationPayload.:purge_expired`).
+      argument :last_oban_attempt?, :boolean, default: false
+
+      run Actions.PurgeOverRetention
+    end
   end
 
   policies do
@@ -249,6 +304,15 @@ defmodule PromptOn.Observability.Generation do
 
     policy action(:record_playground) do
       description "Server-internal (arena) only -- only the SystemActor bypass above passes it."
+      forbid_if always()
+    end
+
+    policy action([:purge, :purge_over_retention]) do
+      description """
+      Retention deletion is the job's alone -- only the SystemActor bypass above passes it. Nobody
+      deletes a monitoring log by hand.
+      """
+
       forbid_if always()
     end
 

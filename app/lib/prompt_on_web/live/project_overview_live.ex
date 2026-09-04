@@ -9,6 +9,7 @@ defmodule PromptOnWeb.ProjectOverviewLive do
   | generations · errors · tokens · cost | `PromptOn.Observability.Stats.time_series/2` (`source: nil`: monitoring logs and arena alike) |
   | use case count and whether deployed | `PromptOn.Prompts.list_use_cases/1` + the live `Deployment` per environment |
   | live deployment count per environment | `PromptOn.Deployments.current_deployments_for_environment/2` |
+  | how long those logs live | `PromptOnWeb.SettingsComponents.retention_note/1` ← `PromptOn.Entitlements` |
 
   The period travels in the URL as `?period=24h\\|7d\\|30d` (CLAUDE.md zero-downtime deployment
   discipline). The segment definitions and number formatting (`compact/1` `cost_label/1`) are taken
@@ -22,6 +23,7 @@ defmodule PromptOnWeb.ProjectOverviewLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Deployments
+  alias PromptOn.Entitlements
   alias PromptOn.Observability.Stats
   alias PromptOn.Prompts
   alias PromptOnWeb.OrgUsageLive
@@ -222,6 +224,8 @@ defmodule PromptOnWeb.ProjectOverviewLive do
             icon="dollar"
           />
         </div>
+
+        <SC.retention_note id="overview-retention-note" plan={Entitlements.plan(@organization)} />
 
         <SC.setting_card
           id="overview-use-cases-card"

@@ -28,6 +28,8 @@ defmodule PromptOnWeb.OrgMembersLiveTest do
 
   test "a team organization shows every member's email and role", %{conn: conn, user: user} do
     org = Fixtures.team_org_fixture(%{user: user, slug: "acme-inc"})
+    # a second member is a paid-plan organization (ADR 0010 §6.4)
+    Fixtures.set_plan(org, :team)
     mate = Fixtures.user_fixture(%{email: "mate@example.com"})
 
     {:ok, _membership} =

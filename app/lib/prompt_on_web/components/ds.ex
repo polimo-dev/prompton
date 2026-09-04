@@ -1505,14 +1505,19 @@ defmodule PromptOnWeb.DS do
   Star rating (ui.jsx Stars). Given `event` it becomes clickable and sends 1..5 as
   `phx-value-star`.
 
-  **No screen uses this right now** — it is a library component kept for when the Evals screen
-  (plan.md §5.8) arrives. Do not attach it to a screen that has nowhere to store the rating.
+  Used by the Evals tab's calibration screen (`PromptOnWeb.EvalsComponents.sample_card/1`), which
+  identifies the row with an extra `phx-value-…` passed through `@rest` — the click writes the
+  score straight to the database. Do not attach it to a screen that has nowhere to store the
+  rating.
   """
   attr :value, :integer, default: 0
   attr :event, :string, default: nil
   attr :size, :integer, default: 16
   attr :target, :any, default: nil
   attr :class, :any, default: nil
+
+  attr :rest, :global,
+    doc: "goes on every star button — this is how the clicked row is identified (`phx-value-…`)"
 
   def stars(assigns) do
     ~H"""
@@ -1527,6 +1532,7 @@ defmodule PromptOnWeb.DS do
         phx-value-star={n}
         title={"#{n}"}
         style={is_nil(@event) && "cursor:default;"}
+        {@rest}
       >
         <DSIcons.icon name="star" size={@size} filled={n <= @value} />
       </button>

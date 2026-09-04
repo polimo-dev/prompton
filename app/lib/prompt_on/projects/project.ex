@@ -31,6 +31,7 @@ defmodule PromptOn.Projects.Project do
       description "Create a project and its default `production`/`staging` envs in one transaction."
       accept [:organization_id, :name, :slug, :timezone, :payload_policy]
       validate PromptOn.Projects.Project.Validations.SlugNotReserved
+      validate PromptOn.Projects.Project.Validations.WithinPlanLimit
       change PromptOn.Projects.Project.Changes.CreateDefaultEnvironments
     end
 

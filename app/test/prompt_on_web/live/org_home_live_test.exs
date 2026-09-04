@@ -284,10 +284,27 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       assert has_element?(view, "#new-org-form")
     end
 
+    test "a free account is told why it cannot create one", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/personal?new_org=1")
+
+      html =
+        view
+        |> form("#new-org-form", organization: %{"name" => "Note Mesh", "slug" => ""})
+        |> render_submit()
+
+      assert html =~ "team organizations are a Team plan feature"
+      # the modal stays open with what was typed, so nothing is lost
+      assert has_element?(view, "#new-org-form")
+    end
+
     test "creating goes to the new organization's home and the creator is the owner", %{
       conn: conn,
       user: user
     } do
+      # team organizations are a paid feature (ADR 0010 §6.3); the refusal for a free account is
+      # `PromptOn.EntitlementsEnforcementTest`
+      Fixtures.set_plan(Fixtures.organization_for(user), :team)
+
       {:ok, view, _html} = live(conn, ~p"/personal?new_org=1")
 
       view

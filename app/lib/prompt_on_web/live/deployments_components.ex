@@ -133,12 +133,17 @@ defmodule PromptOnWeb.DeploymentsComponents do
   @doc """
   Everything one revision pins: the model, a version per prompt name, params and provider options.
   With `live?` a `live` badge is attached to the header.
+
+  The `score_badge` slot is where the Evals tab hangs this revision's evaluated average
+  (ADR 0010 §5.4). It is a slot rather than an attribute so that this module keeps knowing nothing
+  about `PromptOn.Evals`; a revision nobody has evaluated renders an empty slot, not a dash.
   """
   attr :deployment, :map, required: true
   attr :model_index, :map, required: true
   attr :version_index, :map, required: true
   attr :live?, :boolean, default: false
   attr :committer, :string, default: "—"
+  slot :score_badge
 
   def pin_card(assigns) do
     assigns =
@@ -159,6 +164,7 @@ defmodule PromptOnWeb.DeploymentsComponents do
           {num(@deployment.revision)}
         </span>
         <DS.badge :if={@live?} id="pin-live" tone={:ok} mono style="font-size:10px;">live</DS.badge>
+        {render_slot(@score_badge)}
         <span style="flex:1;"></span>
         <span style="font-size:12.5px;color:var(--tx-3);overflow-wrap:anywhere;">{@committer}</span>
         <span class="font-mono" style="font-size:12px;color:var(--tx-3);white-space:nowrap;">
@@ -241,7 +247,10 @@ defmodule PromptOnWeb.DeploymentsComponents do
     end
   end
 
-  @doc "Revision history row: select (patch) and rollback (confirmation modal patch)."
+  @doc """
+  Revision history row: select (patch) and rollback (confirmation modal patch). The `score_badge`
+  slot carries this revision's evaluated average when it has one (ADR 0010 §5.4).
+  """
   attr :deployment, :map, required: true
   attr :model_index, :map, required: true
   attr :live?, :boolean, default: false
@@ -249,6 +258,7 @@ defmodule PromptOnWeb.DeploymentsComponents do
   attr :select_patch, :string, required: true
   attr :rollback_patch, :string, default: nil
   attr :committer, :string, default: "—"
+  slot :score_badge
 
   def revision_row(assigns) do
     ~H"""
@@ -273,6 +283,7 @@ defmodule PromptOnWeb.DeploymentsComponents do
         {num(@deployment.revision)}
       </.link>
       <DS.badge :if={@live?} tone={:ok} mono style="font-size:10px;">live</DS.badge>
+      {render_slot(@score_badge)}
       <span
         class="font-mono"
         style="font-size:12px;color:var(--tx-2);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;"
