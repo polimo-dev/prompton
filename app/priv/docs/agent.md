@@ -12,9 +12,44 @@ This page is the whole contract. Everything an agent needs to move an app's LLM 
 
 ### What to tell the human
 
-Step 1 of the journey below is to explain PromptOn in a few sentences. Paraphrase this in the human's own vocabulary — do not read the bullet list above out loud, and do not paste this block verbatim:
+Step 1 of the journey is to explain PromptOn the way a colleague would: with code, in the human's own vocabulary. Use the project's language and provider once you know them; until then the Python example below is fine. Keep the structure, paraphrase the words, do not paste this block verbatim.
 
-> PromptOn is a control plane for the prompts and models your app uses. Every place your code calls an LLM becomes a **use case**, and for each use case and environment PromptOn holds one **pin**: a prompt version, one model, and its parameters. Your app fetches that configuration and then calls the provider itself, with your own provider key and your own HTTP client — PromptOn is config-fetch, **not a proxy**, so it is never in the request path and never sees your key. After each call your app sends back a **monitoring log**, and those logs are how you see cost, latency, error rate and stop reasons per use case. When a new model comes out you point a staging pin at it, watch it on real traffic in the logs, and then move the production pin — no redeploy, no code change, and a rollback is one command. Your prompts end up versioned in PromptOn; your provider keys, your HTTP calls and your application logic stay exactly where they are.
+**One line.** PromptOn is where your prompts and model settings live, outside your code.
+
+**Today.** The prompt is usually baked into the call:
+
+```python
+response = openai.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "system", "content": "You are a friendly support agent..."}],
+)
+```
+
+Change one word of that prompt and you edit code, deploy, restart. Switching the model is the same story.
+
+**With PromptOn.** The prompt and the model choice live in PromptOn; the app fetches them and uses them:
+
+```python
+config = prompton.resolve("support_reply", variables={"question": question})  # prompt + model + params
+response = openai.chat.completions.create(
+    model=config.model,          # <- comes from PromptOn
+    messages=config.messages,    # <- the rendered prompt
+)
+```
+
+To change the prompt you deploy a new version in the PromptOn web app; the app picks it up on its next config fetch (every 10 seconds by default). No code change, no redeploy. After each call the app sends a monitoring log (latency, cost, errors), so models can be compared on real traffic before the pin moves.
+
+**The point that matters most: PromptOn is not in the request path.**
+
+```text
+Proxy tools (not PromptOn):  your app -> proxy service -> OpenAI
+                             your key travels through someone else's server; if it dies, your app dies
+
+PromptOn:                    your app --fetch config--> PromptOn
+                             your app --the LLM call--> OpenAI  (your key, directly)
+```
+
+PromptOn only tells your app what to use. The LLM call is still made by your app, with your own key. So your provider key is never exposed to PromptOn, no latency is added to responses, your retries, parsing and error handling stay exactly as they are, and if PromptOn is unreachable the app keeps running on the last configuration it fetched.
 
 ## 1. The journey
 
@@ -22,7 +57,7 @@ Seven steps, matching the seven numbered lines of the prompt the human pasted. W
 
 ### Step 1 — tell the human what PromptOn is
 
-Before touching the filesystem, before installing anything: three to five sentences from the script in §0. Then go straight on to step 2; this step has no stop.
+Before touching the filesystem, before installing anything: the one-line definition, the before-and-after code, and the not-a-proxy point from the script in §0 — one screenful, not an essay. Then go straight on to step 2; this step has no stop.
 
 ### Step 2 — confirm you can see the project's code
 
