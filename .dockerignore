@@ -1,5 +1,5 @@
-# Build context is the repository root (`docker build -f app/Dockerfile .`) because the server
-# depends on the SDK by path. Keep the context to what the Dockerfile actually COPYs.
+# Build context is the repository root (`docker build -f app/Dockerfile .`). Keep the context to
+# what the Dockerfile actually COPYs.
 # Patterns without `**` match at the root only, so `app/priv/docs/agent.md` (served at runtime) stays in.
 .git
 .github

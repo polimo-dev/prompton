@@ -7,13 +7,11 @@ WORKDIR /app
 
 RUN mix local.hex --force && mix local.rebar --force
 
-# The server uses the SDK as a path dependency ({:prompton_sdk, path: "../sdk/elixir"}) — the build
-# context is the repo root.
-COPY sdk/elixir /sdk/elixir
+# The build context is the repository root; only app/ is copied. The Elixir SDK is a git dependency
+# (prompton_sdk, pinned to a commit in mix.exs) fetched by mix deps.get.
 COPY app/mix.exs app/mix.lock ./
 COPY app/config config
-RUN sed -i 's#path: "../sdk/elixir"#path: "/sdk/elixir"#' mix.exs \
-  && mix deps.get --only prod && mix deps.compile
+RUN mix deps.get --only prod && mix deps.compile
 
 COPY app/assets assets
 COPY app/lib lib

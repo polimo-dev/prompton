@@ -269,7 +269,7 @@ Use the official SDK when one exists for the project's language. Today exactly o
 
 | language | status | what to do |
 |---|---|---|
-| **Elixir** | **Written, in the repository — not on Hex yet** — `prompton_sdk`, module `PromptOnSDK` (Apache-2.0, repository [prompton-elixir](https://github.com/polimo-dev/prompton-elixir)) | check `mix hex.info prompton_sdk` first. If it resolves, `{:prompton_sdk, "~> 0.1"}`. If it does not, depend on the repository: `{:prompton_sdk, github: "polimo-dev/prompton", sparse: "sdk/elixir"}`. Either way, start `{PromptOnSDK, []}` in the supervision tree |
+| **Elixir** | **Written, in the repository — not on Hex yet** — `prompton_sdk`, module `PromptOnSDK` (Apache-2.0, repository [prompton-elixir](https://github.com/polimo-dev/prompton-elixir)) | check `mix hex.info prompton_sdk` first. If it resolves, `{:prompton_sdk, "~> 0.1"}`. If it does not, depend on the repository: `{:prompton_sdk, github: "polimo-dev/prompton-elixir"}`. Either way, start `{PromptOnSDK, []}` in the supervision tree |
 | Python | Planned, **not published** | hand-written client (§1, step 6c; §1.9) |
 | Node.js / TypeScript | Planned, **not published** | hand-written client |
 | Go | Planned, **not published** | hand-written client |

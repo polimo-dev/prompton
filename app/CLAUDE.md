@@ -16,12 +16,12 @@ written in English.
   `lib/prompt_on/<domain>/<resource>/{changes,validations,preparations,calculations}/`.
 - Public API controllers: `lib/prompt_on_web/controllers/api/v1/`; plugs:
   `lib/prompt_on_web/plugs/`.
-- The SDK is a separate mix project, `../sdk/elixir` (hex `prompton_sdk`, module `PromptOnSDK`). The
-  server reuses its pure modules (Resolver/Template/StopKind/SnapshotData) through
-  `{:prompton_sdk, path: "../sdk/elixir"}`.
+- The Elixir SDK is its own repository, `polimo-dev/prompton-elixir` (hex `prompton_sdk`, module
+  `PromptOnSDK`). The server reuses its pure modules (Resolver/Template/StopKind/SnapshotData) through
+  a git dependency pinned to a commit in `mix.exs` (`{:prompton_sdk, git: …, ref: …}`); bump the
+  ref deliberately and run the contract test (`test/prompt_on/contract/`).
 - **License**: the repo is FSL-1.1-ALv2 (`../LICENSE`, Licensor Polimo — Apache-2.0 after 2 years);
-  only `../sdk/elixir` is Apache-2.0 (`../sdk/elixir/LICENSE`; the hex package metadata says the
-  same). Do not put license headers in new files. The public repo/image are
+  the SDK repositories are Apache-2.0. Do not put license headers in new files. The public repo/image are
   `github.com/polimo-dev/prompton` and `ghcr.io/polimo-dev/prompton` (`.github/workflows/`).
 
 ## Ash conventions (inherited from HeyDiary, plan.md §5.0)

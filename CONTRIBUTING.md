@@ -21,8 +21,6 @@ This appends a `Signed-off-by: Your Name <you@example.com>` line using your git 
 
 - Contributions to this repository are licensed under its license, the
   **Functional Source License, Version 1.1, Apache 2.0 Future License** ([LICENSE](LICENSE)).
-- Contributions under `sdk/elixir` are licensed under the **Apache License 2.0**
-  ([sdk/elixir/LICENSE](sdk/elixir/LICENSE)).
 
 New files do not need license headers.
 
@@ -33,7 +31,6 @@ then make sure the same checks CI runs pass locally:
 
 ```sh
 cd app && mix precommit      # compile --warnings-as-errors, format, credo --strict, ash.codegen --check, test
-cd ../sdk/elixir && mix test
 ```
 
 Migrations are generated with `mix ash.codegen <name>` and must be expand/contract safe

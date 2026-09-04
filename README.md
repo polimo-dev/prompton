@@ -26,7 +26,6 @@ CLI at [polimo-dev/prompton-cli](https://github.com/polimo-dev/prompton-cli).
 | path | what |
 |---|---|
 | `app/` | The Phoenix + Ash application: web UI, runtime API (`/api/v1/snapshot`, `/resolve`, `/generations`), management API (`/api/v1/me`, `/api/v1/orgs/…`), device login. Conventions in `app/CLAUDE.md` and `app/AGENTS.md`. |
-| `sdk/elixir` | The Elixir SDK (hex `prompton_sdk`, module `PromptOnSDK`). The server reuses its pure modules by path. **Separately licensed (Apache-2.0).** |
 
 ## Self-hosting
 
@@ -75,11 +74,12 @@ mix phx.server           # http://localhost:4000 — sign-in codes land in /dev/
 mix test
 mix precommit            # compile --warnings-as-errors, format, credo --strict, ash.codegen --check, test
 
-cd ../sdk/elixir && mix test
 ```
 
-The server depends on the SDK by path (`{:prompton_sdk, path: "../sdk/elixir"}`), so the Docker
-build context is the repository root: `docker build -f app/Dockerfile .`. CI (`.github/workflows/ci.yml`)
+The Elixir SDK (`prompton_sdk`, module `PromptOnSDK`) lives in its own repository,
+[prompton-elixir](https://github.com/polimo-dev/prompton-elixir); the server depends on it as a git
+dependency pinned to a commit in `app/mix.exs`. The Docker build context is the repository root:
+`docker build -f app/Dockerfile .`. CI (`.github/workflows/ci.yml`)
 runs the same checks; `image.yml` publishes the image on pushes to `main` and on `v*` tags.
 
 ## Embedding
@@ -136,8 +136,9 @@ license of the directory they land in.
 - This repository is licensed under the **Functional Source License, Version 1.1, Apache 2.0 Future
   License (FSL-1.1-ALv2)** — see [LICENSE](LICENSE). Each version becomes Apache-2.0 two years after
   its release. Licensor: Polimo.
-- `sdk/elixir` (the Elixir SDK) is licensed separately under the **Apache License 2.0** — see
-  [sdk/elixir/LICENSE](sdk/elixir/LICENSE) — so apps can depend on it without any FSL condition.
+- The SDKs live in their own repositories ([prompton-elixir](https://github.com/polimo-dev/prompton-elixir)
+  and the other `prompton-<language>` repositories) under the **Apache License 2.0**, so apps can
+  depend on them without any FSL condition.
 
 ## Trademark
 
