@@ -4,11 +4,11 @@ PromptOn is a **control plane for an app's LLM prompts**. For every use case (on
 and every environment it holds one **pin** — prompt version(s) + one model + params — and the app
 fetches that pin and calls the provider itself.
 
-- **Config-fetch, not a proxy.** The app reads its pin (`GET /api/v1/snapshot`, cached and polled
-  with ETags, or `POST /api/v1/resolve`) and then calls the LLM provider with its **own** key and its
-  **own** HTTP client. PromptOn is never in the request path and never sees the provider key; an
-  outage costs the app nothing but fresher config.
-- **Monitoring logs.** After each provider call the app sends a batched `POST /api/v1/generations`
+- **Config-fetch, not a proxy.** The app reads its pin (`GET /api/v1/use-cases`, cached and polled
+  with ETags, or `POST /api/v1/use-cases/:key/prompt`) and then calls the LLM provider with its
+  **own** key and its **own** HTTP client. PromptOn is never in the request path and never sees the
+  provider key; an outage costs the app nothing but fresher config.
+- **Monitoring logs.** After each provider call the app sends a batched `POST /api/v1/logs`
   (successes and failures) — model, prompt version, tokens, cost, latency, input/output.
 - **Change without deploying.** Prompt versions are immutable, a deployment revision is a pin, and
   rollback is re-pinning a previous revision. Compare candidates side by side in the arena first.
@@ -25,7 +25,7 @@ CLI at [polimo-dev/prompton-cli](https://github.com/polimo-dev/prompton-cli).
 
 | path | what |
 |---|---|
-| `app/` | The Phoenix + Ash application: web UI, runtime API (`/api/v1/snapshot`, `/resolve`, `/generations`), management API (`/api/v1/me`, `/api/v1/orgs/…`), device login. Conventions in `app/CLAUDE.md` and `app/AGENTS.md`. |
+| `app/` | The Phoenix + Ash application: web UI, runtime API (`/api/v1/use-cases`, `/use-cases/:key/prompt`, `/logs`), management API (`/api/v1/me`, `/api/v1/orgs/…`), device login. Conventions in `app/CLAUDE.md` and `app/AGENTS.md`. |
 
 ## Self-hosting
 
