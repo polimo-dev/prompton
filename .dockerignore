@@ -3,6 +3,7 @@
 # Patterns without `**` match at the root only, so `app/priv/docs/agent.md` (served at runtime) stays in.
 .git
 .github
+.worktrees
 **/.claude
 **/.omc
 **/.DS_Store
@@ -11,6 +12,8 @@
 README.md
 CONTRIBUTING.md
 LICENSE
+Makefile
+scripts
 
 # Build output, dependencies, crash dumps, secrets
 **/_build

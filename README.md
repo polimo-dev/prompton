@@ -26,6 +26,63 @@ CLI at [polimo-dev/prompton-cli](https://github.com/polimo-dev/prompton-cli).
 | path | what |
 |---|---|
 | `app/` | The Phoenix + Ash application: web UI, runtime API (`/api/v1/use-cases`, `/use-cases/:key/prompt`, `/logs`), management API (`/api/v1/me`, `/api/v1/orgs/…`), device login. Conventions in `app/CLAUDE.md` and `app/AGENTS.md`. |
+| `scripts/`, `Makefile` | Worktree lifecycle helpers and the primary-only dev deployment command. |
+| `.worktrees/` | Additional Git checkouts, ignored by Git and Docker. The primary checkout stays in place. |
+
+## Worktrees
+
+The existing checkout (`~/ws/prompton` locally) remains the **primary checkout**, matching
+HeyDiary's layout. Additional worktrees live under `.worktrees/<name>`; this is not a bare-repo
+migration. `app/` and the separate SDK, CLI, home, docs and admin repositories stay where they are.
+
+Run these commands from the primary repository root:
+
+```sh
+make worktree name=prompt-editor          # new branch from local main
+make worktree name=fix-editor from=main   # choose a starting branch, tag or commit
+make worktree name=existing-branch       # reuse an existing local branch unchanged
+make worktree-list
+make worktree-rm name=prompt-editor       # remove only the worktree; keep its branch
+```
+
+Names may include slashes, such as `name=feature/prompt-editor`. For an existing branch, `from`
+is ignored. New worktrees start from committed history: uncommitted primary edits and ignored
+files (including `.env`, local agent notes, dependencies and build artifacts) are not copied.
+The helpers reject linked-checkout lifecycle commands, invalid paths and symlinked destinations.
+
+### Working in a checkout
+
+- Each checkout owns its own `app/deps/`, `app/_build/` and generated assets. Run `mix deps.get`
+  from its `app/` directory, then the usual setup/check commands as needed. Do not symlink these
+  directories to the primary checkout; branches can have different dependency locks and code.
+- Local environment files are optional; dev/test have default secrets. Add only the local values
+  you need, rather than copying production credentials. Local private agent notes do not follow
+  Git either; `app/AGENTS.md` and `app/CLAUDE.md` remain available in every checkout.
+- Worktrees isolate files, **not the database**. The default dev database is still `prompton_dev`;
+  `mix setup` applies migrations and seeds there. Do not run conflicting schema work against that
+  shared database. `PTN_DATABASE_URL` currently overrides the database only in production mode.
+- For simultaneous local servers, use distinct ports, e.g. `PORT=4101 mix phx.server`. For
+  simultaneous test runs, use distinct partitions, e.g. `MIX_TEST_PARTITION=_editor mix test`
+  (database `prompton_test_editor`) or `MIX_TEST_PARTITION=_editor mix precommit`.
+- Git and ripgrep skip `.worktrees/`. Other recursive tools need an explicit exclusion to avoid
+  searching every checkout. Docker excludes worktrees from the root build context too.
+- Removal uses native `git worktree remove` without force: modified, untracked or locked worktrees
+  are refused. Ignored files such as `.env` and build output **are removed**, so save anything you
+  need first. The primary checkout is never a removal target, and branches are not deleted.
+- Once these tooling changes are committed, new worktrees contain the same root Makefile. Until
+  then, run lifecycle commands from the primary checkout; uncommitted tooling does not follow Git.
+
+### Dev deployment
+
+Merge the intended changes into the primary checkout before running `make dev-deploy` there.
+The command refuses linked worktrees, builds with the repository root as Docker context, inspects
+the resulting image, and rolls only the `prompton` server Deployment in the `prompton` namespace.
+Docker and Kubernetes are explicitly pinned to the `orbstack` context; nothing is pushed or sent
+to production. The landing/docs/admin deployments are separate and are not changed by this command.
+Manifests remain in the deployment repository (`deployment/macmini/prompton/`).
+
+`make test-worktrees` checks lifecycle/path safety and deployment ordering in disposable Git
+repositories with Docker/Kubernetes mocked; it never deploys anything.
 
 ## Self-hosting
 

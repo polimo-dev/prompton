@@ -15,6 +15,13 @@ env:
   OTP_VERSION: "29"
 
 jobs:
+  worktrees:
+    name: Worktree tooling
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test-worktrees
+
   app:
     name: app
     runs-on: ubuntu-24.04
@@ -58,4 +65,3 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
       - run: mix test
-

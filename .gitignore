@@ -24,3 +24,6 @@ app/priv/plts/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+
+# Linked checkouts (see README "Worktrees")
+/.worktrees/
