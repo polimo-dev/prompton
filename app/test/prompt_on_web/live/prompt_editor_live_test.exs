@@ -31,6 +31,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   alias PromptOn.Deployments
   alias PromptOn.EvalsFixtures
   alias PromptOn.Fixtures
+  alias PromptOn.Observability.AIUsage
   alias PromptOn.Prompts
 
   # The pin label helpers are pure functions used by the hub's Deployments tab
@@ -2808,6 +2809,41 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert render(view) =~ "Instructions written by the AI"
     end
 
+    test "records each generated draft under its use case before the user applies it", %{
+      conn: conn,
+      user: user,
+      project: project,
+      use_case: use_case
+    } do
+      select_draft_model(user)
+
+      PromptOn.LLM.Fake.set_response(%{
+        content: "Instructions written by the AI",
+        cost_usd: 0.025,
+        usage: %{input_tokens: 100, output_tokens: 40}
+      })
+
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, ai: 0))
+      view |> element("#ai-generate") |> render_click()
+      render_async(view)
+
+      assert [usage] = Ash.read!(AIUsage, Fixtures.scope(project))
+      assert usage.operation == :draft
+      assert usage.use_case_key == use_case.key
+      assert usage.model == "openai/o4-mini"
+      assert usage.input_tokens == 100
+      assert usage.output_tokens == 40
+      assert Decimal.equal?(usage.cost_usd, Decimal.new("0.025"))
+
+      view |> element("#ai-regenerate") |> render_click()
+      render_async(view)
+
+      usages = Ash.read!(AIUsage, Fixtures.scope(project))
+      assert length(usages) == 2
+      cost = Enum.reduce(usages, Decimal.new(0), &Decimal.add(&1.cost_usd, &2))
+      assert Decimal.equal?(cost, Decimal.new("0.05"))
+    end
+
     test "an unset model disables drafts and forged requests until a model is selected", %{
       conn: conn,
       user: user,
@@ -2826,6 +2862,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       render_async(view)
       refute_received {:ai_draft_request, _request}
       refute has_element?(view, "#ai-result")
+      assert Ash.read!(AIUsage, Fixtures.scope(project)) == []
 
       select_draft_model(user)
       {:ok, enabled_view, _html} = live(conn, hub_path(project, use_case, ai: 0))
@@ -2967,6 +3004,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       render_async(view)
 
       assert has_element?(view, "#ai-no-key")
+      assert Ash.read!(AIUsage, Fixtures.scope(project)) == []
 
       assert has_element?(
                view,

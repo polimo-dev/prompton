@@ -100,6 +100,16 @@ written in English.
   and the ingest endpoint is unchanged — PromptOn trims, it never rejects a log for being over quota.
   A retention query that walks a new column needs a matching `custom_indexes` entry on Generation
   (`concurrently: true`, ADR 0005) — `generations` is the hot ingest table.
+- **Organization Usage includes authoring costs**: `Observability.AIUsage` is one metadata-only
+  row per completed Draft or Evaluation provider call. `LLM.complete/2` records it before callers
+  parse or apply the answer, using `usage: %{use_case: use_case, operation: :draft | :evaluation}`.
+  Repeated calls append even when calibration scores are overwritten. Arena already records a
+  Generation and must not attach this option. AI usage never consumes monitoring retention quota.
+  `Observability.Usage.for_project/2` combines both sources in one SQL snapshot, after the caller
+  authorizes the project. Log counts/errors/tokens describe monitoring and Arena; costs include
+  Draft and Evaluation too. Nil cost remains unknown. Never sum EvaluationRun or CalibrationScore
+  costs into current usage: their recoverable historical costs were snapshotted at migration.
+  Project names on the Usage screen toggle the use-case breakdown; they do not navigate away.
 - **A plan gate is a `validate` module on the write action** (`Project.:create`, `UseCase.:define`,
   `Organization.:create`, `Membership.:add`). A team organization inherits its creator's plan in
   `Organization.Changes.AddCreatorAsOwner`, because the member limit reads the *new* row.

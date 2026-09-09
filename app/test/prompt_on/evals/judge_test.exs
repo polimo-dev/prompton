@@ -6,6 +6,7 @@ defmodule PromptOn.Evals.JudgeTest do
   import PromptOn.Fixtures
 
   alias PromptOn.Evals.{Calibration, Judge}
+  alias PromptOn.Observability.AIUsage
 
   setup do
     on_exit(&PromptOn.LLM.Fake.reset/0)
@@ -136,6 +137,8 @@ defmodule PromptOn.Evals.JudgeTest do
 
       assert {:error, :no_provider_key} =
                Judge.draft_rubric(use_case, [sample(1, 5)], judge_opts(project))
+
+      assert Ash.read!(AIUsage, scope(project)) == []
     end
 
     test "rejects a direct call when the organization has no selected evaluation model" do
@@ -152,6 +155,76 @@ defmodule PromptOn.Evals.JudgeTest do
                Judge.draft_rubric(use_case, [sample(1, 5)], judge_opts(project))
 
       refute_received :unexpected_judge_call
+      assert Ash.read!(AIUsage, scope(project)) == []
+    end
+  end
+
+  describe "usage accounting" do
+    test "attributes rubric drafts, revisions and scores to their use case", %{
+      project: project,
+      use_case: use_case
+    } do
+      rubric = rubric_fixture(use_case)
+
+      PromptOn.LLM.Fake.set_response(%{
+        content: rubric_answer_json(),
+        cost_usd: 0.02,
+        usage: %{input_tokens: 120, output_tokens: 30}
+      })
+
+      assert {:ok, _criteria, _usage} =
+               Judge.draft_rubric(use_case, [sample(1, 5)], judge_opts(project))
+
+      assert {:ok, _criteria, _usage} =
+               Judge.revise_rubric(
+                 use_case,
+                 rubric,
+                 [sample(1, 5)],
+                 "Be stricter",
+                 judge_opts(project)
+               )
+
+      PromptOn.LLM.Fake.set_response(%{
+        content: Jason.encode!(%{"score" => 4, "rationale" => "level match"}),
+        cost_usd: 0.01,
+        usage: %{input_tokens: 60, output_tokens: 10}
+      })
+
+      assert {:ok, %{score: 4}} =
+               Judge.score_sample(use_case, rubric, "in", "out", judge_opts(project))
+
+      usages = Ash.read!(AIUsage, scope(project))
+
+      assert length(usages) == 3
+      assert Enum.all?(usages, &(&1.operation == :evaluation))
+      assert Enum.all?(usages, &(&1.use_case_key == use_case.key))
+      assert Enum.all?(usages, &(&1.model == "openai/gpt-4o-mini"))
+      assert Enum.sum(Enum.map(usages, & &1.input_tokens)) == 300
+      assert Enum.sum(Enum.map(usages, & &1.output_tokens)) == 70
+
+      cost = Enum.reduce(usages, Decimal.new(0), &Decimal.add(&1.cost_usd, &2))
+      assert Decimal.equal?(cost, Decimal.new("0.05"))
+    end
+
+    test "keeps paid usage when rubric or score parsing rejects the answer", %{
+      project: project,
+      use_case: use_case
+    } do
+      rubric = rubric_fixture(use_case)
+      PromptOn.LLM.Fake.set_response(%{content: "not JSON", cost_usd: 0.03})
+
+      assert {:error, {:unparsable, _raw}} =
+               Judge.draft_rubric(use_case, [sample(1, 5)], judge_opts(project))
+
+      assert {:error, {:unparsable, _raw}} =
+               Judge.revise_rubric(use_case, rubric, [sample(1, 5)], nil, judge_opts(project))
+
+      assert {:error, {:unparsable, _raw}} =
+               Judge.score_sample(use_case, rubric, "in", "out", judge_opts(project))
+
+      usages = Ash.read!(AIUsage, scope(project))
+      assert length(usages) == 3
+      assert Enum.all?(usages, &Decimal.equal?(&1.cost_usd, Decimal.new("0.03")))
     end
   end
 

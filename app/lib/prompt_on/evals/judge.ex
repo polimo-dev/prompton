@@ -141,7 +141,7 @@ defmodule PromptOn.Evals.Judge do
       %{role: :user, content: samples_block(use_case, samples)}
     ]
 
-    with {:ok, outcome} <- complete(messages, @rubric_params, opts) do
+    with {:ok, outcome} <- complete(use_case, messages, @rubric_params, opts) do
       parse_criteria(outcome)
     end
   end
@@ -166,7 +166,7 @@ defmodule PromptOn.Evals.Judge do
       %{role: :user, content: preface <> samples_block(use_case, samples)}
     ]
 
-    with {:ok, outcome} <- complete(messages, @rubric_params, opts) do
+    with {:ok, outcome} <- complete(use_case, messages, @rubric_params, opts) do
       parse_criteria(outcome)
     end
   end
@@ -196,7 +196,7 @@ defmodule PromptOn.Evals.Judge do
       %{role: :user, content: user}
     ]
 
-    with {:ok, outcome} <- complete(messages, @score_params, opts) do
+    with {:ok, outcome} <- complete(use_case, messages, @score_params, opts) do
       parse_score(outcome)
     end
   end
@@ -269,7 +269,7 @@ defmodule PromptOn.Evals.Judge do
   # ---------------------------------------------------------------------------
   # Calling
 
-  defp complete(messages, params, opts) do
+  defp complete(use_case, messages, params, opts) do
     with :ok <- organization_selected?(Keyword.get(opts, :organization_id)),
          {:ok, model} <- selected_model(Keyword.get(opts, :model)) do
       request = %{
@@ -281,7 +281,8 @@ defmodule PromptOn.Evals.Judge do
 
       PromptOn.LLM.complete(request,
         organization_id: Keyword.fetch!(opts, :organization_id),
-        receive_timeout: Keyword.get(opts, :receive_timeout, @default_receive_timeout)
+        receive_timeout: Keyword.get(opts, :receive_timeout, @default_receive_timeout),
+        usage: %{use_case: use_case, operation: :evaluation}
       )
     end
   end

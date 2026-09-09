@@ -16,6 +16,10 @@ defmodule PromptOn.Observability do
   end
 
   resources do
+    resource PromptOn.Observability.AIUsage do
+      define :record_ai_usage, action: :record
+    end
+
     resource PromptOn.Observability.Generation do
       define :ingest_generation, action: :ingest
       define :get_generation, action: :read, get_by: [:id], not_found_error?: false
