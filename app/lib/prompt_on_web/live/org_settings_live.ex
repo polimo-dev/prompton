@@ -420,7 +420,6 @@ defmodule PromptOnWeb.OrgSettingsLive do
       <DS.screen
         id="org-settings-screen"
         title="Organization settings"
-        sub={Layouts.org_label(@organization)}
         max_w={880}
         tabs={tabs(@org_slug)}
         active_tab={@tab}

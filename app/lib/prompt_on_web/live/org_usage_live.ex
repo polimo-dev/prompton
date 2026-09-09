@@ -258,7 +258,6 @@ defmodule PromptOnWeb.OrgUsageLive do
       <DS.screen
         id="org-usage-screen"
         title="Usage"
-        sub={Layouts.org_label(@organization)}
         max_w={980}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />

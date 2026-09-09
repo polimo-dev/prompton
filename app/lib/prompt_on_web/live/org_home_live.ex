@@ -51,7 +51,7 @@ defmodule PromptOnWeb.OrgHomeLive do
     {:ok,
      socket
      |> assign(
-       page_title: Layouts.org_label(socket.assigns.organization),
+       page_title: "Projects · #{Layouts.org_label(socket.assigns.organization)}",
        setup_dismissed?: false,
        setup_form: setup_form(),
        org_form: nil
@@ -307,10 +307,10 @@ defmodule PromptOnWeb.OrgHomeLive do
     >
       <DS.screen
         id="org-home-screen"
-        title={Layouts.org_label(@organization)}
-        sub={projects_sub(@organization)}
+        title="Projects"
         max_w={900}
       >
+        <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <:actions>
           <DS.btn_link
             id="new-org-btn"
@@ -469,9 +469,6 @@ defmodule PromptOnWeb.OrgHomeLive do
     </Layouts.app>
     """
   end
-
-  # The title is already the organization name, so the subtitle only says how PromptOn is hosted.
-  defp projects_sub(_organization), do: "self-hosted"
 
   # The card that stands only when the organization has no BYOK key at all. A key entered here is
   # **organization-owned**, so every project in this organization shares it: the arena and AI

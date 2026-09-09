@@ -250,7 +250,6 @@ defmodule PromptOnWeb.OrgMembersLive do
       <DS.screen
         id="org-members-screen"
         title="Members"
-        sub={Layouts.org_label(@organization)}
         max_w={980}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
