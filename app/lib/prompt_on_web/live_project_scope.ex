@@ -23,7 +23,9 @@ defmodule PromptOnWeb.LiveProjectScope do
     slug).
   - Anything else → `Accounts.get_organization_by_slug/2`. The read policy is an organization
     member filter, so **to a non-member it is as if it did not exist**: when not found, the user is
-    sent back to `/personal` with a flash (existence is not leaked).
+    sent back to their home organization with a flash (existence is not leaked).
+  - A missing personal organization is valid after conversion. Home prefers personal, otherwise
+    the most recently created accessible organization, or `/account` when none remain.
   - The project is looked up **inside the organization** (project slugs are unique per
     organization). When not found, back to the organization home.
 
@@ -56,6 +58,26 @@ defmodule PromptOnWeb.LiveProjectScope do
   @spec personal_segment() :: String.t()
   def personal_segment, do: @personal
 
+  @doc "The user's personal organization, otherwise their newest accessible organization."
+  def default_organization(nil), do: nil
+
+  def default_organization(user) do
+    case Accounts.default_organization_for(user.id, actor: user) do
+      {:ok, organization} -> organization
+      {:error, _error} -> nil
+    end
+  end
+
+  @doc "A safe landing path, even after the personal organization is converted or deleted."
+  def home_path(nil), do: ~p"/sign-in"
+
+  def home_path(user) do
+    case default_organization(user) do
+      nil -> ~p"/account"
+      organization -> ~p"/#{PromptOnWeb.Layouts.org_segment(organization)}"
+    end
+  end
+
   @doc false
   def on_mount(:default, params, _session, socket) do
     user = socket.assigns[:current_user]
@@ -69,14 +91,9 @@ defmodule PromptOnWeb.LiveProjectScope do
         {:halt,
          socket
          |> put_flash(:error, "Organization not found: #{org_slug}")
-         |> redirect(to: not_found_path(org_slug))}
+         |> redirect(to: home_path(user))}
     end
   end
-
-  # When `/personal` itself does not resolve (no personal organization = a broken session), sending
-  # the user back to `/personal` would be a redirect loop; only then go to sign-in.
-  defp not_found_path(@personal), do: ~p"/sign-in"
-  defp not_found_path(_org_slug), do: ~p"/#{@personal}"
 
   defp resolve_organization(_slug, nil), do: :error
 

@@ -152,6 +152,15 @@ defmodule PromptOn.Accounts.Organization do
       filter expr(exists(memberships, user_id == ^arg(:user_id)))
     end
 
+    read :default_for_user do
+      description "The user's home organization: personal first, otherwise most recently created."
+
+      argument :user_id, :uuid, allow_nil?: false
+      get? true
+      prepare build(sort: [personal?: :desc, inserted_at: :desc, id: :desc], limit: 1)
+      filter expr(exists(memberships, user_id == ^arg(:user_id)))
+    end
+
     destroy :destroy do
       description "Deletes a team organization. Personal organizations are retained for /personal."
       require_atomic? false

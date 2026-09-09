@@ -58,6 +58,11 @@ defmodule PromptOn.Accounts do
         args: [:user_id],
         not_found_error?: false
 
+      define :default_organization_for,
+        action: :default_for_user,
+        args: [:user_id],
+        not_found_error?: false
+
       # Organization switcher.
       define :list_organizations_for, action: :for_user, args: [:user_id]
       define :list_organizations, action: :read

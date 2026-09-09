@@ -307,7 +307,9 @@ written in English.
 - **URLs are `/{org_slug}/{project_slug}/...`** (amended 2026-09-01). `org_slug` is either a team
   organization's globally unique slug or the reserved segment `personal` (= the current user's
   personal organization, which has no slug). Project slugs are unique **per organization**. The root
-  `/` goes to `/personal`, and the organization home `/{org}` is that organization's project list.
+  `/` goes to the personal organization when present, otherwise the most recently created
+  accessible organization (or `/account` if none remain). Conversion does not recreate personal
+  organizations. The organization home `/{org}` is that organization's project list.
   The router declares **static paths first** and opens the organization scope last — the reserved
   words are kept in sync with the router by `PromptOn.Accounts.ReservedSlugs` (`device` is on that
   list too. The word shown to users is "organization"; "workspace" is never used).

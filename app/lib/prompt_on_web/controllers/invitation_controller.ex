@@ -33,7 +33,7 @@ defmodule PromptOnWeb.InvitationController do
         |> AshAuthentication.Phoenix.Controller.clear_session(:prompton)
         |> UserSession.sign_in(user)
         |> put_flash(:info, "You joined #{accepted.organization.name}.")
-        |> redirect(to: organization_path(accepted))
+        |> redirect(to: organization_path(accepted) || ~p"/")
 
       {:error, error} ->
         conn

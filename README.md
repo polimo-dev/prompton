@@ -124,6 +124,10 @@ claiming a URL in **Organization settings** before inviting people, transferring
 deleting it. Team organization deletion requires typing its name; ownership transfer requires an
 explicit confirmation. Existing plan limits continue to apply.
 
+Sign-in and the app root prefer your personal organization. If it has been converted, they open
+the most recently created organization you belong to instead. No replacement personal organization
+is created. If no organizations remain, your account screen stays accessible.
+
 Organization settings includes **AI models** for owners and admins: search the OpenRouter catalog
 to select an **Evaluation model** for evaluations or a **Draft model** for AI drafts in the prompt
 editor. Both settings start unselected and can be cleared independently. Without a selection, the

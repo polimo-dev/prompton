@@ -164,6 +164,7 @@ defmodule PromptOnWeb.Layouts do
     <aside id="sidebar" class="panel hair-r sidebar">
       <div class="sidebar-org">
         <.org_menu
+          :if={@organization}
           org_slug={@org_slug}
           organization={@organization}
           organizations={@organizations}
@@ -226,7 +227,7 @@ defmodule PromptOnWeb.Layouts do
           <.project_switcher org_slug={@org_slug} project={@project} projects={@projects} />
         </div>
 
-        <div :if={is_nil(@project)} id="organization-nav" class="sidebar-mainnav">
+        <div :if={@organization && is_nil(@project)} id="organization-nav" class="sidebar-mainnav">
           <.nav_item
             :for={item <- org_items()}
             id={"org-#{item.id}"}

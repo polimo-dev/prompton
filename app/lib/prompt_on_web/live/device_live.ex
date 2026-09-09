@@ -202,7 +202,7 @@ defmodule PromptOnWeb.DeviceLive do
             :if={@state not in [:pending, :blank, :unknown]}
             id="device-home"
             variant="ghost"
-            navigate={~p"/personal"}
+            navigate={~p"/"}
             full
           >
             Back to PromptOn

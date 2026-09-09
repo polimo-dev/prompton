@@ -26,14 +26,11 @@ defmodule PromptOnWeb.AccountLive do
   ## Drawing the sidebar needs an organization
 
   This route has no `:org_slug` segment, so `PromptOnWeb.LiveProjectScope` does not run. Mount
-  therefore resolves the **personal organization** (`/personal`) directly and fills the shell
-  assigns. Which organization the sidebar should show is a matter of taste, and the account being
-  tied to the personal organization is the least surprising choice. If there is no personal
-  organization (the session is broken), the user is sent back to sign-in.
+  therefore resolves the home organization (personal first, otherwise newest) and fills the shell
+  assigns. A user without any organizations can still manage their account and sign out.
   """
   use PromptOnWeb, :live_view
 
-  alias PromptOn.Accounts
   alias PromptOn.Accounts.CliSession
   alias PromptOn.Accounts.Sessions
   alias PromptOnWeb.ErrorText
@@ -44,17 +41,11 @@ defmodule PromptOnWeb.AccountLive do
   def mount(_params, session, socket) do
     user = socket.assigns.current_user
 
-    case Accounts.personal_organization_for(user.id, actor: user) do
-      {:ok, %{} = organization} ->
-        {:ok,
-         socket
-         |> assign_shell(organization, user)
-         |> assign(session_jti: session_jti(session))
-         |> load_devices()}
-
-      _other ->
-        {:ok, redirect(socket, to: ~p"/sign-in")}
-    end
+    {:ok,
+     socket
+     |> assign_shell(LiveProjectScope.default_organization(user), user)
+     |> assign(session_jti: session_jti(session))
+     |> load_devices()}
   end
 
   defp assign_shell(socket, organization, user) do
@@ -62,7 +53,7 @@ defmodule PromptOnWeb.AccountLive do
       page_title: "Account",
       organization: organization,
       organizations: LiveProjectScope.list_organizations(user),
-      org_slug: LiveProjectScope.personal_segment(),
+      org_slug: if(organization, do: Layouts.org_segment(organization)),
       project: nil,
       projects: LiveProjectScope.list_projects(organization, user)
     )
@@ -132,7 +123,11 @@ defmodule PromptOnWeb.AccountLive do
       nav={:account}
     >
       <DS.screen id="account-screen" title="Account" sub={to_string(@current_user.email)} max_w={720}>
-        <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
+        <:crumb
+          :if={@organization}
+          label={Layouts.org_label(@organization)}
+          navigate={~p"/#{@org_slug}"}
+        />
 
         <SC.setting_card
           id="account-identity-card"

@@ -208,8 +208,8 @@ defmodule PromptOnWeb.Router do
   scope "/", PromptOnWeb do
     pipe_through :browser
 
-    # Root: `/personal` when signed in, otherwise `/sign-in` (the public landing page is a separate
-    # repo).
+    # Root: the home organization when signed in, otherwise `/sign-in` (the public landing page
+    # is a separate repo). Users without organizations land on `/account`.
     get "/", PageController, :home
 
     get "/sign-in", SignInController, :show
