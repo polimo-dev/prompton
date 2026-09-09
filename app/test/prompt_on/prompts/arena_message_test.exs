@@ -4,6 +4,7 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
   import PromptOn.Fixtures
 
   alias PromptOn.Prompts
+  alias PromptOn.Prompts.ArenaMessage
 
   setup do
     project = project_fixture()
@@ -76,6 +77,65 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
     assert failed.status == :error
     assert failed.content == ""
     assert failed.error_message == "provider returned 429"
+  end
+
+  test "request_context is encrypted at rest and loaded only when explicit", ctx do
+    snapshot = %{
+      "prompt" => %{"id" => Ash.UUIDv7.generate(), "name" => "default", "version_number" => 2},
+      "variables" => %{"secret" => "SECRET-DIARY-TEXT"}
+    }
+
+    assert {:ok, message} =
+             Prompts.append_arena_message(
+               %{
+                 use_case_id: ctx.use_case.id,
+                 model_id: ctx.sonnet.id,
+                 role: :user,
+                 content: "hello",
+                 request_context: snapshot
+               },
+               scope(ctx.project)
+             )
+
+    assert %Ash.NotLoaded{} = message.request_context
+
+    %{rows: [[encrypted]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        "SELECT encrypted_request_context FROM arena_messages WHERE id = $1",
+        [Ecto.UUID.dump!(message.id)]
+      )
+
+    assert is_binary(encrypted)
+    refute encrypted =~ "SECRET-DIARY-TEXT"
+    refute encrypted =~ "default"
+
+    assert encrypted
+           |> Base.decode64!()
+           |> PromptOn.Vault.decrypt!()
+           |> :erlang.binary_to_term() == snapshot
+
+    assert {:ok, [plain]} =
+             Prompts.arena_messages_for_use_case(
+               ctx.use_case.id,
+               scope(ctx.project) ++ [load: [:request_context]]
+             )
+
+    assert plain.request_context == snapshot
+
+    assert {:ok, [lazy]} =
+             Prompts.arena_messages_for_use_case(ctx.use_case.id, scope(ctx.project))
+
+    assert %Ash.NotLoaded{} = lazy.request_context
+  end
+
+  test "old arena rows have no request snapshot", ctx do
+    message = arena_message_fixture(ctx.use_case, ctx.sonnet)
+
+    assert {:ok, loaded} =
+             Ash.get(ArenaMessage, message.id, scope(ctx.project) ++ [load: [:request_context]])
+
+    assert loaded.request_context == nil
   end
 
   test "role and status are constrained, use_case and model are required", ctx do
@@ -246,8 +306,17 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
     assert {:ok, [seen]} = Prompts.arena_messages_for_use_case(use_case.id, scope(project, owner))
     assert seen.id == message.id
 
+    assert {:ok, [_seen]} =
+             Prompts.arena_messages_for_use_case(
+               use_case.id,
+               scope(project, owner) ++ [load: [:request_context]]
+             )
+
     assert {:ok, []} =
-             Prompts.arena_messages_for_use_case(use_case.id, scope(project, stranger))
+             Prompts.arena_messages_for_use_case(
+               use_case.id,
+               scope(project, stranger) ++ [load: [:request_context]]
+             )
 
     # An ApiKey has no read bypass at all. Ash folds read policies into a filter, so the result is
     # always an empty list (not an error): unlike other resources, not even "its own project's"

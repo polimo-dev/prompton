@@ -1208,6 +1208,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   attr :variables, :list, default: [], doc: "`%{name:, type:, required?:, value:}` list"
   attr :variables_open?, :boolean, default: false
+  attr :logs_patch, :string, default: nil
   attr :input, :string, default: ""
   attr :running?, :boolean, default: false
   attr :blocked, :string, default: nil
@@ -1252,7 +1253,12 @@ defmodule PromptOnWeb.PromptEditorComponents do
         </div>
       </div>
 
-      <.arena_variables :if={@variables != []} rows={@variables} open?={@variables_open?} />
+      <.arena_variables
+        :if={@variables != []}
+        rows={@variables}
+        open?={@variables_open?}
+        logs_patch={@logs_patch}
+      />
 
       <div :if={@notice} id="arena-notice" style={hint_style(8)}>{@notice}</div>
 
@@ -1322,7 +1328,12 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
       <div style="flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:10px 16px 14px;">
         <div :if={@notice} id="arena-notice" style={hint_style()}>{@notice}</div>
-        <.arena_variables :if={@variables != []} rows={@variables} open?={@variables_open?} />
+        <.arena_variables
+          :if={@variables != []}
+          rows={@variables}
+          open?={@variables_open?}
+          logs_patch={@logs_patch}
+        />
         <.arena_strip columns={@columns} size="flex:1;min-height:0;" />
         <.arena_composer input={@input} running?={@running?} blocked={@blocked} />
       </div>
@@ -1349,6 +1360,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
         mounted() {
           this.onKeydown = (event) => {
             if (event.key !== "Escape") return
+            if (document.querySelector("#arena-log-modal, #arena-input-modal")) return
             const exit = this.el.querySelector("#arena-exit-full")
             if (!exit) return
             event.preventDefault()
@@ -1370,34 +1382,73 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   attr :rows, :list, required: true
   attr :open?, :boolean, default: false
+  attr :logs_patch, :string, default: nil
 
   defp arena_variables(assigns) do
     ~H"""
-    <DS.collapsible id="arena-variables" label="variables" icon="variable" open={@open?}>
-      <form id="arena-vars-form" phx-change="arena_vars_change" style="padding:10px 12px;">
-        <div style="display:flex;flex-direction:column;gap:7px;">
-          <label :for={variable <- @rows} style="display:block;">
-            <span style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">
-              <span class="font-mono" style="font-size:12px;color:var(--tx-1);">
-                {variable.name}
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div :if={@logs_patch} style="display:flex;justify-content:flex-end;">
+        <.link
+          id="arena-load-logs"
+          patch={@logs_patch}
+          style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--link);text-decoration:none;"
+        >
+          <DSIcons.icon name="database" size={12} /> Load from logs
+        </.link>
+      </div>
+      <DS.collapsible
+        id="arena-variables"
+        label="variables"
+        icon="variable"
+        open={@open?}
+        phx-hook=".ArenaVariables"
+      >
+        <form
+          id="arena-vars-form"
+          phx-change="arena_vars_change"
+          style="padding:10px 12px;max-height:40vh;overflow:auto;"
+        >
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <label :for={variable <- @rows} style="display:block;">
+              <span style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">
+                <span class="font-mono" style="font-size:12px;color:var(--tx-1);">
+                  {variable.name}
+                </span>
+                <span style="font-size:10.5px;color:var(--tx-3);">{variable.type}</span>
+                <span :if={variable.required?} style="font-size:10.5px;color:var(--tx-1);">
+                  required
+                </span>
               </span>
-              <span style="font-size:10.5px;color:var(--tx-3);">{variable.type}</span>
-              <span :if={variable.required?} style="font-size:10.5px;color:var(--tx-1);">
-                required
-              </span>
-            </span>
-            <textarea
-              id={"arena-var-#{variable.name}"}
-              name={"vars[#{variable.name}]"}
-              spellcheck="false"
-              placeholder={variable.type == :list && "one item per line"}
-              class="ed ring-acc"
-              style="padding:9px 12px;min-height:40px;display:block;font-size:13px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r);"
-            ><%= variable.value %></textarea>
-          </label>
-        </div>
-      </form>
-    </DS.collapsible>
+              <textarea
+                id={"arena-var-#{variable.name}"}
+                name={"vars[#{variable.name}]"}
+                spellcheck="false"
+                placeholder={variable.type == :list && "one item per line or a JSON array"}
+                class="ed ring-acc"
+                style="padding:9px 12px;min-height:40px;display:block;font-size:13px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r);"
+              ><%= variable.value %></textarea>
+            </label>
+          </div>
+        </form>
+      </DS.collapsible>
+    </div>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".ArenaVariables">
+      export default {
+        mounted() {
+          this.onToggle = () => this.pushEvent("arena_variables_toggle", { open: this.el.open })
+          this.el.addEventListener("toggle", this.onToggle)
+        },
+        beforeUpdate() {
+          this.keepOpen = this.el.open && this.el.contains(document.activeElement)
+        },
+        updated() {
+          if (this.keepOpen) this.el.open = true
+          this.keepOpen = false
+        },
+        destroyed() { this.el.removeEventListener("toggle", this.onToggle) }
+      }
+    </script>
     """
   end
 
@@ -1487,6 +1538,15 @@ defmodule PromptOnWeb.PromptEditorComponents do
                 <div :if={turn_meta(row) != []} style={meta_style(row)}>
                   {Enum.join(turn_meta(row), " · ")}
                 </div>
+                <div :if={Map.get(row, :input_patch)} style={input_link_style(row)}>
+                  <.link
+                    id={"arena-input-link-#{column.id}-#{row.key}"}
+                    patch={row.input_patch}
+                    style="display:inline-flex;align-items:center;gap:4px;color:var(--tx-3);text-decoration:none;"
+                  >
+                    <DSIcons.icon name="eye" size={11} /> View input
+                  </.link>
+                </div>
               </div>
             </div>
             <div :if={column.running?} id={"arena-running-#{column.id}"} style={hint_style()}>
@@ -1562,6 +1622,11 @@ defmodule PromptOnWeb.PromptEditorComponents do
     do: "font-size:10.5px;color:var(--tx-3);margin-top:4px;text-align:right;"
 
   defp meta_style(_row), do: "font-size:10.5px;color:var(--tx-3);margin-top:4px;"
+
+  defp input_link_style(%{role: :user}),
+    do: "font-size:10.5px;margin-top:4px;text-align:right;"
+
+  defp input_link_style(_row), do: "font-size:10.5px;margin-top:4px;"
 
   # The line under a turn: a successful model turn carries version, latency, cost and tokens; the
   # rest carry only the time.

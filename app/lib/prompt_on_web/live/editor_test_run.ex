@@ -58,7 +58,10 @@ defmodule PromptOnWeb.EditorTestRun do
           :buffer => [map()],
           :variables => map(),
           optional(:engine) => atom(),
+          optional(:prompt_id) => String.t() | nil,
+          optional(:prompt_name) => String.t() | nil,
           optional(:prompt_version_id) => String.t() | nil,
+          optional(:prompt_version_number) => pos_integer() | nil,
           optional(:turns) => [turn()]
         }
 
@@ -142,13 +145,59 @@ defmodule PromptOnWeb.EditorTestRun do
     end)
   end
 
-  defp cast_value(:list, raw) do
-    raw
-    |> to_string()
-    |> String.split("\n")
-    |> Enum.map(&String.trim_trailing(&1, "\r"))
-    |> Enum.reject(&(String.trim(&1) == ""))
+  @doc """
+  Stored typed variables → variable form input values for the declared schema names that are
+  present in the stored map.
+
+  Literal strings are kept verbatim. Structured values are rendered as JSON for the field types that
+  can round-trip them (`:list` and `:map`); scalars keep false/0 distinct from a blank value.
+  """
+  @spec variable_inputs([map()], map()) :: map()
+  def variable_inputs(input_schema, stored_variables) do
+    stored_variables = stored_variables || %{}
+
+    input_schema
+    |> List.wrap()
+    |> Enum.filter(&Map.has_key?(stored_variables, &1.name))
+    |> Map.new(fn variable ->
+      {variable.name, variable_input(variable.type, Map.fetch!(stored_variables, variable.name))}
+    end)
   end
+
+  defp variable_input(:list, value) when is_list(value), do: json_or_inspect(value)
+  defp variable_input(:map, value) when is_map(value), do: json_or_inspect(value)
+  defp variable_input(:map, value) when is_list(value), do: json_or_inspect(value)
+  defp variable_input(_type, value) when is_binary(value), do: value
+  defp variable_input(_type, value) when is_boolean(value), do: to_string(value)
+  defp variable_input(_type, value) when is_number(value), do: to_string(value)
+  defp variable_input(_type, nil), do: ""
+  defp variable_input(_type, value), do: json_or_inspect(value)
+
+  defp json_or_inspect(value) do
+    case Jason.encode(value) do
+      {:ok, encoded} -> encoded
+      {:error, _reason} -> inspect(value)
+    end
+  end
+
+  defp cast_value(:list, raw) when is_list(raw), do: raw
+
+  defp cast_value(:list, raw) do
+    text = to_string(raw)
+
+    case Jason.decode(text) do
+      {:ok, value} when is_list(value) ->
+        value
+
+      _other ->
+        text
+        |> String.split("\n")
+        |> Enum.map(&String.trim_trailing(&1, "\r"))
+        |> Enum.reject(&(String.trim(&1) == ""))
+    end
+  end
+
+  defp cast_value(:map, raw) when is_map(raw), do: raw
 
   defp cast_value(:map, raw) do
     case Jason.decode(to_string(raw)) do
@@ -205,40 +254,30 @@ defmodule PromptOnWeb.EditorTestRun do
   mid-run, leaving no Generation behind.
   """
   @spec run(context()) :: result()
-  def run(%{project: project, use_case: use_case, model: model, variables: variables} = context) do
-    params = use_case.default_params || %{}
-    provider_options = model.provider_options || %{}
+  def run(%{project: project, model: _model, variables: variables} = context) do
     started_at = DateTime.utc_now()
+    request = assemble_request(context)
 
     base = %{
       context: context,
-      params: params,
-      provider_options: provider_options,
+      params: request.params,
+      provider_options: request.provider_options,
       variables: variables,
       started_at: started_at
     }
 
-    case build_messages(use_case, Map.get(context, :buffer, []), variables, engine(context)) do
-      {:ok, rendered} ->
-        messages = rendered ++ conversation_turns(context)
-
-        request = %{
-          model: model.model_id,
-          messages: messages,
-          params: params,
-          provider_options: provider_options
-        }
-
+    case request do
+      %{status: :ok, request: llm_request, messages: messages} ->
         # BYOK keys are **organization-owned** (2026-09-01): what the adapter receives is the
         # organization id, not the project id.
-        complete(request, project.organization_id, Map.put(base, :messages, messages))
+        complete(llm_request, project.organization_id, Map.put(base, :messages, messages))
 
-      {:error, reason} ->
+      %{status: :error, render_error_reason: reason} ->
         Map.merge(base, %{
           status: :error,
           stage: :render,
           reason: reason,
-          message: render_error_message(reason),
+          message: request.render_error || render_error_message(reason),
           messages: nil,
           received_at: DateTime.utc_now()
         })
@@ -246,6 +285,145 @@ defmodule PromptOnWeb.EditorTestRun do
   end
 
   defp engine(context), do: Map.get(context, :engine) || :liquid
+
+  @doc """
+  Builds the encrypted ArenaMessage request snapshot.
+
+  The map uses string keys so the value can be rendered or serialized without depending on Elixir
+  atom conventions. `messages` is nil when the draft cannot render; the `render_error` fields still
+  explain what prevented the provider call.
+  """
+  @spec request_snapshot(context()) :: map()
+  def request_snapshot(%{use_case: _use_case, model: _model} = context) do
+    request = assemble_request(context)
+
+    %{
+      "prompt" => prompt_snapshot(context),
+      "engine" => to_string(request.engine),
+      "template_messages" => template_messages(Map.get(context, :buffer, [])),
+      "variables" => stringify_keys(Map.get(context, :variables) || %{}),
+      "messages" => Map.get(request, :messages),
+      "render_error" => Map.get(request, :render_error),
+      "render_error_reason" =>
+        Map.get(request, :render_error_reason) && describe(request.render_error_reason),
+      "params" => stringify_keys(request.params),
+      "provider_options" => stringify_keys(request.provider_options),
+      "model" => model_snapshot(context.model)
+    }
+  end
+
+  defp assemble_request(%{request_snapshot: snapshot, model: model}) when is_map(snapshot) do
+    params = Map.get(snapshot, "params") || %{}
+    provider_options = Map.get(snapshot, "provider_options") || %{}
+    messages = Map.get(snapshot, "messages")
+    render_error = Map.get(snapshot, "render_error")
+
+    base = %{
+      engine: Map.get(snapshot, "engine") || :liquid,
+      params: params,
+      provider_options: provider_options
+    }
+
+    if is_list(messages) and is_nil(render_error) do
+      Map.merge(base, %{
+        status: :ok,
+        messages: messages,
+        request: %{
+          model: snapshot_model_id(snapshot, model),
+          messages: messages,
+          params: params,
+          provider_options: provider_options
+        }
+      })
+    else
+      reason =
+        Map.get(snapshot, "render_error_reason") || render_error || :prepared_snapshot_error
+
+      Map.merge(base, %{
+        status: :error,
+        messages: nil,
+        render_error: render_error || render_error_message(reason),
+        render_error_reason: reason
+      })
+    end
+  end
+
+  defp assemble_request(%{use_case: use_case, model: model, variables: variables} = context) do
+    params = use_case.default_params || %{}
+    provider_options = model.provider_options || %{}
+    engine = engine(context)
+
+    base = %{
+      engine: engine,
+      params: params,
+      provider_options: provider_options
+    }
+
+    case build_messages(use_case, Map.get(context, :buffer, []), variables, engine) do
+      {:ok, rendered} ->
+        messages = rendered ++ conversation_turns(context)
+
+        Map.merge(base, %{
+          status: :ok,
+          messages: messages,
+          request: %{
+            model: model.model_id,
+            messages: messages,
+            params: params,
+            provider_options: provider_options
+          }
+        })
+
+      {:error, reason} ->
+        Map.merge(base, %{
+          status: :error,
+          messages: nil,
+          render_error: render_error_message(reason),
+          render_error_reason: reason
+        })
+    end
+  end
+
+  defp snapshot_model_id(snapshot, fallback_model) do
+    case Map.get(snapshot, "model") do
+      %{"model_id" => model_id} when is_binary(model_id) and model_id != "" -> model_id
+      _other -> fallback_model.model_id
+    end
+  end
+
+  defp prompt_snapshot(context) do
+    %{
+      "id" => stringify_value(Map.get(context, :prompt_id)),
+      "name" => Map.get(context, :prompt_name),
+      "version_id" => stringify_value(Map.get(context, :prompt_version_id)),
+      "version_number" => Map.get(context, :prompt_version_number)
+    }
+  end
+
+  defp model_snapshot(model) do
+    %{
+      "id" => stringify_value(Map.get(model, :id)),
+      "name" => Map.get(model, :display_name),
+      "model_id" => Map.get(model, :model_id)
+    }
+  end
+
+  defp template_messages(buffer) do
+    Enum.map(List.wrap(buffer), fn message ->
+      %{"role" => to_string(role_of(message)), "content" => content_of(message) || ""}
+    end)
+  end
+
+  defp stringify_keys(value) when is_map(value) do
+    Map.new(value, fn {key, value} -> {stringify_value(key), stringify_keys(value)} end)
+  end
+
+  defp stringify_keys(value) when is_list(value), do: Enum.map(value, &stringify_keys/1)
+  defp stringify_keys(value), do: value
+
+  defp stringify_value(nil), do: nil
+  defp stringify_value(value) when is_atom(value), do: Atom.to_string(value)
+  defp stringify_value(value), do: to_string(value)
 
   defp complete(request, organization_id, base) do
     case PromptOn.LLM.complete(request, organization_id: organization_id) do

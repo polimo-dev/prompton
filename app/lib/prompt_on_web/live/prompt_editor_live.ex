@@ -49,6 +49,8 @@ defmodule PromptOnWeb.PromptEditorLive do
   | `?ai=<message-index>` | The AI draft modal for that message is open |
   | `?new_prompt=1` | The "new prompt" modal is open |
   | `?var=<name>` | That declared variable row is expanded |
+  | `?logs=1` `?sample=<id>` | Monitoring log picker and selected variable preview |
+  | `?input=<message-id>` | Dispatch-time input for one Arena turn |
   | `?full=1` | The arena is open as a **full-screen overlay** (Arena tab only) |
   | `?env=<slug>` `?rev=<n>` `?confirm=<id>` | Deployments tab state (environment, revision viewed, rollback confirm) |
   (On the Deployments tab, `?deploy=1` rides along with these parameters too, so opening and closing
@@ -103,6 +105,8 @@ defmodule PromptOnWeb.PromptEditorLive do
   """
   use PromptOnWeb, :live_view
 
+  require Ash.Query
+
   import PromptOnWeb.DeploymentsComponents
   import PromptOnWeb.PromptEditorComponents
 
@@ -112,10 +116,13 @@ defmodule PromptOnWeb.PromptEditorLive do
   alias PromptOn.Deployments
   alias PromptOn.Deployments.Deployment
   alias PromptOn.Prompts
+  alias PromptOn.Prompts.ArenaMessage
   alias PromptOn.Prompts.Prompt
   alias PromptOn.Prompts.PromptVersion
   alias PromptOnSDK.Params
   alias PromptOnSDK.Template
+  alias PromptOnWeb.ArenaContextComponents
+  alias PromptOnWeb.ArenaLogSamples
   alias PromptOnWeb.EditorTestRun
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.EvalsComponents
@@ -204,6 +211,15 @@ defmodule PromptOnWeb.PromptEditorLive do
            arena_history: %{},
            arena_running: %{},
            arena_vars: %{},
+           arena_variables_open?: nil,
+           arena_logs?: false,
+           arena_logs: [],
+           arena_log_id: nil,
+           arena_log_preview: nil,
+           arena_log_error: nil,
+           arena_input_id: nil,
+           arena_context: nil,
+           arena_context_error: nil,
            arena_input: "",
            arena_notice: nil,
            arena_full?: false,
@@ -259,7 +275,8 @@ defmodule PromptOnWeb.PromptEditorLive do
      |> apply_deploy(params["deploy"])
      |> apply_env_slug(params)
      |> apply_deployments_tab(params)
-     |> apply_evals_tab(params)}
+     |> apply_evals_tab(params)
+     |> apply_arena_panels(params)}
   end
 
   # `?env=` belongs to the Deployments tab, and the Evals tab reuses it (ADR 0010 §5.2). Resolving
@@ -1173,8 +1190,111 @@ defmodule PromptOnWeb.PromptEditorLive do
         label: model.display_name,
         model_id: model.model_id,
         price: known_price(model_pricing(assigns.catalog_prices, model)),
-        rows: rows,
+        rows: Enum.map(rows, &Map.put(&1, :input_patch, arena_path(assigns, input: &1.key))),
         running?: Map.has_key?(assigns.arena_running, model.id)
+      }
+    end)
+  end
+
+  defp arena_variables_open?(%{arena_variables_open?: nil} = assigns),
+    do: arena_missing(assigns) != []
+
+  defp arena_variables_open?(assigns), do: assigns.arena_variables_open?
+
+  defp apply_arena_panels(socket, params) do
+    socket
+    |> apply_arena_logs(params)
+    |> apply_arena_input(params)
+  end
+
+  defp apply_arena_logs(%{assigns: %{tab: "arena"}} = socket, %{"logs" => "1"} = params) do
+    socket = assign(socket, arena_logs?: true, arena_log_id: params["sample"])
+
+    case ArenaLogSamples.list(socket.assigns.use_case, scope(socket)) do
+      {:ok, logs} ->
+        socket
+        |> assign(arena_logs: logs, arena_log_error: nil)
+        |> preview_arena_log(params["sample"])
+
+      {:error, _reason} ->
+        assign(socket,
+          arena_logs: [],
+          arena_log_preview: nil,
+          arena_log_error: "Could not load monitoring logs. Try again."
+        )
+    end
+  end
+
+  defp apply_arena_logs(socket, _params) do
+    assign(socket,
+      arena_logs?: false,
+      arena_logs: [],
+      arena_log_id: nil,
+      arena_log_preview: nil,
+      arena_log_error: nil
+    )
+  end
+
+  defp preview_arena_log(socket, nil), do: assign(socket, :arena_log_preview, nil)
+
+  defp preview_arena_log(socket, id) do
+    case ArenaLogSamples.variables(socket.assigns.use_case, id, scope(socket)) do
+      {:ok, variables} ->
+        assign(socket, :arena_log_preview, arena_log_preview(socket.assigns, variables))
+
+      {:error, _reason} ->
+        assign(socket,
+          arena_log_preview: nil,
+          arena_log_error:
+            "Variables are unavailable for this log. It may have expired or been removed."
+        )
+    end
+  end
+
+  defp arena_log_preview(assigns, variables) do
+    names = Enum.map(assigns.declared, & &1.name)
+    values = Map.take(variables, names)
+
+    %{
+      values: values,
+      missing: names -- Map.keys(values),
+      ignored: map_size(variables) - map_size(values)
+    }
+  end
+
+  defp apply_arena_input(%{assigns: %{tab: "arena"}} = socket, %{"input" => id}) do
+    result =
+      with {:ok, id} <- Ecto.UUID.cast(id) do
+        ArenaMessage
+        |> Ash.Query.filter(id == ^id and use_case_id == ^socket.assigns.use_case.id)
+        |> Ash.Query.load(:request_context)
+        |> Ash.read_one(scope(socket))
+      end
+
+    case result do
+      {:ok, %ArenaMessage{request_context: context}} ->
+        assign(socket, arena_input_id: id, arena_context: context, arena_context_error: nil)
+
+      _other ->
+        assign(socket,
+          arena_input_id: id,
+          arena_context: nil,
+          arena_context_error: "This turn is no longer available."
+        )
+    end
+  end
+
+  defp apply_arena_input(socket, _params),
+    do: assign(socket, arena_input_id: nil, arena_context: nil, arena_context_error: nil)
+
+  defp arena_log_rows(assigns) do
+    Enum.map(assigns.arena_logs, fn log ->
+      %{
+        id: log.id,
+        model: log.model,
+        started_at: log.started_at,
+        status: log.status,
+        patch: arena_path(assigns, logs: 1, sample: log.id)
       }
     end)
   end
@@ -1407,7 +1527,38 @@ defmodule PromptOnWeb.PromptEditorLive do
   # Events: arena
 
   def handle_event("arena_vars_change", params, socket) do
-    {:noreply, update(socket, :arena_vars, &Map.merge(&1, params["vars"] || %{}))}
+    {:noreply,
+     socket
+     |> update(:arena_vars, &Map.merge(&1, params["vars"] || %{}))
+     |> assign(:arena_variables_open?, true)}
+  end
+
+  def handle_event("arena_variables_toggle", %{"open" => open?}, socket) when is_boolean(open?),
+    do: {:noreply, assign(socket, :arena_variables_open?, open?)}
+
+  def handle_event("arena_apply_log", %{"id" => id}, socket) do
+    # Re-read on apply: retention or access may have changed since the preview opened.
+    with :ok <- ensure_project_access(socket),
+         {:ok, variables} <- ArenaLogSamples.variables(socket.assigns.use_case, id, scope(socket)),
+         inputs when map_size(inputs) > 0 <-
+           EditorTestRun.variable_inputs(socket.assigns.declared, variables) do
+      updated =
+        socket
+        |> update(:arena_vars, &Map.merge(&1, inputs))
+        |> assign(
+          arena_variables_open?: true,
+          arena_notice: "Loaded #{map_size(inputs)} variable values from the selected log."
+        )
+
+      {:noreply, push_patch(updated, to: arena_path(updated.assigns, []))}
+    else
+      _other ->
+        {:noreply,
+         assign(socket,
+           arena_log_preview: nil,
+           arena_log_error: "No matching variables are available. Choose another log."
+         )}
+    end
   end
 
   def handle_event("arena_input_change", params, socket) do
@@ -1896,14 +2047,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     # edited draft has no version to point at.
     version = clean_version(socket.assigns)
     number = version && version.number
-    params = %{}
-
-    socket =
-      append_arena(socket, model.id, %{
-        role: :user,
-        content: input,
-        author_id: author_id(socket)
-      })
+    params = socket.assigns.use_case.default_params || %{}
 
     context = %{
       project: socket.assigns.project,
@@ -1911,13 +2055,33 @@ defmodule PromptOnWeb.PromptEditorLive do
       model: model,
       buffer: socket.assigns.messages,
       engine: socket.assigns.engine,
+      prompt_id: socket.assigns.prompt.id,
+      prompt_name: socket.assigns.prompt.name,
       prompt_version_id: version && version.id,
+      prompt_version_number: number,
       variables: variables,
       turns: turns
     }
 
+    request_context = EditorTestRun.request_snapshot(context)
+    context = Map.put(context, :request_snapshot, request_context)
+
     socket
-    |> update(:arena_running, &Map.put(&1, model.id, %{version_number: number, params: params}))
+    |> append_arena(model.id, %{
+      role: :user,
+      content: input,
+      prompt_version_number: number,
+      request_context: request_context,
+      params: params,
+      author_id: author_id(socket)
+    })
+    |> update(:arena_running, fn running ->
+      Map.put(running, model.id, %{
+        version_number: number,
+        params: params,
+        request_context: request_context
+      })
+    end)
     |> start_async({:arena, model.id}, fn -> EditorTestRun.run(context) end)
   end
 
@@ -1935,6 +2099,7 @@ defmodule PromptOnWeb.PromptEditorLive do
       %{
         role: :assistant,
         prompt_version_number: Map.get(meta, :version_number),
+        request_context: Map.get(meta, :request_context),
         params: Map.get(meta, :params) || %{},
         author_id: author_id(socket)
       }
@@ -2338,6 +2503,15 @@ defmodule PromptOnWeb.PromptEditorLive do
     ~p"/#{assigns.org_slug}/#{assigns.project.slug}/use-cases/#{assigns.use_case.key}/prompt?#{query}"
   end
 
+  defp arena_path(assigns, params) do
+    editor_path(
+      assigns,
+      params
+      |> Keyword.put_new(:v, assigns.selected_number)
+      |> Keyword.put_new(:full, if(assigns.arena_full?, do: 1))
+    )
+  end
+
   defp tab_param_value(%{tab: tab}) when tab in @sticky_tabs, do: tab
   defp tab_param_value(_assigns), do: nil
 
@@ -2548,7 +2722,8 @@ defmodule PromptOnWeb.PromptEditorLive do
             columns={arena_columns(assigns)}
             add_patch={@picker_patch}
             variables={arena_variable_rows(assigns)}
-            variables_open?={arena_missing(assigns) != []}
+            variables_open?={arena_variables_open?(assigns)}
+            logs_patch={arena_path(assigns, logs: 1)}
             input={@arena_input}
             running?={arena_running?(assigns)}
             blocked={arena_blocker(assigns)}
@@ -2577,6 +2752,23 @@ defmodule PromptOnWeb.PromptEditorLive do
           params={@eval_params}
         />
       </DS.screen>
+
+      <ArenaContextComponents.log_picker
+        :if={@active_use_case? and @tab == "arena" and @arena_logs?}
+        rows={arena_log_rows(assigns)}
+        selected_id={@arena_log_id}
+        preview={@arena_log_preview}
+        error={@arena_log_error}
+        close_patch={arena_path(assigns, [])}
+        integration_patch={editor_path(assigns, tab: "deployments") <> "#integration"}
+      />
+
+      <ArenaContextComponents.input_inspector
+        :if={@active_use_case? and @tab == "arena" and @arena_input_id}
+        context={@arena_context}
+        error={@arena_context_error}
+        close_patch={arena_path(assigns, [])}
+      />
 
       <.versions_drawer
         :if={@active_use_case? and @versions_open?}

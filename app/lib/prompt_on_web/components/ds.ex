@@ -1452,12 +1452,19 @@ defmodule PromptOnWeb.DS do
   attr :mono, :boolean, default: true
   attr :id, :string, default: nil
   attr :class, :any, default: nil
+  attr :rest, :global
   slot :right
   slot :inner_block, required: true
 
   def collapsible(assigns) do
     ~H"""
-    <details id={@id} class={["card2 dscollapse", @class]} style="overflow:hidden;" open={@open}>
+    <details
+      id={@id}
+      class={["card2 dscollapse", @class]}
+      style="overflow:hidden;"
+      open={@open}
+      {@rest}
+    >
       <summary>
         <DSIcons.icon name="chevRight" size={14} class="tx2 dscollapse-closed" />
         <DSIcons.icon name="chevDown" size={14} class="tx2 dscollapse-open" />
