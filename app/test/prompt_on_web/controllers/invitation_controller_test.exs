@@ -39,7 +39,7 @@ defmodule PromptOnWeb.InvitationControllerTest do
     html = html_response(conn, 200)
     assert html =~ "Join #{org.name}"
     assert html =~ "Join"
-    assert html =~ project.name
+    assert html =~ project.slug
     assert get_resp_header(conn, "referrer-policy") == ["no-referrer"]
     assert get_resp_header(conn, "cache-control") == ["no-store"]
     assert [] = memberships(org, invited)

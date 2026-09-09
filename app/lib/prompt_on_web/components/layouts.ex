@@ -453,7 +453,7 @@ defmodule PromptOnWeb.Layouts do
         <.link
           :for={p <- @projects}
           id={"switch-to-#{p.slug}"}
-          navigate={~p"/#{@org_slug}/#{p.slug}/use-cases"}
+          navigate={~p"/#{@org_slug}/#{p.slug}"}
           class={["dsmenu-item", @project && p.id == @project.id && "is-current"]}
         >
           <span style={"width:8px;height:8px;border-radius:var(--r-pill);background:#{project_color(p)};flex-shrink:0;"} />

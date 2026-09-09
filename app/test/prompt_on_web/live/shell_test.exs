@@ -15,8 +15,8 @@ defmodule PromptOnWeb.ShellTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
-    other = Fixtures.project_fixture(%{user: user, slug: "zeta", name: "Zeta"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
+    other = Fixtures.project_fixture(%{user: user, slug: "zeta", description: "Zeta"})
     use_case = Fixtures.use_case_fixture(project, %{key: "diary_generation"})
 
     %{
@@ -112,10 +112,11 @@ defmodule PromptOnWeb.ShellTest do
       project: project,
       use_case: uc
     } do
-      for path <- [
-            ~p"/personal/#{project.slug}/use-cases",
-            ~p"/personal/#{project.slug}/use-cases/#{uc.key}/prompt",
-            ~p"/personal/#{project.slug}/settings"
+      for {path, screen} <- [
+            {~p"/personal/#{project.slug}/use-cases", "#use-cases-screen"},
+            {~p"/personal/#{project.slug}/use-cases/#{uc.key}/prompt", "#use-case-hub"},
+            {~p"/personal/#{project.slug}/api-keys", "#api-keys-screen"},
+            {~p"/personal/#{project.slug}/settings", "#settings-screen"}
           ] do
         {:ok, view, _html} = live(conn, path)
         html = render(view)
@@ -123,6 +124,11 @@ defmodule PromptOnWeb.ShellTest do
         assert html =~ "Personal", "#{path}: no organization crumb"
         assert has_element?(view, "a[href='/personal']"), "#{path}: no organization home link"
         assert html =~ project.slug, "#{path}: no project crumb"
+
+        project_crumb = "#{screen} > div:first-child a[href='/personal/#{project.slug}']"
+        assert has_element?(view, project_crumb, project.slug)
+        view |> element(project_crumb) |> render_click()
+        assert_redirect(view, ~p"/personal/#{project.slug}")
       end
     end
   end
@@ -460,10 +466,11 @@ defmodule PromptOnWeb.ShellTest do
       |> element("#switch-to-#{other.slug}")
       |> render_click()
 
-      {:ok, view, _html} = live(conn, ~p"/personal/#{other.slug}/use-cases")
+      assert_redirect(view, ~p"/personal/#{other.slug}")
+      {:ok, view, _html} = live(conn, ~p"/personal/#{other.slug}")
 
       assert has_element?(view, "#sidebar-toggle[phx-hook='PromptOnWeb.Layouts.SidebarToggle']")
-      assert has_element?(view, "#nav-usecases .sidebar-label")
+      assert has_element?(view, "#nav-overview[aria-current='page']")
     end
   end
 

@@ -16,7 +16,7 @@ defmodule PromptOnWeb.ProjectOverviewLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme"})
     production = Fixtures.environment(project, "production")
     use_case = Fixtures.use_case_fixture(project, %{key: "diary_generation"})
 

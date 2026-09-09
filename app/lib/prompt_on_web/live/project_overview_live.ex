@@ -193,11 +193,10 @@ defmodule PromptOnWeb.ProjectOverviewLive do
       <DS.screen
         id="project-overview-screen"
         title="Overview"
-        sub={@project.name}
         max_w={980}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:crumb label={@project.slug} />
+        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
         <:actions>
           <DS.seg
             id="overview-period"

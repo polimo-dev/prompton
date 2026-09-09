@@ -320,7 +320,7 @@ defmodule PromptOnWeb.OrgUsageLive do
                 <span style={"width:8px;height:8px;border-radius:var(--r-pill);flex-shrink:0;background:#{row.color};"} />
                 <.link
                   id={"usage-open-#{row.project.slug}"}
-                  navigate={~p"/#{@org_slug}/#{row.project.slug}/use-cases"}
+                  navigate={~p"/#{@org_slug}/#{row.project.slug}"}
                   class="font-mono"
                   style="font-size:13px;color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                 >

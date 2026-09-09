@@ -20,7 +20,7 @@ defmodule PromptOnWeb.ApiKeysLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme"})
     production = Fixtures.environment(project, "production")
 
     %{conn: log_in_user(conn, user), user: user, project: project, production: production}

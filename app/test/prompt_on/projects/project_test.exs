@@ -5,6 +5,39 @@ defmodule PromptOn.Projects.ProjectTest do
 
   alias PromptOn.Projects
 
+  test "projects use a key and an optional description instead of a name" do
+    project = project_fixture(%{slug: "key-only"})
+
+    assert project.slug == "key-only"
+    assert project.description == nil
+    refute Map.has_key?(project, :name)
+
+    described = project_fixture(%{description: "Customer support automation"})
+    assert described.description == "Customer support automation"
+  end
+
+  test "a project member can edit and clear its description, but strangers cannot" do
+    owner = user_fixture()
+    project = project_fixture(%{user: owner})
+
+    assert {:ok, updated} =
+             Projects.set_project_description(project, %{description: "Support workflows"},
+               actor: owner
+             )
+
+    assert updated.description == "Support workflows"
+
+    assert {:error, %Ash.Error.Forbidden{}} =
+             Projects.set_project_description(updated, %{description: "Not allowed"},
+               actor: user_fixture()
+             )
+
+    assert {:ok, cleared} =
+             Projects.set_project_description(updated, %{description: ""}, actor: owner)
+
+    assert cleared.description == nil
+  end
+
   test "creating a project creates production (protected) and staging environments" do
     project = project_fixture()
     slugs = project.environments |> Enum.map(& &1.slug) |> Enum.sort()
@@ -35,16 +68,16 @@ defmodule PromptOn.Projects.ProjectTest do
     personal = organization_for(owner)
     team = team_org_fixture(%{user: owner, slug: "slug-owner-team"})
 
-    assert {:ok, a} = create_named(personal.id, "shared-slug", owner)
+    assert {:ok, a} = create_with_key(personal.id, "shared-slug", owner)
     assert a.organization_id == personal.id
 
     # The same slug is allowed in another organization: URLs are `/{org}/{project}`, no collision.
-    assert {:ok, b} = create_named(team.id, "shared-slug", owner)
+    assert {:ok, b} = create_with_key(team.id, "shared-slug", owner)
     assert b.organization_id == team.id
     refute a.id == b.id
 
     # Within the same organization it is refused.
-    assert {:error, %Ash.Error.Invalid{}} = create_named(personal.id, "shared-slug", owner)
+    assert {:error, %Ash.Error.Invalid{}} = create_with_key(personal.id, "shared-slug", owner)
   end
 
   test "project slugs may not collide with organization-scoped static routes" do
@@ -52,14 +85,15 @@ defmodule PromptOn.Projects.ProjectTest do
     personal = organization_for(owner)
 
     for reserved <- PromptOn.Accounts.ReservedSlugs.all_project() do
-      assert {:error, %Ash.Error.Invalid{} = error} = create_named(personal.id, reserved, owner)
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               create_with_key(personal.id, reserved, owner)
 
       assert Enum.any?(error.errors, &(Map.get(&1, :field) == :slug)),
              "#{reserved} was accepted as a project slug"
     end
 
     # Names merely prefixed with a reserved word are not blocked (only `/{org}/settings` collides).
-    assert {:ok, _} = create_named(personal.id, "settings-app", owner)
+    assert {:ok, _} = create_with_key(personal.id, "settings-app", owner)
   end
 
   test "get_project_by_slug is scoped to an organization" do
@@ -67,8 +101,8 @@ defmodule PromptOn.Projects.ProjectTest do
     personal = organization_for(owner)
     team = team_org_fixture(%{user: owner, slug: "lookup-team"})
 
-    {:ok, a} = create_named(personal.id, "lookup-me", owner)
-    {:ok, b} = create_named(team.id, "lookup-me", owner)
+    {:ok, a} = create_with_key(personal.id, "lookup-me", owner)
+    {:ok, b} = create_with_key(team.id, "lookup-me", owner)
 
     assert {:ok, %{id: id_a}} =
              Projects.get_project_by_slug(personal.id, "lookup-me", actor: owner)
@@ -84,9 +118,9 @@ defmodule PromptOn.Projects.ProjectTest do
              Projects.get_project_by_slug(personal.id, "lookup-me", actor: stranger)
   end
 
-  defp create_named(organization_id, slug, actor) do
+  defp create_with_key(organization_id, slug, actor) do
     Projects.create_project(
-      %{organization_id: organization_id, name: slug, slug: slug},
+      %{organization_id: organization_id, slug: slug},
       actor: actor
     )
   end

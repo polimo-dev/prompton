@@ -20,7 +20,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
     use_case = Fixtures.use_case_fixture(project, %{key: "diary_generation"})
 
     on_exit(&PromptOn.LLM.Fake.reset/0)

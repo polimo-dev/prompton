@@ -18,7 +18,7 @@ defmodule PromptOn.EntitlementsEnforcementTest do
 
   defp create_project(organization, user, slug) do
     Projects.create_project(
-      %{organization_id: organization.id, name: slug, slug: slug},
+      %{organization_id: organization.id, slug: slug},
       actor: user
     )
   end
@@ -63,7 +63,7 @@ defmodule PromptOn.EntitlementsEnforcementTest do
       for slug <- ~w(a b c d) do
         assert {:ok, _} =
                  Projects.create_project(
-                   %{organization_id: organization.id, name: slug, slug: slug},
+                   %{organization_id: organization.id, slug: slug},
                    actor: Fixtures.system_actor()
                  )
       end

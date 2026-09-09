@@ -26,7 +26,7 @@ defmodule PromptOn.HeyDiaryImport do
 
   @doc """
   Builds a migration plan from a dump (map or `%Dump{}`). See
-  `PromptOn.HeyDiaryImport.Planner.plan/2` for `opts` (`:project_slug`, `:project_name`,
+  `PromptOn.HeyDiaryImport.Planner.plan/2` for `opts` (`:project_slug`, `:project_description`,
   `:environment`).
   """
   @spec plan(map() | Dump.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}

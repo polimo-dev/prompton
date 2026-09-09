@@ -90,7 +90,7 @@ defmodule PromptOnWeb.OrgMembersLiveTest do
 
     assert_patch(view, ~p"/#{org.slug}/members")
     assert html =~ "Project access saved"
-    assert html =~ second_project.name
+    assert html =~ second_project.slug
     refute html =~ "No projects"
   end
 

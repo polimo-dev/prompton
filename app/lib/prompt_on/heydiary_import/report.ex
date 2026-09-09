@@ -13,7 +13,7 @@ defmodule PromptOn.HeyDiaryImport.Report do
     counts = Plan.counts(plan)
 
     [
-      "HeyDiary import plan — project #{plan.project.slug} (#{plan.project.name}), environment #{plan.environment}",
+      "HeyDiary import plan — project #{plan.project.slug}, environment #{plan.environment}",
       "",
       "Models (#{counts.models})",
       table(

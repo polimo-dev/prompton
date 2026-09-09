@@ -19,8 +19,8 @@ defmodule PromptOnWeb.SettingsLive do
   (`PromptOnWeb.ApiKeysLive`, `/{org}/{project}/api-keys`). **Nor are context dimensions**: when
   deployments turned from routers into pins (ADR 0007 revision 2026-09-01) the rule conditions that
   were the dimensions' only consumer disappeared, and `Project.dimensions` itself was deleted. So
-  this screen has no tabs; what remains is what belongs to the project itself (name · environments
-  · deletion).
+  this screen has no tabs; what remains is what belongs to the project itself (description ·
+  environments · deletion).
 
   ## Deliberate differences from the mockup
 
@@ -43,7 +43,8 @@ defmodule PromptOnWeb.SettingsLive do
        can_delete?: false,
        modal: nil,
        form: nil,
-       general_form: to_form(%{"name" => socket.assigns.project.name}, as: :project),
+       general_form:
+         to_form(%{"description" => description_value(socket.assigns.project)}, as: :project),
        env_rows: []
      )}
   end
@@ -144,16 +145,19 @@ defmodule PromptOnWeb.SettingsLive do
   # Events: Project tab
 
   def handle_event("save_project", %{"project" => params}, socket) do
-    case Projects.rename_project(
+    case Projects.set_project_description(
            socket.assigns.project,
-           %{name: params["name"]},
+           %{description: params["description"]},
            actor: socket.assigns.current_user
          ) do
       {:ok, project} ->
         {:noreply,
          socket
          |> assign(:project, project)
-         |> assign(:general_form, to_form(%{"name" => project.name}, as: :project))
+         |> assign(
+           :general_form,
+           to_form(%{"description" => description_value(project)}, as: :project)
+         )
          |> put_flash(:info, "Project saved")}
 
       {:error, error} ->
@@ -249,12 +253,7 @@ defmodule PromptOnWeb.SettingsLive do
       organizations={@organizations}
       nav={:settings}
     >
-      <DS.screen
-        id="settings-screen"
-        title="Settings"
-        sub={settings_sub(@project, @organization)}
-        max_w={880}
-      >
+      <DS.screen id="settings-screen" title="Settings" max_w={880}>
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
         <.project_settings
@@ -278,10 +277,6 @@ defmodule PromptOnWeb.SettingsLive do
     """
   end
 
-  # The organization and project are already in the crumbs; the subtitle keeps only the project's
-  # human-readable name.
-  defp settings_sub(project, _organization), do: project.name
-
   # --- Project settings ------------------------------------------------------
 
   attr :org_slug, :string, required: true
@@ -302,15 +297,20 @@ defmodule PromptOnWeb.SettingsLive do
           id="general-form"
           phx-submit="save_project"
           phx-change="validate_general"
-          style="display:flex;gap:12px;"
+          style="display:flex;flex-direction:column;gap:12px;"
         >
-          <div style="flex:1;">
+          <div>
             <SC.form_label text="key" />
             <DS.ds_input id="project-key" name="project[slug]" value={@project.slug} mono readonly />
           </div>
-          <div style="flex:1;">
-            <SC.form_label text="name" />
-            <DS.ds_input id="project-name" field={@general_form[:name]} />
+          <div>
+            <SC.form_label text="description" />
+            <textarea
+              id="project-description"
+              name="project[description]"
+              style="width:100%;min-height:86px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--bg-0);color:var(--tx-0);font-size:13px;line-height:1.5;padding:9px 10px;resize:vertical;"
+              placeholder="What this project is for"
+            >{Phoenix.HTML.Form.normalize_value("textarea", @general_form[:description].value)}</textarea>
           </div>
         </form>
         <:footer>
@@ -385,6 +385,9 @@ defmodule PromptOnWeb.SettingsLive do
     </div>
     """
   end
+
+  defp description_value(%{description: description}) when is_binary(description), do: description
+  defp description_value(_project), do: ""
 
   # --- Modals ----------------------------------------------------------------
 

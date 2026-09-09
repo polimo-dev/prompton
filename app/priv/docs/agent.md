@@ -226,7 +226,7 @@ Provisioning talks to the server, so it does not depend on the worktree — but 
 **One PromptOn project per deployable app**: one runtime key, one use-case document. Services that ship and scale independently get separate projects; services that make up one app share a project and are told apart by use case key.
 
 ```sh
-prompton projects create helpdesk --name Helpdesk --timezone Etc/UTC --idempotent
+prompton projects create helpdesk --description "Customer support app" --timezone Etc/UTC --idempotent
 prompton use --project helpdesk
 
 # use case: kind + declared variables (from the placeholders you found)
@@ -387,7 +387,7 @@ Global flags on every command: `--host`, `--token`, `--org <slug|personal>`, `--
 | `orgs list` | `prompton orgs list --json` |
 | `use --org O [--project P]` | `prompton use --org acme --project helpdesk` |
 | `projects list` | `prompton projects list --json` |
-| `projects create <slug> [--name N] [--timezone TZ]` | `prompton projects create helpdesk --name Helpdesk --idempotent` |
+| `projects create <slug> [--description D] [--timezone TZ]` | `prompton projects create helpdesk --description "Customer support app" --idempotent` |
 | `use-cases list` | `prompton use-cases list --json` |
 | `use-cases get <key>` | `prompton use-cases get support_reply --json` (prompts, versions, live deployments) |
 | `use-cases create <key> [--name N] [--description D] [--input-schema-file F] [--default-params JSON] [--tags a,b]` | `prompton use-cases create support_reply --input-schema-file schema.json` |
@@ -446,9 +446,9 @@ Limits: `/device/code` 20 requests / 10 min / IP, `/device/token` 600 / 10 min /
 ```jsonc
 GET  /orgs/:org/projects                      // {"projects": [...]}; archived ones are absent
 POST /orgs/:org/projects
-     {"key": "helpdesk", "name": "Helpdesk", "timezone": "Etc/UTC"}   // key (alias "slug") required; name defaults to key; timezone defaults to Etc/UTC
+     {"key": "helpdesk", "description": "Customer support app", "timezone": "Etc/UTC"}   // key (alias "slug") required; description optional; timezone defaults to Etc/UTC
 // 201
-{"id": "…", "slug": "helpdesk", "name": "Helpdesk", "timezone": "Etc/UTC", "created_at": "…",
+{"id": "…", "slug": "helpdesk", "description": "Customer support app", "timezone": "Etc/UTC", "created_at": "…",
  "environments": [{"id": "…", "slug": "production", "name": "Production", "protected": true},
                   {"id": "…", "slug": "staging", "name": "Staging", "protected": false}]}
 // 400 missing/malformed/reserved key · 409 {"details": {"project": {...}}}

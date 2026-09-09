@@ -26,7 +26,7 @@ defmodule PromptOnWeb.OrgScopeTest do
 
   describe "/personal (reserved segment)" do
     test "resolves to the viewer's personal organization", %{conn: conn, user: user} do
-      mine = Fixtures.project_fixture(%{user: user, slug: "mine", name: "Mine"})
+      mine = Fixtures.project_fixture(%{user: user, slug: "mine", description: "Mine"})
 
       {:ok, view, _html} = live(conn, ~p"/personal")
 
@@ -153,12 +153,18 @@ defmodule PromptOnWeb.OrgScopeTest do
       conn: conn,
       user: user
     } do
-      personal_app = Fixtures.project_fixture(%{user: user, slug: "app", name: "Personal App"})
+      personal_app =
+        Fixtures.project_fixture(%{user: user, slug: "app", description: "Personal App"})
 
       org = Fixtures.team_org_fixture(%{user: user, slug: "acme-inc"})
 
       team_app =
-        Fixtures.project_fixture(%{user: user, organization: org, slug: "app", name: "Team App"})
+        Fixtures.project_fixture(%{
+          user: user,
+          organization: org,
+          slug: "app",
+          description: "Team App"
+        })
 
       refute personal_app.id == team_app.id
 
@@ -242,7 +248,7 @@ defmodule PromptOnWeb.OrgScopeTest do
         {:ok, view, _html} = live(conn, ~p"/personal?new=1")
 
         view
-        |> form("#new-project-form", form: %{"name" => "X", "slug" => reserved})
+        |> form("#new-project-form", form: %{"slug" => reserved})
         |> render_submit()
 
         assert has_element?(view, "#new-project-modal"), "expected #{reserved} to be rejected"

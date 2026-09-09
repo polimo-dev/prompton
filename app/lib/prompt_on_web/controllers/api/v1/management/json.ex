@@ -43,7 +43,7 @@ defmodule PromptOnWeb.API.V1.Management.JSON do
     base = %{
       "id" => project.id,
       "slug" => project.slug,
-      "name" => project.name,
+      "description" => project.description,
       "timezone" => project.timezone,
       "created_at" => timestamp(project.inserted_at)
     }

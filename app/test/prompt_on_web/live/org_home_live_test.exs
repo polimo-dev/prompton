@@ -19,7 +19,9 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+
+    project =
+      Fixtures.project_fixture(%{user: user, slug: "acme", description: "Support tooling"})
 
     %{conn: log_in_user(conn, user), user: user, project: project}
   end
@@ -37,10 +39,21 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       card = view |> element("#project-card-acme") |> render()
 
       assert card =~ "acme"
-      assert card =~ "Acme"
+      assert has_element?(view, "#project-card-description-acme", "Support tooling")
       assert card =~ "2"
       assert card =~ "production"
       assert card =~ "staging"
+    end
+
+    test "a project card omits the description line when it is blank", %{conn: conn, user: user} do
+      Fixtures.project_fixture(%{user: user, slug: "blank"})
+
+      {:ok, view, _html} = live(conn, ~p"/personal")
+
+      card = view |> element("#project-card-blank") |> render()
+
+      assert card =~ "blank"
+      refute has_element?(view, "#project-card-description-blank")
     end
 
     test "the project switcher and the card use the same color for the same project", %{
@@ -73,10 +86,10 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       assert view |> element("#switch-to-acme") |> render() =~ "2 uc"
     end
 
-    test "the card goes to the use case list and the ⋯ goes to settings", %{conn: conn} do
+    test "the card goes to the project overview and the ⋯ goes to settings", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/personal")
 
-      assert has_element?(view, "#open-project-acme[href='/personal/acme/use-cases']")
+      assert has_element?(view, "#open-project-acme[href='/personal/acme']")
       assert has_element?(view, "#manage-project-acme[href='/personal/acme/settings']")
     end
 
@@ -109,30 +122,29 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       assert has_element?(view, "#new-project-form")
     end
 
-    test "the slug is suggested from the name", %{conn: conn} do
+    test "key is required directly; there is no project name field", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/personal?new=1")
 
-      html =
-        view
-        |> form("#new-project-form", form: %{"name" => "Note Mesh!", "slug" => ""})
-        |> render_change()
-
-      assert html =~ "note-mesh"
+      assert has_element?(view, "#new-project-form input[name='form[slug]']")
+      assert has_element?(view, "#project-description")
+      refute has_element?(view, "#new-project-form input[name='form[name]']")
     end
 
-    test "creating navigates to the new project's use case list", %{conn: conn, user: user} do
+    test "creating navigates to the new project's overview", %{conn: conn, user: user} do
       {:ok, view, _html} = live(conn, ~p"/personal?new=1")
 
       view
-      |> form("#new-project-form", form: %{"name" => "Note Mesh", "slug" => "notemesh"})
+      |> form("#new-project-form",
+        form: %{"slug" => "notemesh", "description" => "Notes automation"}
+      )
       |> render_submit()
 
-      assert_redirect(view, ~p"/personal/notemesh/use-cases")
+      assert_redirect(view, ~p"/personal/notemesh")
 
       {:ok, projects} = Projects.list_projects(actor: user)
       created = Enum.find(projects, &(&1.slug == "notemesh"))
 
-      assert created.name == "Note Mesh"
+      assert created.description == "Notes automation"
       # Context dimensions were deleted (ADR 0007 revision 2026-09-01: deployments are pins).
       refute Map.has_key?(created, :dimensions)
 
@@ -146,7 +158,7 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
 
       html =
         view
-        |> form("#new-project-form", form: %{"name" => "Acme 2", "slug" => "acme"})
+        |> form("#new-project-form", form: %{"slug" => "acme"})
         |> render_submit()
 
       assert has_element?(view, "#new-project-modal")
@@ -160,7 +172,7 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       user: user
     } do
       org = Fixtures.team_org_fixture(%{user: user, slug: "acme-inc", name: "Acme Inc"})
-      Fixtures.project_fixture(%{user: user, organization: org, slug: "web", name: "Web"})
+      Fixtures.project_fixture(%{user: user, organization: org, slug: "web"})
 
       {:ok, view, _html} = live(conn, ~p"/#{org.slug}")
 
@@ -176,10 +188,10 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       {:ok, view, _html} = live(conn, ~p"/#{org.slug}?new=1")
 
       view
-      |> form("#new-project-form", form: %{"name" => "Web", "slug" => "web"})
+      |> form("#new-project-form", form: %{"slug" => "web"})
       |> render_submit()
 
-      assert_redirect(view, ~p"/#{org.slug}/web/use-cases")
+      assert_redirect(view, ~p"/#{org.slug}/web")
 
       {:ok, created} = Projects.get_project_by_slug(org.id, "web", actor: user)
       assert created.organization_id == org.id
@@ -194,10 +206,10 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       {:ok, view, _html} = live(conn, ~p"/#{org.slug}?new=1")
 
       view
-      |> form("#new-project-form", form: %{"name" => "Acme", "slug" => "acme"})
+      |> form("#new-project-form", form: %{"slug" => "acme"})
       |> render_submit()
 
-      assert_redirect(view, ~p"/#{org.slug}/acme/use-cases")
+      assert_redirect(view, ~p"/#{org.slug}/acme")
 
       {:ok, %{} = team_acme} = Projects.get_project_by_slug(org.id, "acme", actor: user)
       personal = Fixtures.organization_for(user)

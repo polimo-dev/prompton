@@ -71,14 +71,14 @@ defmodule PromptOn.Accounts.Permissions do
   defp organization_projects(organization_id) do
     Project
     |> Ash.Query.filter(organization_id == ^organization_id and is_nil(archived_at))
-    |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.sort(slug: :asc)
     |> Ash.read!(actor: PromptOn.SystemActor.new())
   end
 
   defp authorized_projects(actor, organization_id) do
     Project
     |> Ash.Query.filter(organization_id == ^organization_id and is_nil(archived_at))
-    |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.sort(slug: :asc)
     |> Ash.read!(actor: actor)
   end
 end

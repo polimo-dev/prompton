@@ -118,7 +118,11 @@ defmodule PromptOn.HeyDiaryImport.Apply do
         with {:ok, project} <-
                ok(
                  Projects.create_project(
-                   %{organization_id: organization_id, name: plan.project.name, slug: slug},
+                   %{
+                     organization_id: organization_id,
+                     description: plan.project.description,
+                     slug: slug
+                   },
                    actor: actor,
                    return_notifications?: true
                  )

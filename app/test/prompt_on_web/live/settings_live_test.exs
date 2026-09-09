@@ -23,7 +23,10 @@ defmodule PromptOnWeb.SettingsLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+
+    project =
+      Fixtures.project_fixture(%{user: user, slug: "acme", description: "Support tooling"})
+
     production = Fixtures.environment(project, "production")
 
     %{
@@ -78,21 +81,33 @@ defmodule PromptOnWeb.SettingsLiveTest do
   end
 
   describe "General" do
-    test "key is read-only and name is saved", %{conn: conn, project: project, user: user} do
+    test "key is read-only and description is saved", %{conn: conn, project: project, user: user} do
       {:ok, view, _html} = live(conn, ~p"/personal/acme/settings")
 
       assert has_element?(view, "#project-key[readonly]")
+      refute has_element?(view, "#project-name")
 
       html =
         view
-        |> form("#general-form", project: %{"name" => "Acme Inc."})
+        |> form("#general-form", project: %{"description" => "Customer support prompts"})
         |> render_submit()
 
       assert html =~ "Project saved"
 
       {:ok, reloaded} = Projects.get_project(project.id, actor: user)
-      assert reloaded.name == "Acme Inc."
+      assert reloaded.description == "Customer support prompts"
       assert reloaded.slug == "acme"
+    end
+
+    test "description can be cleared", %{conn: conn, project: project, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/personal/acme/settings")
+
+      view
+      |> form("#general-form", project: %{"description" => "  "})
+      |> render_submit()
+
+      {:ok, reloaded} = Projects.get_project(project.id, actor: user)
+      assert is_nil(reloaded.description)
     end
   end
 

@@ -53,7 +53,6 @@ defmodule PromptOn.Accounts.InvitationTest do
           %{
             organization_id: Ecto.UUID.dump!(organization.id),
             creator_id: Ecto.UUID.dump!(user.id),
-            name: "Project #{n}",
             slug: slug,
             timezone: "Etc/UTC",
             payload_policy:
@@ -127,7 +126,7 @@ defmodule PromptOn.Accounts.InvitationTest do
     assert preview.organization.id == organization.id
 
     assert Ash.Resource.get_metadata(preview, :projects) == [
-             %{id: project.id, name: project.name, slug: project.slug}
+             %{id: project.id, slug: project.slug}
            ]
 
     assert {:error, error} = preview(stranger, token)

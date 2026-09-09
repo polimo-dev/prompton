@@ -24,7 +24,7 @@ defmodule PromptOn.Projects do
         not_found_error?: false
 
       define :list_projects, action: :active
-      define :rename_project, action: :rename
+      define :set_project_description, action: :set_description
       define :set_project_payload_policy, action: :set_payload_policy
       define :archive_project, action: :archive
     end

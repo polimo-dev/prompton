@@ -16,7 +16,7 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
     use_case = Fixtures.use_case_fixture(project, %{key: "chat_response"})
 
     %{conn: log_in_user(conn, user), user: user, project: project, use_case: use_case}
@@ -79,6 +79,9 @@ defmodule PromptOnWeb.OrgUsageLiveTest do
     {:ok, view, _html} = live(conn, ~p"/personal/usage")
 
     assert ["acme", "0", "0", "0", "$0"] = row_cells(view, "usage-row-acme")
+    assert has_element?(view, "#usage-open-acme[href='/personal/acme']")
+    view |> element("#usage-open-acme") |> render_click()
+    assert_redirect(view, ~p"/personal/acme")
   end
 
   test "the period stays in the URL as ?period=", %{conn: conn} do

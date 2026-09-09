@@ -86,7 +86,7 @@ defmodule PromptOn.Fixtures do
       Projects.create_project(
         %{
           organization_id: org.id,
-          name: Map.get(attrs, :name, "Project #{n}"),
+          description: Map.get(attrs, :description),
           slug: Map.get(attrs, :slug, "project-#{n}")
         },
         actor: user

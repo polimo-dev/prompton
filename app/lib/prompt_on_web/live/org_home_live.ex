@@ -12,9 +12,9 @@ defmodule PromptOnWeb.OrgHomeLive do
 
   The new project modal travels in the URL as `?new=1` (CLAUDE.md zero-downtime deployment
   discipline): when a deploy drops the socket and remounts, the modal stays open. The form is an
-  `AshPhoenix.Form`; the slug is suggested from the name, but the user can edit it. Project slugs
-  are unique **per organization**, so they do not collide with the same slug in another
-  organization.
+  `AshPhoenix.Form`; the key is the project's slug and the optional description gives the project
+  list a small human note. Project slugs are unique **per organization**, so they do not collide
+  with the same slug in another organization.
 
   ## Setup card (when there is no provider key)
 
@@ -216,15 +216,11 @@ defmodule PromptOnWeb.OrgHomeLive do
   # Events: new project
 
   def handle_event("validate_project", %{"form" => params}, socket) do
-    params = suggest_slug(params)
-
     {:noreply,
      assign(socket, :new_form, AshPhoenix.Form.validate(socket.assigns.new_form, params))}
   end
 
   def handle_event("create_project", %{"form" => params}, socket) do
-    params = suggest_slug(params)
-
     case organization_id(socket) do
       nil ->
         {:noreply, put_flash(socket, :error, "Organization not found.")}
@@ -240,7 +236,7 @@ defmodule PromptOnWeb.OrgHomeLive do
         {:noreply,
          socket
          |> put_flash(:info, "Project #{project.slug} created")
-         |> push_navigate(to: ~p"/#{socket.assigns.org_slug}/#{project.slug}/use-cases")}
+         |> push_navigate(to: ~p"/#{socket.assigns.org_slug}/#{project.slug}")}
 
       {:error, form} ->
         {:noreply, socket |> assign(:new_form, form) |> put_flash(:error, form_errors(form))}
@@ -260,15 +256,8 @@ defmodule PromptOnWeb.OrgHomeLive do
 
   defp suggest_org_slug(params), do: Map.put(params, "slug", slugify(params["name"]))
 
-  # When the slug is left blank it is suggested from the name. Anything typed by hand is kept as is.
-  defp suggest_slug(%{"slug" => slug} = params) when is_binary(slug) do
-    if String.trim(slug) == "", do: %{params | "slug" => slugify(params["name"])}, else: params
-  end
-
-  defp suggest_slug(params), do: Map.put(params, "slug", slugify(params["name"]))
-
   @doc """
-  Name → slug suggestion. Only produces values that satisfy the Project `slug` constraint
+  Text → slug suggestion for organization names. Only produces values that satisfy the slug constraint
   (`^[a-z0-9][a-z0-9-]{0,62}$`).
 
       iex> PromptOnWeb.OrgHomeLive.slugify("Acme Helpdesk!")
@@ -288,6 +277,15 @@ defmodule PromptOnWeb.OrgHomeLive do
     |> String.slice(0, 63)
     |> String.trim("-")
   end
+
+  defp project_description(%{description: description}) when is_binary(description) do
+    case String.trim(description) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp project_description(_project), do: nil
 
   # ---------------------------------------------------------------------------
   # Render
@@ -359,7 +357,7 @@ defmodule PromptOnWeb.OrgHomeLive do
           >
             <.link
               id={"open-project-#{card.project.slug}"}
-              navigate={~p"/#{@org_slug}/#{card.project.slug}/use-cases"}
+              navigate={~p"/#{@org_slug}/#{card.project.slug}"}
               style="display:block;color:inherit;text-decoration:none;"
             >
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
@@ -373,10 +371,16 @@ defmodule PromptOnWeb.OrgHomeLive do
                   <span style={"width:10px;height:10px;border-radius:var(--r-pill);background:#{card.color};"} />
                 </span>
                 <div style="min-width:0;">
-                  <div class="font-mono" style="font-size:14.5px;font-weight:600;">
+                  <div class="font-mono" style="font-size:15px;font-weight:650;">
                     {card.project.slug}
                   </div>
-                  <div style="font-size:12.5px;color:var(--tx-2);">{card.project.name}</div>
+                  <div
+                    :if={project_description(card.project)}
+                    id={"project-card-description-#{card.project.slug}"}
+                    style="font-size:12.5px;color:var(--tx-2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                  >
+                    {project_description(card.project)}
+                  </div>
                 </div>
               </div>
               <div style="display:flex;align-items:center;gap:14px;">
@@ -416,12 +420,17 @@ defmodule PromptOnWeb.OrgHomeLive do
             phx-change="validate_project"
             phx-submit="create_project"
           >
-            <SC.form_label text="name" />
-            <DS.ds_input field={@new_form[:name]} placeholder="Helpdesk" />
-            <SC.field_error field={@new_form[:name]} />
-            <SC.form_label text="key (slug)" style="margin-top:14px;" />
-            <DS.ds_input field={@new_form[:slug]} mono placeholder="helpdesk" />
+            <SC.form_label text="key" />
+            <DS.ds_input field={@new_form[:slug]} mono placeholder="helpdesk" required />
             <SC.field_error field={@new_form[:slug]} />
+            <SC.form_label text="description" style="margin-top:14px;" />
+            <textarea
+              id="project-description"
+              name="form[description]"
+              style="width:100%;min-height:82px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--bg-0);color:var(--tx-0);font-size:13px;line-height:1.5;padding:9px 10px;resize:vertical;"
+              placeholder="What this project is for"
+            >{Phoenix.HTML.Form.normalize_value("textarea", @new_form[:description].value)}</textarea>
+            <SC.field_error field={@new_form[:description]} />
             <div style="font-size:12.5px;color:var(--tx-2);margin-top:7px;line-height:1.55;">
               The key is used as-is in URLs and SDK config — it can't be changed after creation.
               The default environments production · staging are created with it.

@@ -58,9 +58,9 @@ defmodule PromptOn.Accounts.Invitation.Actions.Preview do
   defp project_summaries(%Invitation{project_ids: project_ids}) do
     Project
     |> Ash.Query.filter(id in ^project_ids)
-    |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.sort(slug: :asc)
     |> Ash.read!(actor: PromptOn.SystemActor.new())
-    |> Enum.map(&%{id: &1.id, name: &1.name, slug: &1.slug})
+    |> Enum.map(&%{id: &1.id, slug: &1.slug})
   end
 
   def invalid(field, message),

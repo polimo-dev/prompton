@@ -33,12 +33,16 @@ defmodule PromptOnWeb.API.V1.Management.ProjectControllerTest do
   describe "POST /projects" do
     test "creates a project with the default environments", %{raw: raw, org: org} do
       conn =
-        api_post(raw, ~p"/api/v1/orgs/personal/projects", %{key: "heydiary", name: "HeyDiary"})
+        api_post(raw, ~p"/api/v1/orgs/personal/projects", %{
+          key: "heydiary",
+          description: "Diary app prompts"
+        })
 
       body = json_response(conn, 201)
 
       assert body["slug"] == "heydiary"
-      assert body["name"] == "HeyDiary"
+      assert body["description"] == "Diary app prompts"
+      refute Map.has_key?(body, "name")
       assert body["timezone"] == "Etc/UTC"
       assert Enum.map(body["environments"], & &1["slug"]) == ["production", "staging"]
       assert Enum.find(body["environments"], &(&1["slug"] == "production"))["protected"] == true
@@ -48,23 +52,55 @@ defmodule PromptOnWeb.API.V1.Management.ProjectControllerTest do
 
       assert project.id == body["id"]
       assert project.organization_id == org.id
+      assert project.description == "Diary app prompts"
     end
 
-    test "name defaults to the key, and slug is accepted as an alias", %{raw: raw} do
-      body = json_response(api_post(raw, ~p"/api/v1/orgs/personal/projects", %{key: "solo"}), 201)
-      assert body["name"] == "solo"
+    test "description is optional and slug is accepted as an alias", %{raw: raw} do
+      body =
+        json_response(
+          api_post(raw, ~p"/api/v1/orgs/personal/projects", %{key: "solo", name: "Ignored"}),
+          201
+        )
+
+      assert body["description"] == nil
+      refute Map.has_key?(body, "name")
 
       body =
-        json_response(api_post(raw, ~p"/api/v1/orgs/personal/projects", %{slug: "aliased"}), 201)
+        json_response(
+          api_post(raw, ~p"/api/v1/orgs/personal/projects", %{
+            slug: "aliased",
+            description: ""
+          }),
+          201
+        )
 
       assert body["slug"] == "aliased"
+      assert body["description"] == nil
+      refute Map.has_key?(body, "name")
+    end
+
+    test "400 when description is not a string", %{raw: raw} do
+      assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
+               json_response(
+                 api_post(raw, ~p"/api/v1/orgs/personal/projects", %{
+                   key: "bad-description",
+                   description: 42
+                 }),
+                 400
+               )
+
+      assert message =~ "description must be a string"
     end
 
     test "409 with the existing project when the key is taken", %{raw: raw} do
       created =
         json_response(api_post(raw, ~p"/api/v1/orgs/personal/projects", %{key: "twice"}), 201)
 
-      conn = api_post(raw, ~p"/api/v1/orgs/personal/projects", %{key: "twice", name: "Another"})
+      conn =
+        api_post(raw, ~p"/api/v1/orgs/personal/projects", %{
+          key: "twice",
+          description: "Another"
+        })
 
       assert %{"error" => %{"code" => "conflict", "message" => message, "details" => details}} =
                json_response(conn, 409)
@@ -72,12 +108,15 @@ defmodule PromptOnWeb.API.V1.Management.ProjectControllerTest do
       assert message =~ "twice"
       assert details["project"]["id"] == created["id"]
       assert details["project"]["slug"] == "twice"
+      refute Map.has_key?(details["project"], "name")
     end
 
     test "400 without a key, and on reserved or malformed slugs", %{raw: raw} do
       assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
                json_response(
-                 api_post(raw, ~p"/api/v1/orgs/personal/projects", %{name: "no key"}),
+                 api_post(raw, ~p"/api/v1/orgs/personal/projects", %{
+                   description: "no key"
+                 }),
                  400
                )
 

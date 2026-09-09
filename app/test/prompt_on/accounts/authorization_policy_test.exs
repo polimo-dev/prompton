@@ -38,7 +38,7 @@ defmodule PromptOn.Accounts.AuthorizationPolicyTest do
 
       assert {:ok, created} =
                Projects.create_project(
-                 %{organization_id: org.id, name: "Member App", slug: "member-app"},
+                 %{organization_id: org.id, slug: "member-app"},
                  actor: member
                )
 

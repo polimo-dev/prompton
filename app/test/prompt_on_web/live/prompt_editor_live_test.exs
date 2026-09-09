@@ -114,7 +114,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
 
     use_case =
       Fixtures.use_case_fixture(project, %{
@@ -395,7 +395,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       refute has_element?(view, "#version-row-1.is-selected")
     end
 
-    test "the header sub states the version count and the live revision", %{
+    test "the header omits small summary text", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -408,8 +408,9 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
       {:ok, view, _html} = live(conn, hub_path(project, use_case))
 
-      assert render(view) =~ "2 versions · latest v2"
-      assert render(view) =~ "live production #1"
+      refute has_element?(view, "#use-case-hub > div:first-child", "2 versions · latest v2")
+      refute has_element?(view, "#use-case-hub > div:first-child", "live production #1")
+      assert has_element?(view, "#use-case-hub > div:first-child", use_case.key)
     end
   end
 

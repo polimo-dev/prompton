@@ -12,7 +12,6 @@ defmodule PromptOnWeb.InvitationHTML do
 
   embed_templates "invitation_html/*"
 
-  def project_name(%{name: name}) when is_binary(name), do: name
-  def project_name(%{slug: slug}) when is_binary(slug), do: slug
-  def project_name(project), do: to_string(project)
+  def project_key(%{slug: slug}) when is_binary(slug), do: slug
+  def project_key(project), do: to_string(project)
 end

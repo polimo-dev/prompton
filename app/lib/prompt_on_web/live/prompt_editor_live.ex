@@ -2362,7 +2362,6 @@ defmodule PromptOnWeb.PromptEditorLive do
     assigns =
       assigns
       |> assign(:roles, roles(assigns.use_case))
-      |> assign(:sub, header_sub(assigns))
       |> assign(:draft_patch, editor_path(assigns, []))
       |> assign(:prompt_rows, prompt_rows(assigns))
       |> assign(
@@ -2398,7 +2397,6 @@ defmodule PromptOnWeb.PromptEditorLive do
         id="use-case-hub"
         title={@use_case.key}
         title_mono
-        sub={@sub}
         tabs={@tab_rows}
         active_tab={@tab}
         max_w={900}
@@ -2406,7 +2404,7 @@ defmodule PromptOnWeb.PromptEditorLive do
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <:crumb
           label={@project.slug}
-          navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases"}
+          navigate={~p"/#{@org_slug}/#{@project.slug}"}
         />
         <:crumb label={@use_case.key} />
         <:actions>
@@ -2811,31 +2809,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       end)
 
     ~p"/#{assigns.org_slug}/#{assigns.project.slug}/use-cases/#{assigns.use_case.key}/prompt?#{query}"
-  end
-
-  # The header sub says only "how many of what exist, and what is running now".
-  defp header_sub(assigns) do
-    versions =
-      case assigns.versions do
-        [] -> "no version yet"
-        [latest | _rest] = list -> "#{length(list)} versions · latest v#{latest.number}"
-      end
-
-    [versions | live_summary(assigns)] |> Enum.join(" · ")
-  end
-
-  defp live_summary(assigns) do
-    assigns.envs
-    |> Enum.flat_map(fn env ->
-      case Map.get(assigns.deployments || %{}, env.id) do
-        nil -> []
-        deployment -> ["#{env.slug} ##{deployment.revision}"]
-      end
-    end)
-    |> case do
-      [] -> []
-      parts -> ["live " <> Enum.join(parts, " · ")]
-    end
   end
 
   defp arena_model_rows(assigns) do

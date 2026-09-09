@@ -93,14 +93,21 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       plan: plan
     } do
       assert plan.project.slug == "heydiary"
-      assert plan.project.name == "HeyDiary"
+      assert plan.project.description == nil
       assert plan.environment == "production"
 
       # Context dimensions were deleted (ADR 0007 revision 2026-09-01) — not in the plan either
       refute Map.has_key?(plan.project, :dimensions)
 
-      {:ok, other} = HeyDiaryImport.plan(dump, project_slug: "hd-dev", environment: "development")
+      {:ok, other} =
+        HeyDiaryImport.plan(dump,
+          project_slug: "hd-dev",
+          project_description: "Development import",
+          environment: "development"
+        )
+
       assert other.project.slug == "hd-dev"
+      assert other.project.description == "Development import"
       assert other.environment == "development"
     end
 

@@ -11,7 +11,7 @@ defmodule PromptOnWeb.UseCaseLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
     use_case = Fixtures.use_case_fixture(project, %{key: "diary_generation"})
 
     %{conn: log_in_user(conn, user), user: user, project: project, use_case: use_case}

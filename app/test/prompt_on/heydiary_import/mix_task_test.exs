@@ -21,7 +21,7 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
       capture_io(fn -> ImportHeydiary.run(["--dump", @dump_path, "--dry-run", "--yes"]) end)
 
     assert output =~
-             "HeyDiary import plan — project heydiary (HeyDiary), environment production"
+             "HeyDiary import plan — project heydiary, environment production"
 
     # Context dimensions were deleted — not in the report either
     refute output =~ "dimensions:"

@@ -8,7 +8,7 @@ defmodule PromptOn.HeyDiaryImport.Plan do
 
   | Field | Contents |
   |---|---|
-  | `project` | `%{slug, name}` (context dimensions were deleted) |
+  | `project` | `%{slug, description}` (context dimensions were deleted) |
   | `environment` | target environment slug |
   | `models` | `%{provider, model_id, display_name, metadata, provider_options, source_id}` |
   | `use_cases` | `%{key, name, kind, input_schema, default_params, description}` |

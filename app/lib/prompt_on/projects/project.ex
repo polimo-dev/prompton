@@ -22,6 +22,42 @@ defmodule PromptOn.Projects.Project do
     references do
       reference :organization, on_delete: :delete
     end
+
+    custom_statements do
+      statement :transition_project_descriptions do
+        up """
+        DO $migration$
+        BEGIN
+          CREATE FUNCTION sync_project_description() RETURNS trigger AS $sync$
+          BEGIN
+            IF TG_OP = 'INSERT' THEN
+              NEW.description := COALESCE(NEW.description, NULLIF(NEW.name, NEW.slug));
+              NEW.name := COALESCE(NEW.description, NEW.slug);
+            ELSIF NEW.description IS DISTINCT FROM OLD.description THEN
+              NEW.name := COALESCE(NEW.description, NEW.slug);
+            ELSIF NEW.name IS DISTINCT FROM OLD.name THEN
+              NEW.description := NULLIF(NEW.name, NEW.slug);
+            END IF;
+            RETURN NEW;
+          END;
+          $sync$ LANGUAGE plpgsql;
+
+          CREATE TRIGGER sync_project_description
+          BEFORE INSERT OR UPDATE ON projects
+          FOR EACH ROW EXECUTE FUNCTION sync_project_description();
+
+          UPDATE projects
+          SET description = COALESCE(description, NULLIF(name, slug)),
+              name = COALESCE(description, name, slug);
+        END;
+        $migration$;
+        """
+
+        down """
+        DROP FUNCTION IF EXISTS sync_project_description() CASCADE;
+        """
+      end
+    end
   end
 
   actions do
@@ -29,7 +65,7 @@ defmodule PromptOn.Projects.Project do
 
     create :create do
       description "Create a project and its default `production`/`staging` envs in one transaction."
-      accept [:organization_id, :name, :slug, :timezone, :payload_policy]
+      accept [:organization_id, :description, :slug, :timezone, :payload_policy]
       validate PromptOn.Projects.Project.Validations.SlugNotReserved
       validate PromptOn.Projects.Project.Validations.WithinPlanLimit
       change PromptOn.Projects.Project.Changes.SetCreator
@@ -37,8 +73,8 @@ defmodule PromptOn.Projects.Project do
       change PromptOn.Projects.Project.Changes.GrantCreatorMembership
     end
 
-    update :rename do
-      accept [:name]
+    update :set_description do
+      accept [:description]
     end
 
     update :set_payload_policy do
@@ -90,7 +126,7 @@ defmodule PromptOn.Projects.Project do
       authorize_if {PromptOn.Checks.OrganizationManager, path: [:organization]}
     end
 
-    policy action([:rename, :set_payload_policy]) do
+    policy action([:set_description, :set_payload_policy]) do
       authorize_if {PromptOn.Checks.ProjectMember, path: []}
     end
   end
@@ -98,7 +134,10 @@ defmodule PromptOn.Projects.Project do
   attributes do
     uuid_v7_primary_key :id
 
-    attribute :name, :string, allow_nil?: false, public?: true
+    attribute :description, :string, public?: true
+
+    # Track the legacy column for codegen, but never read it while the next release removes it.
+    attribute :legacy_name, :string, source: :name, select_by_default?: false
 
     attribute :slug, :string do
       description """

@@ -249,11 +249,10 @@ defmodule PromptOnWeb.UseCasesLive do
       <DS.screen
         id="use-cases-screen"
         title="Use Cases"
-        sub="LLM call sites in the app"
         max_w={1000}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:crumb label={@project.slug} />
+        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
         <:actions>
           <form phx-change="filter" phx-submit="filter" id="use-case-filter-form">
             <DS.ds_input

@@ -203,7 +203,7 @@ defmodule PromptOnWeb.ApiKeysLive do
       organizations={@organizations}
       nav={:apikeys}
     >
-      <DS.screen id="api-keys-screen" title="API keys" sub={@project.name} max_w={880}>
+      <DS.screen id="api-keys-screen" title="API keys" max_w={880}>
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
 

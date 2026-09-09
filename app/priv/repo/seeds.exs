@@ -70,7 +70,6 @@ project =
         Projects.create_project(
           %{
             organization_id: organization.id,
-            name: "HeyDiary",
             slug: "heydiary",
             timezone: "Asia/Seoul"
           },

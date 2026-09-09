@@ -717,7 +717,6 @@ defmodule PromptOnWeb.OrgMembersLive do
 
   defp members_path(assigns), do: ~p"/#{assigns.org_slug}/members"
 
-  defp project_label(%{name: name}) when is_binary(name), do: name
   defp project_label(%{slug: slug}) when is_binary(slug), do: slug
   defp project_label(project), do: to_string(project)
 

@@ -34,19 +34,18 @@ defmodule PromptOn.HeyDiaryImport.Planner do
   alias PromptOn.HeyDiaryImport.{Dump, Plan, Spec}
 
   @default_project_slug "heydiary"
-  @default_project_name "HeyDiary"
   @default_environment "production"
   @ignored_heydiary_tasks ~w(voice_transcription)
 
   @doc """
-  Builds the plan. `opts`: `:project_slug` (default `"heydiary"`), `:project_name` (default
-  `"HeyDiary"`), `:environment` (default `"production"`).
+  Builds the plan. `opts`: `:project_slug` (default `"heydiary"`), `:project_description`
+  (default `nil`), `:environment` (default `"production"`).
   """
   @spec plan(Dump.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}
   def plan(%Dump{} = dump, opts \\ []) do
     project = %{
       slug: Keyword.get(opts, :project_slug, @default_project_slug),
-      name: Keyword.get(opts, :project_name, @default_project_name)
+      description: Keyword.get(opts, :project_description)
     }
 
     environment = Keyword.get(opts, :environment, @default_environment)

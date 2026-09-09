@@ -12,7 +12,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
-    project = Fixtures.project_fixture(%{user: user, slug: "acme", name: "Acme"})
+    project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
     production = Fixtures.environment(project, "production")
 
     diary =

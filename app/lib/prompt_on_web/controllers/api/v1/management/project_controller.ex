@@ -8,11 +8,12 @@ defmodule PromptOnWeb.API.V1.Management.ProjectController do
   In every sub-path of this API a project is addressed **by slug** (`/projects/:project/...`) - the
   same value as `/{org}/{project}` in the UI. The create request takes that value as `key` (the
   same grain as a use case's `key`, a prompt's `name`, and an environment's slug - a coding AI
-  never has to carry UUIDs around). Sending it under the name `slug` works the same.
+  never has to carry UUIDs around). Sending it under the name `slug` works the same. A project may
+  carry an optional `description`.
 
-  Without `name`, `key` is used verbatim. The `production`/`staging` environments are created in
-  the same transaction as the project (`Project.Changes.CreateDefaultEnvironments`) - that is what
-  the `environments` in the response are.
+  The `production`/`staging` environments are created in the same transaction as the project
+  (`Project.Changes.CreateDefaultEnvironments`) - that is what the `environments` in the response
+  are.
 
   Creating with a slug that already exists is **409** with that project in `details.project` - a
   coding AI must be able to move on to the next step even after re-running a provisioning script.
@@ -46,10 +47,10 @@ defmodule PromptOnWeb.API.V1.Management.ProjectController do
     organization = Scope.organization(conn)
 
     with {:ok, slug} <- project_key(params),
-         {:ok, name} <- Params.optional_string(params, "name"),
+         {:ok, description} <- Params.optional_string(params, "description"),
          {:ok, timezone} <- Params.optional_string(params, "timezone"),
          :ok <- ensure_available(conn, slug),
-         attrs = attrs(organization, slug, name, timezone),
+         attrs = attrs(organization, slug, description, timezone),
          {:ok, project} <- Projects.create_project(attrs, actor: user) do
       conn |> put_status(:created) |> json(summary(conn, project))
     end
@@ -64,11 +65,11 @@ defmodule PromptOnWeb.API.V1.Management.ProjectController do
     end
   end
 
-  defp attrs(organization, slug, name, timezone) do
+  defp attrs(organization, slug, description, timezone) do
     attrs = %{
       organization_id: organization.id,
       slug: slug,
-      name: name || slug
+      description: description
     }
 
     if timezone, do: Map.put(attrs, :timezone, timezone), else: attrs
