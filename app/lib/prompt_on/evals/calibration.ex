@@ -37,7 +37,7 @@ defmodule PromptOn.Evals.Calibration do
     with :ok <- authorize_record(set, opts),
          {:ok, context} <- context(set.use_case_id, set.project_id),
          {:ok, samples} <- scored_samples(set.id, opts),
-         judge_opts = judge_opts(nil, context, opts),
+         {:ok, judge_opts} <- judge_opts(nil, context, opts),
          {:ok, criteria, _usage} <- Judge.draft_rubric(context.use_case, samples, judge_opts),
          {:ok, rubric} <- create_draft(set, criteria, opts) do
       score_and_return(rubric, context, samples, opts)
@@ -56,7 +56,7 @@ defmodule PromptOn.Evals.Calibration do
          {:ok, set_id} <- calibration_set_id(rubric),
          {:ok, context} <- context(rubric.use_case_id, rubric.project_id),
          {:ok, samples} <- scored_samples(set_id, opts),
-         judge_opts = judge_opts(rubric, context, opts),
+         {:ok, judge_opts} <- judge_opts(rubric, context, opts),
          note = Keyword.get(opts, :note),
          {:ok, criteria, _usage} <-
            Judge.revise_rubric(context.use_case, rubric, samples, note, judge_opts),
@@ -74,22 +74,24 @@ defmodule PromptOn.Evals.Calibration do
     with :ok <- authorize_record(rubric, opts),
          {:ok, set_id} <- calibration_set_id(rubric),
          {:ok, context} <- context(rubric.use_case_id, rubric.project_id),
-         {:ok, samples} <- scored_samples(set_id, opts) do
-      {:ok, score_samples(rubric, context, samples, opts)}
+         {:ok, samples} <- scored_samples(set_id, opts),
+         {:ok, judge_opts} <- judge_opts(rubric, context, opts) do
+      {:ok, score_samples(rubric, context, samples, opts, judge_opts)}
     end
   end
 
   # ---------------------------------------------------------------------------
 
   defp score_and_return(rubric, context, samples, opts) do
-    _tally = score_samples(rubric, context, samples, opts)
-    {:ok, rubric}
+    with {:ok, judge_opts} <- judge_opts(rubric, context, opts) do
+      _tally = score_samples(rubric, context, samples, opts, judge_opts)
+      {:ok, rubric}
+    end
   end
 
-  defp score_samples(rubric, context, samples, opts) do
+  defp score_samples(rubric, context, samples, opts, judge_opts) do
     tenant = Keyword.fetch!(opts, :tenant)
-    model = Judge.model(rubric, context.organization_id)
-    judge_opts = [organization_id: context.organization_id, model: model]
+    model = Keyword.fetch!(judge_opts, :model)
 
     samples
     |> Task.async_stream(
@@ -155,6 +157,7 @@ defmodule PromptOn.Evals.Calibration do
   # exactly the one that echoes the payload back, so neither the body nor the raw answer is stored.
   defp failure({:unparsable, _raw}), do: {:unparsable, "the judge did not answer with JSON"}
   defp failure(:no_provider_key), do: {:failed, "no provider key"}
+  defp failure(:no_evaluation_model), do: {:failed, "evaluation model not selected"}
   defp failure(:timeout), do: {:failed, "timeout"}
   defp failure({:request_failed, _reason}), do: {:failed, "request failed"}
   defp failure({:http_error, status, _body}), do: {:failed, "HTTP #{status}"}
@@ -249,10 +252,17 @@ defmodule PromptOn.Evals.Calibration do
   end
 
   defp judge_opts(rubric, context, opts) do
-    [
-      organization_id: context.organization_id,
-      model: Judge.model(rubric, context.organization_id),
-      receive_timeout: Keyword.get(opts, :receive_timeout, 60_000)
-    ]
+    case Judge.model(rubric, context.organization_id) do
+      nil ->
+        {:error, :no_evaluation_model}
+
+      model ->
+        {:ok,
+         [
+           organization_id: context.organization_id,
+           model: model,
+           receive_timeout: Keyword.get(opts, :receive_timeout, 60_000)
+         ]}
+    end
   end
 end

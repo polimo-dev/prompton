@@ -8,7 +8,7 @@ defmodule PromptOn.Evals.CalibrationTest do
   import PromptOn.EvalsFixtures
   import PromptOn.Fixtures
 
-  alias PromptOn.Evals
+  alias PromptOn.{Accounts, Evals}
   alias PromptOn.Evals.Calibration
 
   setup do
@@ -16,6 +16,7 @@ defmodule PromptOn.Evals.CalibrationTest do
 
     project = project_fixture()
     provider_key_fixture(organization_id(project))
+    select_judge_model(project)
     use_case = use_case_fixture(project)
     {set, samples} = scored_calibration_set_fixture(project, use_case, [5, 4, 3, 2, 1])
 
@@ -118,6 +119,23 @@ defmodule PromptOn.Evals.CalibrationTest do
       assert {:error, :no_provider_key} = Calibration.draft(set, scope(project))
       assert {:ok, nil} = Evals.current_rubric(set.use_case_id, scope(project))
     end
+
+    test "refuses before a provider call when the organization has no evaluation model" do
+      project = project_fixture()
+      provider_key_fixture(organization_id(project))
+      use_case = use_case_fixture(project)
+      {set, _samples} = scored_calibration_set_fixture(project, use_case, [5, 4, 3, 2, 1])
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn _request ->
+        send(test_pid, :unexpected_judge_call)
+        {:error, :unexpected_judge_call}
+      end)
+
+      assert {:error, :no_evaluation_model} = Calibration.draft(set, scope(project))
+      assert {:ok, nil} = Evals.current_rubric(set.use_case_id, scope(project))
+      refute_received :unexpected_judge_call
+    end
   end
 
   describe "revise/2" do
@@ -141,6 +159,26 @@ defmodule PromptOn.Evals.CalibrationTest do
       hand_written = rubric_fixture(use_case)
 
       assert {:error, :no_calibration_set} = Calibration.revise(hand_written, scope(project))
+    end
+
+    test "refuses after the organization evaluation model is cleared, even with a rubric override",
+         %{project: project, set: set, use_case: use_case} do
+      rubric =
+        rubric_fixture(use_case, %{
+          calibration_set_id: set.id,
+          judge_model: "anthropic/claude-haiku-4"
+        })
+
+      clear_judge_model(project)
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn _request ->
+        send(test_pid, :unexpected_judge_call)
+        {:error, :unexpected_judge_call}
+      end)
+
+      assert {:error, :no_evaluation_model} = Calibration.revise(rubric, scope(project))
+      refute_received :unexpected_judge_call
     end
   end
 
@@ -174,5 +212,35 @@ defmodule PromptOn.Evals.CalibrationTest do
 
       assert {:ok, %{scored: 2}} = Calibration.score_set(rubric, scope(project))
     end
+
+    test "refuses after the organization evaluation model is cleared before scoring", %{
+      project: project,
+      set: set,
+      use_case: use_case
+    } do
+      rubric = rubric_fixture(use_case, %{calibration_set_id: set.id})
+      clear_judge_model(project)
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn _request ->
+        send(test_pid, :unexpected_judge_call)
+        {:error, :unexpected_judge_call}
+      end)
+
+      assert {:error, :no_evaluation_model} = Calibration.score_set(rubric, scope(project))
+      refute_received :unexpected_judge_call
+    end
+  end
+
+  defp clear_judge_model(project) do
+    organization =
+      Ash.get!(PromptOn.Accounts.Organization, organization_id(project), actor: system_actor())
+
+    {:ok, updated} =
+      Accounts.set_organization_judge_model(organization, %{judge_model: nil},
+        actor: system_actor()
+      )
+
+    updated
   end
 end

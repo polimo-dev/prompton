@@ -4,7 +4,7 @@ defmodule PromptOn.Evals.EvaluationResultTest do
   import PromptOn.EvalsFixtures
   import PromptOn.Fixtures
 
-  alias PromptOn.Evals
+  alias PromptOn.{Accounts, Evals}
   alias PromptOn.Evals.EvaluationResult
   alias PromptOn.Observability
 
@@ -13,6 +13,7 @@ defmodule PromptOn.Evals.EvaluationResultTest do
 
     project = project_fixture()
     provider_key_fixture(organization_id(project))
+    select_judge_model(project)
     use_case = use_case_fixture(project)
     target = evaluatable_fixture(project, use_case: use_case, count: 5)
 
@@ -104,6 +105,47 @@ defmodule PromptOn.Evals.EvaluationResultTest do
 
       assert failed.status == :failed
       assert failed.error_message == "no provider key"
+    end
+
+    test "a cleared organization model fails a queued result without a provider call", %{
+      project: project,
+      run: run
+    } do
+      [result | _rest] = results(run, project)
+      clear_judge_model(project)
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn _request ->
+        send(test_pid, :unexpected_judge_call)
+        {:error, :unexpected_judge_call}
+      end)
+
+      failed = score!(result, project)
+
+      assert failed.status == :failed
+      assert failed.error_message == "evaluation model not selected"
+      refute_received :unexpected_judge_call
+    end
+
+    test "uses the run's frozen model when the organization selects a different model", %{
+      project: project,
+      run: run
+    } do
+      [result | _rest] = results(run, project)
+      select_judge_model(project, "openai/gpt-5-mini")
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(test_pid, {:judge_request, request})
+        {:ok, %{PromptOn.LLM.Fake.default_outcome(request) | content: score_answer_json(4)}}
+      end)
+
+      scored = score!(result, project)
+
+      assert scored.status == :scored
+      assert scored.judge_model == run.judge_model
+      assert_received {:judge_request, %{model: frozen_model}}
+      assert frozen_model == run.judge_model
     end
 
     test "a transport failure is a changeset error, so AshOban retries", %{
@@ -256,4 +298,19 @@ defmodule PromptOn.Evals.EvaluationResultTest do
     assert Exception.message(error) =~ "already been taken" or
              Exception.message(error) =~ "unique"
   end
+
+  defp clear_judge_model(project) do
+    organization =
+      Ash.get!(PromptOn.Accounts.Organization, project.organization_id, actor: system_actor())
+
+    {:ok, updated} =
+      Accounts.set_organization_judge_model(organization, %{judge_model: nil},
+        actor: system_actor()
+      )
+
+    updated
+  end
+
+  defp score_answer_json(score),
+    do: Jason.encode!(%{"score" => score, "rationale" => "level match"})
 end

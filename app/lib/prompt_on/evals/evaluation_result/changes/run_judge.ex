@@ -6,13 +6,15 @@ defmodule PromptOn.Evals.EvaluationResult.Changes.RunJudge do
   decrypting path, flattens it with `PromptOn.Evals.PayloadText`, asks
   `PromptOn.Evals.Judge.score_sample/5` and force-writes the outcome.
 
-  Three outcomes are **terminal and are not changeset errors**, because there is nothing to retry:
+  These outcomes are **terminal and are not changeset errors**, because there is nothing to retry:
 
   - the payload is gone (the retention purge got there first) → `:failed`,
     `"payload no longer stored"`;
   - the judge did not answer with JSON → `:unparsable`, excluded from the average and counted
     separately;
-  - `{:error, :no_provider_key}` → `:failed`, `"no provider key"` (the key was revoked mid-run).
+  - `{:error, :no_provider_key}` → `:failed`, `"no provider key"` (the key was revoked mid-run);
+  - `{:error, :no_evaluation_model}` → `:failed`, `"evaluation model not selected"` (the
+    organization selection was cleared mid-run).
 
   Anything else (transport, HTTP) **is** added as a changeset error, so AshOban retries with
   exponential backoff and `on_error :mark_failed` records the failure after the last attempt.
@@ -46,26 +48,35 @@ defmodule PromptOn.Evals.EvaluationResult.Changes.RunJudge do
   end
 
   defp score(changeset, context, run, use_case, input, output, opts) do
-    judge_opts = [organization_id: organization_id(opts), model: run.judge_model]
+    case selected_model(run.judge_model) do
+      {:ok, model} ->
+        judge_opts = [organization_id: organization_id(opts), model: model]
 
-    case Judge.score_sample(use_case, run.rubric, input, output, judge_opts) do
-      {:ok, outcome} ->
-        write(changeset, context, :scored, run.judge_model, outcome)
+        case Judge.score_sample(use_case, run.rubric, input, output, judge_opts) do
+          {:ok, outcome} ->
+            write(changeset, context, :scored, model, outcome)
 
-      {:error, {:unparsable, _raw}} ->
-        terminal(changeset, :unparsable, "the judge did not answer with JSON", run.judge_model)
+          {:error, {:unparsable, _raw}} ->
+            terminal(changeset, :unparsable, "the judge did not answer with JSON", model)
 
-      {:error, :no_provider_key} ->
-        terminal(changeset, :failed, "no provider key", run.judge_model)
+          {:error, :no_provider_key} ->
+            terminal(changeset, :failed, "no provider key", model)
 
-      {:error, reason} ->
-        Ash.Changeset.add_error(
-          changeset,
-          Ash.Error.Changes.InvalidAttribute.exception(
-            field: :status,
-            message: "judge call failed: #{describe(reason)}"
-          )
-        )
+          {:error, :no_evaluation_model} ->
+            terminal(changeset, :failed, "evaluation model not selected", nil)
+
+          {:error, reason} ->
+            Ash.Changeset.add_error(
+              changeset,
+              Ash.Error.Changes.InvalidAttribute.exception(
+                field: :status,
+                message: "judge call failed: #{describe(reason)}"
+              )
+            )
+        end
+
+      {:error, :no_evaluation_model} ->
+        terminal(changeset, :failed, "evaluation model not selected", nil)
     end
   end
 
@@ -138,6 +149,15 @@ defmodule PromptOn.Evals.EvaluationResult.Changes.RunJudge do
       _other -> nil
     end
   end
+
+  defp selected_model(model) when is_binary(model) do
+    case String.trim(model) do
+      "" -> {:error, :no_evaluation_model}
+      _trimmed -> {:ok, model}
+    end
+  end
+
+  defp selected_model(_model), do: {:error, :no_evaluation_model}
 
   # Only the shape of the failure, never a body: a provider error body can quote the request.
   defp describe(:timeout), do: "timeout"

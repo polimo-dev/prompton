@@ -41,10 +41,10 @@ defmodule PromptOnWeb.EvalsPanel do
 
   ## Provider key
 
-  Every AI call here is BYOK on the organization's own OpenRouter key
-  (`PromptOn.Evals.Judge.available?/1`). Without one, the AI buttons are disabled with the arena's
-  own copy and the same link to `/{org}/settings?tab=providers` — sampling and manual scoring still
-  work, because they call no model.
+  AI evaluation needs a selected Evaluation model and the organization's own OpenRouter key
+  (`PromptOn.Evals.Judge.availability/1`). Missing configuration disables the AI steps and links to
+  the relevant Organization settings. Sampling and manual scoring still work because they call no
+  model. Availability is refreshed before every AI event as well as when the panel updates.
   """
   use PromptOnWeb, :live_component
 
@@ -100,7 +100,7 @@ defmodule PromptOnWeb.EvalsPanel do
         do: socket,
         else: load_all(socket)
 
-    {:ok, socket |> apply_params() |> arm_poll()}
+    {:ok, socket |> refresh_judge() |> apply_params() |> arm_poll()}
   end
 
   defp ensure_defaults(%{assigns: %{loaded_use_case_id: _id}} = socket), do: socket
@@ -118,6 +118,7 @@ defmodule PromptOnWeb.EvalsPanel do
       run: nil,
       worst: [],
       judge?: false,
+      judge_error: :no_evaluation_model,
       eligible_count: 0,
       eligible_ok?: true,
       evaluate_key: nil,
@@ -138,11 +139,17 @@ defmodule PromptOnWeb.EvalsPanel do
   defp load_all(socket) do
     socket
     |> assign(:loaded_use_case_id, socket.assigns.use_case.id)
-    |> assign(:judge?, Judge.available?(socket.assigns.organization.id))
     |> count_eligible()
     |> load_sets()
     |> load_rubrics()
     |> load_runs()
+  end
+
+  defp refresh_judge(socket) do
+    case Judge.availability(socket.assigns.organization.id) do
+      :ok -> assign(socket, judge?: true, judge_error: nil)
+      {:error, reason} -> assign(socket, judge?: false, judge_error: reason)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -476,6 +483,8 @@ defmodule PromptOnWeb.EvalsPanel do
   end
 
   def handle_event("draft", _params, socket) do
+    socket = refresh_judge(socket)
+
     case guard_draft(socket) do
       {:error, message} ->
         {:noreply, flash(socket, :error, message)}
@@ -495,6 +504,7 @@ defmodule PromptOnWeb.EvalsPanel do
     do: {:noreply, assign(socket, :revise_note, note)}
 
   def handle_event("revise", params, socket) do
+    socket = refresh_judge(socket)
     note = get_in(params, ["revise", "note"]) || socket.assigns.revise_note
 
     case guard_rubric(socket) do
@@ -513,6 +523,8 @@ defmodule PromptOnWeb.EvalsPanel do
   end
 
   def handle_event("rescore", _params, socket) do
+    socket = refresh_judge(socket)
+
     case guard_rubric(socket) do
       {:error, message} ->
         {:noreply, flash(socket, :error, message)}
@@ -566,6 +578,8 @@ defmodule PromptOnWeb.EvalsPanel do
   # The button only exists when nothing blocks the run, but the event is re-checked anyway: a
   # crafted event must produce the same sentence the modal would have shown, not a crash.
   def handle_event("evaluate", _params, socket) do
+    socket = refresh_judge(socket)
+
     case evaluate_blocker(socket.assigns) do
       nil -> start_evaluation(socket)
       message -> {:noreply, flash(socket, :error, message)}
@@ -635,8 +649,8 @@ defmodule PromptOnWeb.EvalsPanel do
   defp guard_draft(%{assigns: %{set: nil}}), do: {:error, "Sample some logs first."}
   defp guard_draft(socket), do: guard_ai(socket)
 
-  defp guard_ai(%{assigns: %{judge?: false}}),
-    do: {:error, EditorTestRun.llm_error_message(:no_provider_key)}
+  defp guard_ai(%{assigns: %{judge?: false, judge_error: reason}}),
+    do: {:error, ai_error_message(reason)}
 
   defp guard_ai(%{assigns: %{stage: :running}}), do: {:error, "Still running — wait."}
   defp guard_ai(_socket), do: :ok
@@ -734,6 +748,12 @@ defmodule PromptOnWeb.EvalsPanel do
     end
   end
 
+  defp ai_error_message(:no_evaluation_model),
+    do: "Select an Evaluation model in Organization settings to enable evaluations."
+
+  defp ai_error_message(reason), do: EditorTestRun.llm_error_message(reason)
+
+  defp async_error_message(:no_evaluation_model), do: ai_error_message(:no_evaluation_model)
   defp async_error_message(:no_scored_samples), do: "Score the samples first."
   defp async_error_message(:no_calibration_set), do: "These criteria have no calibration set."
   defp async_error_message({:unparsable, _raw}), do: "The judge did not answer with JSON."
@@ -827,7 +847,7 @@ defmodule PromptOnWeb.EvalsPanel do
         "Draft criteria first — an evaluation needs them."
 
       not assigns.judge? ->
-        EditorTestRun.llm_error_message(:no_provider_key)
+        ai_error_message(assigns.judge_error)
 
       assigns.env == nil ->
         "This project has no environments."
@@ -880,7 +900,7 @@ defmodule PromptOnWeb.EvalsPanel do
 
   defp draft_blocker(assigns) do
     cond do
-      not assigns.judge? -> EditorTestRun.llm_error_message(:no_provider_key)
+      not assigns.judge? -> ai_error_message(assigns.judge_error)
       not all_scored?(assigns.samples) -> "Score all #{length(assigns.samples)} samples first."
       assigns.stage == :running -> "Still running — wait."
       true -> nil
@@ -904,7 +924,23 @@ defmodule PromptOnWeb.EvalsPanel do
 
     ~H"""
     <div id={@id} style="display:flex;flex-direction:column;gap:16px;min-width:0;">
-      <.no_key_note :if={not @judge?} id="evals-no-key" providers_path={providers_path(assigns)} />
+      <.no_key_note
+        :if={@judge_error == :no_provider_key}
+        id="evals-no-key"
+        providers_path={providers_path(assigns)}
+      />
+      <div
+        :if={@judge_error == :no_evaluation_model}
+        id="evals-no-model"
+        class="card2"
+        style="padding:10px 12px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx-2);flex-wrap:wrap;"
+      >
+        <DSIcons.icon name="sparkles" size={14} class="tx3" />
+        <span>No Evaluation model selected. AI evaluation is unavailable.</span>
+        <.link navigate={settings_path(assigns)} style="color:var(--link);">
+          Organization settings
+        </.link>
+      </div>
 
       <.calibration_section {assigns} />
       <.rubric_section :if={@rubric} {assigns} />
@@ -1162,7 +1198,7 @@ defmodule PromptOnWeb.EvalsPanel do
           phx-click="rescore"
           phx-target={@myself}
           disabled={not @judge? or @stage == :running}
-          title={not @judge? && EditorTestRun.llm_error_message(:no_provider_key)}
+          title={not @judge? && ai_error_message(@judge_error)}
         >
           Re-score with these criteria
         </DS.btn>
@@ -1243,7 +1279,7 @@ defmodule PromptOnWeb.EvalsPanel do
           form="revise-form"
           type="submit"
           disabled={not @judge? or @stage == :running}
-          title={not @judge? && EditorTestRun.llm_error_message(:no_provider_key)}
+          title={not @judge? && ai_error_message(@judge_error)}
         >
           {if @stage == :running, do: "Working…", else: "Revise"}
         </DS.btn>
@@ -1350,16 +1386,18 @@ defmodule PromptOnWeb.EvalsPanel do
           <DS.kv label="revision">{revision_line(@live)}</DS.kv>
           <DS.kv label="criteria">{rubric_line(current_rubric(assigns))}</DS.kv>
           <DS.kv label="samples">{@evaluate_count}</DS.kv>
-          <DS.kv label="judge">{Judge.model(current_rubric(assigns), @organization)}</DS.kv>
+          <DS.kv label="evaluation model">
+            {Judge.model(current_rubric(assigns), @organization.id) || "Not selected"}
+          </DS.kv>
         </div>
 
         <div id="evaluate-eligible" style="font-size:12.5px;color:var(--tx-2);line-height:1.55;">
           {eligible_line(@evaluate_count, @organization)}
         </div>
 
-        <div id="evaluate-cost" style="font-size:12.5px;color:var(--tx-3);">
+        <div :if={@judge?} id="evaluate-cost" style="font-size:12.5px;color:var(--tx-3);">
           ≈ {cost_label(cost_estimate(@evaluate_count))} on your OpenRouter key
-          ({Judge.model(current_rubric(assigns), @organization)}).
+          ({Judge.model(current_rubric(assigns), @organization.id)}).
         </div>
       </div>
       <:footer>
@@ -1370,6 +1408,14 @@ defmodule PromptOnWeb.EvalsPanel do
           style="margin-left:auto;font-size:12.5px;color:var(--tx-3);text-align:right;"
         >
           {@evaluate_blocker}
+          <.link
+            :if={@evaluate_blocker == ai_error_message(:no_evaluation_model)}
+            id="evaluate-model-settings-link"
+            navigate={settings_path(assigns)}
+            style="color:var(--link);"
+          >
+            Organization settings
+          </.link>
           <.link
             :if={@evaluate_blocker == EditorTestRun.llm_error_message(:no_provider_key)}
             id="evaluate-providers-link"

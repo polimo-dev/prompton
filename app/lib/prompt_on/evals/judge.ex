@@ -26,7 +26,6 @@ defmodule PromptOn.Evals.Judge do
 
   alias PromptOn.Evals.RubricCriteria
 
-  @default_judge_model "openai/gpt-4o-mini"
   @default_receive_timeout 60_000
   @max_rationale_chars 500
 
@@ -78,38 +77,54 @@ defmodule PromptOn.Evals.Judge do
   5. Answer with JSON only, no markdown fences: {"score": <integer 1-5>, "rationale": "..."}\
   """
 
-  @doc "The app-level default judge model when neither the rubric nor the organization names one."
-  @spec default_model() :: String.t()
-  def default_model, do: Application.get_env(:prompton, :judge_model, @default_judge_model)
-
   @doc """
-  Can this organization run a judge call at all? True when it has a non-revoked OpenRouter
-  `ProviderKey`, or when the app-wide `PTN_OPENROUTER_API_KEY` fallback is configured.
+  Can this organization run a judge call at all? It must have an explicitly selected evaluation
+  model, and either a non-revoked OpenRouter `ProviderKey` or the app-wide fallback key.
 
   The Evals panel calls this on mount to disable the AI buttons before the click, and
   `EvaluationRun.:start` validates it again.
   """
   @spec available?(Ash.UUID.t() | nil) :: boolean()
-  def available?(nil), do: fallback_key?()
+  def available?(organization_id), do: availability(organization_id) == :ok
 
-  def available?(organization_id) do
-    case PromptOn.Accounts.active_provider_key(organization_id, :openrouter,
-           actor: PromptOn.SystemActor.new()
-         ) do
-      {:ok, %{}} -> true
-      _other -> fallback_key?()
+  @doc """
+  Returns why an organization cannot run new judge calls.
+
+  Existing frozen evaluation history remains valid; this gates only new calls.
+  """
+  @spec availability(Ash.UUID.t() | nil) ::
+          :ok | {:error, :no_evaluation_model | :no_provider_key}
+  def availability(nil), do: {:error, :no_evaluation_model}
+
+  def availability(organization_id) do
+    cond do
+      is_nil(model(nil, organization_id)) ->
+        {:error, :no_evaluation_model}
+
+      provider_available?(organization_id) ->
+        :ok
+
+      true ->
+        {:error, :no_provider_key}
     end
   end
 
   @doc """
-  Resolves the judge model: the rubric's override, then the organization's default, then the app
-  default. `EvaluationRun.:start` freezes the result onto the run.
+  Resolves the judge model for a new call.
+
+  The organization must have explicitly selected an evaluation model. Once that gate is satisfied,
+  a rubric override wins over the organization model. There is deliberately no app-level fallback
+  for new evaluation calls.
   """
-  @spec model(map() | nil, map() | Ash.UUID.t() | nil) :: String.t()
+  @spec model(map() | nil, map() | Ash.UUID.t() | nil) :: String.t() | nil
   def model(rubric, organization) do
-    blank_to_nil(rubric && Map.get(rubric, :judge_model)) ||
-      blank_to_nil(organization_model(organization)) ||
-      default_model()
+    case blank_to_nil(organization_model(organization)) do
+      nil ->
+        nil
+
+      organization_model ->
+        blank_to_nil(rubric && Map.get(rubric, :judge_model)) || organization_model
+    end
   end
 
   @doc """
@@ -255,17 +270,43 @@ defmodule PromptOn.Evals.Judge do
   # Calling
 
   defp complete(messages, params, opts) do
-    request = %{
-      model: Keyword.fetch!(opts, :model),
-      messages: messages,
-      params: params,
-      provider_options: %{}
-    }
+    with :ok <- organization_selected?(Keyword.get(opts, :organization_id)),
+         {:ok, model} <- selected_model(Keyword.get(opts, :model)) do
+      request = %{
+        model: model,
+        messages: messages,
+        params: params,
+        provider_options: %{}
+      }
 
-    PromptOn.LLM.complete(request,
-      organization_id: Keyword.fetch!(opts, :organization_id),
-      receive_timeout: Keyword.get(opts, :receive_timeout, @default_receive_timeout)
-    )
+      PromptOn.LLM.complete(request,
+        organization_id: Keyword.fetch!(opts, :organization_id),
+        receive_timeout: Keyword.get(opts, :receive_timeout, @default_receive_timeout)
+      )
+    end
+  end
+
+  defp organization_selected?(organization_id) do
+    case model(nil, organization_id) do
+      nil -> {:error, :no_evaluation_model}
+      _model -> :ok
+    end
+  end
+
+  defp selected_model(model) do
+    case blank_to_nil(model) do
+      nil -> {:error, :no_evaluation_model}
+      model -> {:ok, model}
+    end
+  end
+
+  defp provider_available?(organization_id) do
+    case PromptOn.Accounts.active_provider_key(organization_id, :openrouter,
+           actor: PromptOn.SystemActor.new()
+         ) do
+      {:ok, %{}} -> true
+      _other -> fallback_key?()
+    end
   end
 
   # ---------------------------------------------------------------------------

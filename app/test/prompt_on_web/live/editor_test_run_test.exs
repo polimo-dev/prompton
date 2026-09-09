@@ -12,7 +12,7 @@ defmodule PromptOnWeb.EditorTestRunTest do
      deployment nor a save (ADR 0007), so if this path is blocked the draft-first flow becomes
      unobservable.
   """
-  use PromptOn.DataCase, async: true
+  use PromptOn.DataCase, async: false
 
   alias PromptOn.Fixtures
   alias PromptOn.Observability
@@ -80,6 +80,127 @@ defmodule PromptOnWeb.EditorTestRunTest do
                EditorTestRun.run(context(ctx, %{variables: %{}}))
 
       assert message =~ "input"
+    end
+  end
+
+  describe "request_snapshot/1" do
+    test "freezes the same request messages that a run sends to the fake LLM", ctx do
+      turns = [%{role: "assistant", content: "prior answer"}, %{role: "user", content: "next"}]
+
+      context =
+        context(ctx, %{
+          prompt_id: Ash.UUIDv7.generate(),
+          prompt_name: "default",
+          prompt_version_id: Ash.UUIDv7.generate(),
+          prompt_version_number: 7,
+          variables: %{"input" => "hi", "count" => 0, "ok" => false},
+          turns: turns
+        })
+
+      snapshot = EditorTestRun.request_snapshot(context)
+      result = EditorTestRun.run(context)
+
+      assert snapshot["prompt"]["name"] == "default"
+      assert snapshot["prompt"]["version_number"] == 7
+      assert snapshot["engine"] == "liquid"
+
+      assert snapshot["template_messages"] == [
+               %{"role" => "system", "content" => "Be terse."},
+               %{"role" => "user", "content" => "{{ input }}"}
+             ]
+
+      assert snapshot["variables"]["count"] == 0
+      assert snapshot["variables"]["ok"] == false
+      assert snapshot["messages"] == result.messages
+
+      assert snapshot["messages"] == [
+               %{"role" => "system", "content" => "Be terse."},
+               %{"role" => "user", "content" => "hi"},
+               %{"role" => "assistant", "content" => "prior answer"},
+               %{"role" => "user", "content" => "next"}
+             ]
+
+      assert snapshot["params"] == %{}
+      assert snapshot["provider_options"] == %{"only" => ["Anthropic"]}
+
+      assert snapshot["model"] == %{
+               "id" => ctx.model.id,
+               "name" => "Model A",
+               "model_id" => "m/a"
+             }
+
+      assert result.outcome.content =~ "prior answer\nnext"
+      assert snapshot["render_error"] == nil
+    end
+
+    test "keeps prompt metadata and a useful error when rendering fails", ctx do
+      snapshot =
+        ctx
+        |> context(%{
+          prompt_name: "default",
+          prompt_version_number: 3,
+          variables: %{}
+        })
+        |> EditorTestRun.request_snapshot()
+
+      assert snapshot["prompt"]["name"] == "default"
+      assert snapshot["prompt"]["version_number"] == 3
+      assert snapshot["messages"] == nil
+      assert snapshot["render_error"] =~ "input"
+      assert snapshot["render_error_reason"] =~ "missing_variable"
+    end
+
+    test "a prepared snapshot is sent without rendering the current draft again", ctx do
+      snapshot =
+        ctx
+        |> context(%{
+          variables: %{"input" => "snapshot value"},
+          prompt_name: "default",
+          prompt_version_number: 9
+        })
+        |> EditorTestRun.request_snapshot()
+
+      parent = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(parent, {:llm_request, request})
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      on_exit(&PromptOn.LLM.Fake.reset/0)
+
+      context =
+        context(ctx, %{
+          request_snapshot: snapshot,
+          buffer: [%{role: "user", content: "{{ missing_after_snapshot }}"}],
+          variables: %{}
+        })
+
+      assert %{status: :ok, messages: messages} = EditorTestRun.run(context)
+      assert messages == snapshot["messages"]
+      assert_receive {:llm_request, %{messages: ^messages}}
+    end
+
+    test "a prepared render-error snapshot does not call the provider", ctx do
+      snapshot =
+        ctx
+        |> context(%{variables: %{}})
+        |> EditorTestRun.request_snapshot()
+
+      parent = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(parent, {:unexpected_llm_request, request})
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      on_exit(&PromptOn.LLM.Fake.reset/0)
+
+      assert %{status: :error, stage: :render, messages: nil, message: message} =
+               EditorTestRun.run(context(ctx, %{request_snapshot: snapshot}))
+
+      assert message == snapshot["render_error"]
+      refute_receive {:unexpected_llm_request, _request}
     end
   end
 
@@ -189,6 +310,52 @@ defmodule PromptOnWeb.EditorTestRunTest do
                "n" => 3,
                "flag" => true,
                "raw" => "x"
+             }
+    end
+
+    test "typed stored variables become form inputs and cast back without losing structure" do
+      schema = [
+        %{name: "lines", type: :list, required?: false},
+        %{name: "settings", type: :map, required?: false},
+        %{name: "n", type: :number, required?: false},
+        %{name: "flag", type: :boolean, required?: false},
+        %{name: "raw", type: :string, required?: false},
+        %{name: "missing", type: :string, required?: false}
+      ]
+
+      stored = %{
+        "lines" => ["a", %{"nested" => [1, false]}, ["deep"]],
+        "settings" => %{"enabled" => false, "count" => 0},
+        "n" => 0,
+        "flag" => false,
+        "raw" => "literal\nstring",
+        "ignored" => "gone"
+      }
+
+      inputs = EditorTestRun.variable_inputs(schema, stored)
+
+      assert inputs["n"] == "0"
+      assert inputs["flag"] == "false"
+      assert inputs["raw"] == "literal\nstring"
+      refute Map.has_key?(inputs, "ignored")
+      refute Map.has_key?(inputs, "missing")
+
+      cast = EditorTestRun.cast_variables(schema, inputs)
+
+      assert Map.drop(cast, ["missing"]) == %{
+               "lines" => ["a", %{"nested" => [1, false]}, ["deep"]],
+               "settings" => %{"enabled" => false, "count" => 0},
+               "n" => 0,
+               "flag" => false,
+               "raw" => "literal\nstring"
+             }
+    end
+
+    test "list casting still accepts newline text when it is not a JSON array" do
+      schema = [%{name: "lines", type: :list, required?: false}]
+
+      assert EditorTestRun.cast_variables(schema, %{"lines" => "a\n\nb"}) == %{
+               "lines" => ["a", "b"]
              }
     end
 

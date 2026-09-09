@@ -45,6 +45,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
   alias PromptOn.Accounts
   alias PromptOn.Accounts.Permissions
+  alias PromptOn.Catalog.ProviderCatalog
   alias PromptOn.Entitlements
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.OrgComponents, as: OC
@@ -73,9 +74,10 @@ defmodule PromptOnWeb.OrgSettingsLive do
        form: nil,
        name_form: name_form(socket.assigns.organization),
        slug_form: slug_form(socket.assigns.organization),
-       evaluation_form: evaluation_form(socket.assigns.organization),
-       draft_form: draft_form(socket.assigns.organization),
        provider_key: nil,
+       model_catalog: [],
+       model_catalog_state: nil,
+       model_query: "",
        can_manage?: false,
        owner?: false,
        transfer_members: []
@@ -114,12 +116,6 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
   defp slug_form(organization),
     do: to_form(%{"slug" => organization.slug || "", "name" => organization.name}, as: :claim)
-
-  defp evaluation_form(organization),
-    do: to_form(%{"evaluation_model" => organization.judge_model || ""}, as: :evaluation)
-
-  defp draft_form(organization),
-    do: to_form(%{"draft_model" => organization.draft_model || ""}, as: :draft)
 
   # ---------------------------------------------------------------------------
   # Data
@@ -176,6 +172,13 @@ defmodule PromptOnWeb.OrgSettingsLive do
   defp apply_modal(%{assigns: %{can_manage?: false}} = socket, _tab, _params),
     do: assign(socket, modal: nil)
 
+  defp apply_modal(socket, "general", %{"model-picker" => target})
+       when target in ["evaluation", "draft"] do
+    socket
+    |> assign(modal: {:model_picker, target}, model_query: "")
+    |> maybe_start_model_catalog()
+  end
+
   # With a single provider the value of `?add-provider=` no longer selects anything: if present,
   # the modal opens.
   defp apply_modal(socket, "providers", %{"add-provider" => value}) when is_binary(value) do
@@ -215,16 +218,16 @@ defmodule PromptOnWeb.OrgSettingsLive do
     {:noreply, assign(socket, :slug_form, to_form(params, as: :claim))}
   end
 
-  def handle_event("validate_evaluation", %{"evaluation" => params}, socket) do
-    {:noreply, assign(socket, :evaluation_form, to_form(params, as: :evaluation))}
-  end
-
-  def handle_event("validate_draft", %{"draft" => params}, socket) do
-    {:noreply, assign(socket, :draft_form, to_form(params, as: :draft))}
-  end
-
   def handle_event("validate_form", params, socket) do
     {:noreply, assign(socket, :form, restore_form(socket.assigns.form, params))}
+  end
+
+  def handle_event("org_model_search", params, socket) do
+    {:noreply, assign(socket, :model_query, search_query(params))}
+  end
+
+  def handle_event("retry_org_model_catalog", _params, socket) do
+    {:noreply, start_model_catalog(socket, refresh: true)}
   end
 
   # ---------------------------------------------------------------------------
@@ -247,40 +250,32 @@ defmodule PromptOnWeb.OrgSettingsLive do
     end
   end
 
-  # Model defaults are organization settings editable by admins and owners.
-  def handle_event("save_evaluation_model", %{"evaluation" => params}, socket) do
-    attrs = %{judge_model: blank_to_nil(params["evaluation_model"])}
+  def handle_event("select_org_model", %{"target" => target, "model-id" => model_id}, socket)
+      when target in ["evaluation", "draft"] and is_binary(model_id) do
+    cond do
+      not socket.assigns.can_manage? ->
+        {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
 
-    case Accounts.set_organization_judge_model(socket.assigns.organization, attrs,
-           actor: socket.assigns.current_user
-         ) do
-      {:ok, organization} ->
-        {:noreply,
-         socket
-         |> assign(organization: organization, evaluation_form: evaluation_form(organization))
-         |> put_flash(:info, "Evaluation model saved")}
+      Enum.any?(socket.assigns.model_catalog, &(&1.model_id == model_id)) ->
+        save_org_model(socket, target, model_id)
 
-      {:error, error} ->
-        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+      true ->
+        {:noreply, put_flash(socket, :error, "Choose a model from the OpenRouter list.")}
     end
   end
 
-  def handle_event("save_draft_model", %{"draft" => params}, socket) do
-    case Accounts.set_organization_draft_model(
-           socket.assigns.organization,
-           %{draft_model: blank_to_nil(params["draft_model"])},
-           actor: socket.assigns.current_user
-         ) do
-      {:ok, organization} ->
-        {:noreply,
-         socket
-         |> assign(organization: organization, draft_form: draft_form(organization))
-         |> put_flash(:info, "Draft model saved")}
+  def handle_event("select_org_model", _params, socket),
+    do: {:noreply, put_flash(socket, :error, "Choose a model from the OpenRouter list.")}
 
-      {:error, error} ->
-        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
-    end
+  def handle_event("clear_org_model", %{"target" => target}, socket)
+      when target in ["evaluation", "draft"] do
+    if socket.assigns.can_manage?,
+      do: save_org_model(socket, target, nil),
+      else: {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
   end
+
+  def handle_event("clear_org_model", _params, socket),
+    do: {:noreply, put_flash(socket, :error, "Unknown model setting.")}
 
   # Getting a slug changes the URL: a personal organization becomes a team organization at that
   # moment (`/personal` → `/{slug}`), and a team organization moves address. Either way the links
@@ -394,8 +389,76 @@ defmodule PromptOnWeb.OrgSettingsLive do
      |> push_navigate(to: ~p"/personal")}
   end
 
+  @impl Phoenix.LiveView
+  def handle_async(:org_model_catalog, {:ok, {:ok, models}}, socket) do
+    {:noreply, assign(socket, model_catalog: models, model_catalog_state: :loaded)}
+  end
+
+  def handle_async(:org_model_catalog, {:ok, {:error, reason}}, socket) do
+    {:noreply, assign(socket, :model_catalog_state, {:error, reason})}
+  end
+
+  def handle_async(:org_model_catalog, {:exit, reason}, socket) do
+    {:noreply,
+     assign(socket, :model_catalog_state, {:error, "request stopped (#{inspect(reason)})"})}
+  end
+
   # ---------------------------------------------------------------------------
   # Helpers
+
+  defp save_org_model(socket, "evaluation", model_id) do
+    case Accounts.set_organization_judge_model(
+           socket.assigns.organization,
+           %{judge_model: model_id},
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, organization} ->
+        {:noreply,
+         socket
+         |> assign(:organization, organization)
+         |> put_flash(:info, model_flash("Evaluation model", model_id))
+         |> push_patch(to: settings_path(socket, "general"))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+    end
+  end
+
+  defp save_org_model(socket, "draft", model_id) do
+    case Accounts.set_organization_draft_model(
+           socket.assigns.organization,
+           %{draft_model: model_id},
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, organization} ->
+        {:noreply,
+         socket
+         |> assign(:organization, organization)
+         |> put_flash(:info, model_flash("Draft model", model_id))
+         |> push_patch(to: settings_path(socket, "general"))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+    end
+  end
+
+  defp model_flash(label, nil), do: "#{label} cleared"
+  defp model_flash(label, _model_id), do: "#{label} saved"
+
+  defp maybe_start_model_catalog(socket) do
+    if connected?(socket) and socket.assigns.model_catalog_state == nil,
+      do: start_model_catalog(socket),
+      else: socket
+  end
+
+  defp start_model_catalog(socket, opts \\ []) do
+    socket
+    |> assign(:model_catalog_state, :loading)
+    |> start_async(:org_model_catalog, fn -> ProviderCatalog.list_openrouter_models(opts) end)
+  end
+
+  defp search_query(%{"picker" => %{"q" => query}}) when is_binary(query), do: query
+  defp search_query(_params), do: ""
 
   defp claim_slug(socket, params, slug) do
     attrs = %{slug: slug, name: String.trim(params["name"] || socket.assigns.organization.name)}
@@ -464,10 +527,9 @@ defmodule PromptOnWeb.OrgSettingsLive do
         <.general_tab
           :if={@tab == "general"}
           organization={@organization}
+          org_slug={@org_slug}
           name_form={@name_form}
           slug_form={@slug_form}
-          evaluation_form={@evaluation_form}
-          draft_form={@draft_form}
           can_manage?={@can_manage?}
         />
         <.providers_tab
@@ -480,6 +542,15 @@ defmodule PromptOnWeb.OrgSettingsLive do
           :if={@tab == "general" and @owner?}
           organization={@organization}
           org_slug={@org_slug}
+        />
+        <.org_model_picker_modal
+          :if={match?({:model_picker, _target}, @modal)}
+          target={elem(@modal, 1)}
+          organization={@organization}
+          org_slug={@org_slug}
+          query={@model_query}
+          catalog_state={@model_catalog_state}
+          rows={org_model_rows(assigns)}
         />
         <.ownership_modal
           :if={@modal in [:transfer_owner, :delete_organization]}
@@ -504,10 +575,9 @@ defmodule PromptOnWeb.OrgSettingsLive do
   # --- General ---------------------------------------------------------------
 
   attr :organization, :map, required: true
+  attr :org_slug, :string, required: true
   attr :name_form, :map, required: true
   attr :slug_form, :map, required: true
-  attr :evaluation_form, :map, required: true
-  attr :draft_form, :map, required: true
   attr :can_manage?, :boolean, required: true
 
   defp general_tab(assigns) do
@@ -517,8 +587,8 @@ defmodule PromptOnWeb.OrgSettingsLive do
     <div id="org-settings-general">
       <.plan_card plan={@plan} />
       <.models_card
-        evaluation_form={@evaluation_form}
-        draft_form={@draft_form}
+        organization={@organization}
+        org_slug={@org_slug}
         can_manage?={@can_manage?}
       />
 
@@ -645,8 +715,8 @@ defmodule PromptOnWeb.OrgSettingsLive do
     """
   end
 
-  attr :evaluation_form, :map, required: true
-  attr :draft_form, :map, required: true
+  attr :organization, :map, required: true
+  attr :org_slug, :string, required: true
   attr :can_manage?, :boolean, required: true
 
   defp models_card(assigns) do
@@ -654,77 +724,152 @@ defmodule PromptOnWeb.OrgSettingsLive do
     <SC.setting_card
       id="org-models-card"
       title="AI models"
-      desc="Default models for this organization's evaluations and AI draft writing. Uses your OpenRouter key."
+      desc="Choose the OpenRouter models this organization uses for evaluations and AI draft writing."
     >
-      <form
-        id="org-evaluation-form"
-        phx-submit="save_evaluation_model"
-        phx-change="validate_evaluation"
-      >
-        <label for="org-evaluation-model" class="mono-label" style="display:block;margin-bottom:7px;">
-          Evaluation model
-        </label>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <DS.ds_input
-            id="org-evaluation-model"
-            class="flex-1 min-w-0"
-            readonly={not @can_manage?}
-            field={@evaluation_form[:evaluation_model]}
-            mono
-            placeholder={default_evaluation_model()}
-            aria-describedby="evaluation-model-help"
-          />
-          <DS.btn :if={@can_manage?} id="save-evaluation-model" variant="solid" type="submit">
-            Save
-          </DS.btn>
-        </div>
-        <div
-          id="evaluation-model-help"
-          style="font-size:12px;color:var(--tx-3);margin-top:6px;line-height:1.5;"
-        >
-          Scores evaluations. Leave blank to use {default_evaluation_model()}.
-        </div>
-      </form>
-      <form
-        id="org-draft-form"
-        phx-submit="save_draft_model"
-        phx-change="validate_draft"
-        style="margin-top:22px;"
-      >
-        <label for="org-draft-model" class="mono-label" style="display:block;margin-bottom:7px;">
-          Draft model
-        </label>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <DS.ds_input
-            id="org-draft-model"
-            class="flex-1 min-w-0"
-            readonly={not @can_manage?}
-            field={@draft_form[:draft_model]}
-            mono
-            placeholder={PromptOn.Accounts.Organization.default_draft_model()}
-            aria-describedby="draft-model-help"
-          />
-          <DS.btn :if={@can_manage?} id="save-draft-model" variant="solid" type="submit">
-            Save
-          </DS.btn>
-        </div>
-        <div
-          id="draft-model-help"
-          style="font-size:12px;color:var(--tx-3);margin-top:6px;line-height:1.5;"
-        >
-          Writes AI drafts in the prompt editor. Leave blank to use {PromptOn.Accounts.Organization.default_draft_model()}.
-        </div>
-      </form>
+      <.model_setting
+        id="evaluation"
+        title="Evaluation model"
+        unavailable="Evaluations are unavailable until an evaluation model is selected."
+        selected={@organization.judge_model}
+        org_slug={@org_slug}
+        can_manage?={@can_manage?}
+      />
+      <.model_setting
+        id="draft"
+        title="Draft model"
+        unavailable="AI draft writing is unavailable until a draft model is selected."
+        selected={@organization.draft_model}
+        org_slug={@org_slug}
+        can_manage?={@can_manage?}
+        style="margin-top:14px;"
+      />
     </SC.setting_card>
     """
   end
 
-  @doc """
-  The app-wide evaluation model fallback, shown as the placeholder when the organization has not set
-  one (`config :prompton, :judge_model`).
-  """
-  @spec default_evaluation_model() :: String.t()
-  def default_evaluation_model, do: PromptOn.Evals.Judge.default_model()
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :unavailable, :string, required: true
+  attr :selected, :string, default: nil
+  attr :org_slug, :string, required: true
+  attr :can_manage?, :boolean, required: true
+  attr :style, :string, default: nil
+
+  defp model_setting(assigns) do
+    ~H"""
+    <div id={"#{@id}-model-setting"} style={@style}>
+      <div class="mono-label" style="margin-bottom:7px;">{@title}</div>
+      <SC.row_box id={"#{@id}-model-row"} pad="10px 11px">
+        <DS.provider_mark provider={:openrouter} size={22} radius={6} />
+        <div style="min-width:0;flex:1;">
+          <div
+            :if={blank?(@selected)}
+            id={"#{@id}-model-unavailable"}
+            style="font-size:12.5px;color:var(--tx-2);line-height:1.45;"
+          >
+            {@unavailable}
+          </div>
+          <div
+            :if={not blank?(@selected)}
+            id={"#{@id}-model-selection"}
+            class="font-mono"
+            style="font-size:12.5px;color:var(--tx-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+          >
+            {@selected}
+          </div>
+        </div>
+        <DS.btn_link
+          :if={@can_manage?}
+          id={"open-#{@id}-model-picker"}
+          variant="ghost"
+          size="sm"
+          patch={~p"/#{@org_slug}/settings?tab=general&model-picker=#{@id}"}
+        >
+          {if blank?(@selected), do: "Choose", else: "Change"}
+        </DS.btn_link>
+        <DS.btn
+          :if={@can_manage? and not blank?(@selected)}
+          id={"clear-#{@id}-model"}
+          variant="ghost"
+          size="sm"
+          phx-click="clear_org_model"
+          phx-value-target={@id}
+        >
+          Clear
+        </DS.btn>
+      </SC.row_box>
+    </div>
+    """
+  end
+
+  defp org_model_rows(assigns) do
+    target = model_picker_target(assigns.modal)
+    selected = selected_org_model(assigns.organization, target)
+    query = assigns.model_query |> to_string() |> String.trim() |> String.downcase()
+
+    assigns.model_catalog
+    |> Enum.filter(&model_matches?(&1, query))
+    |> Enum.sort_by(&String.downcase(&1.display_name))
+    |> Enum.take(50)
+    |> Enum.map(fn entry ->
+      %{
+        dom_id: safe_dom_id(entry.model_id),
+        name: entry.display_name,
+        model_id: entry.model_id,
+        price: price_label(entry.pricing),
+        context: context_label(entry.context_length),
+        selected?: entry.model_id == selected
+      }
+    end)
+  end
+
+  defp model_picker_target({:model_picker, target}), do: target
+  defp model_picker_target(_modal), do: nil
+
+  defp selected_org_model(organization, "evaluation"), do: organization.judge_model
+  defp selected_org_model(organization, "draft"), do: organization.draft_model
+  defp selected_org_model(_organization, _target), do: nil
+
+  defp model_target_label("evaluation"), do: "evaluation model"
+  defp model_target_label("draft"), do: "draft model"
+  defp model_target_label(_target), do: "model"
+
+  defp model_matches?(_entry, ""), do: true
+
+  defp model_matches?(entry, query) do
+    String.contains?(String.downcase(entry.display_name), query) or
+      String.contains?(String.downcase(entry.model_id), query)
+  end
+
+  defp safe_dom_id(value),
+    do: value |> to_string() |> String.replace(~r/[^A-Za-z0-9_-]+/, "-")
+
+  defp price_label(%{input_per_m: input, output_per_m: output}),
+    do: "#{money(input)} / #{money(output)}"
+
+  defp price_label(_pricing), do: "— / —"
+
+  defp money(nil), do: "—"
+  defp money(value), do: "$#{trim_float(value)}"
+
+  defp trim_float(value) do
+    value
+    |> :erlang.float_to_binary(decimals: 4)
+    |> String.trim_trailing("0")
+    |> String.trim_trailing(".")
+  end
+
+  defp context_label(nil), do: "ctx —"
+  defp context_label(value), do: "ctx #{Entitlements.number(value)}"
+
+  defp catalog_error({:error, reason}), do: reason
+  defp catalog_error(_state), do: nil
+
+  defp hint_style(top) do
+    "margin-top:#{top}px;font-size:12.5px;color:var(--tx-3);line-height:1.45;"
+  end
+
+  defp blank?(value), do: blank_to_nil(value) == nil
 
   @doc """
   Badge tone of a plan: free is neutral, team accented, pro the success tone.
@@ -751,6 +896,129 @@ defmodule PromptOnWeb.OrgSettingsLive do
   defp slug_desc(_organization),
     do:
       "Changing the URL key moves every page in this organization. Links people already have stop working."
+
+  attr :target, :string, required: true
+  attr :organization, :map, required: true
+  attr :org_slug, :string, required: true
+  attr :query, :string, default: ""
+  attr :catalog_state, :any, default: nil
+  attr :rows, :list, default: []
+
+  defp org_model_picker_modal(assigns) do
+    assigns = assign(assigns, :selected, selected_org_model(assigns.organization, assigns.target))
+
+    ~H"""
+    <DS.modal
+      id="org-model-picker-modal"
+      on_close={~p"/#{@org_slug}/settings?tab=general"}
+      width={620}
+      icon="search"
+      title={"Choose #{model_target_label(@target)}"}
+    >
+      <form
+        id="org-model-search-form"
+        phx-change="org_model_search"
+        phx-submit="org_model_search"
+      >
+        <DS.ds_input
+          id="org-model-search"
+          name="picker[q]"
+          value={@query}
+          placeholder="Search OpenRouter models — gpt, claude, llama…"
+          w="100%"
+          mono
+          autocomplete="off"
+          phx-debounce="200"
+        />
+      </form>
+
+      <div :if={@catalog_state == :loading} id="org-model-picker-loading" style={hint_style(8)}>
+        Loading the OpenRouter catalog…
+      </div>
+      <div :if={catalog_error(@catalog_state)} id="org-model-picker-error" style={hint_style(8)}>
+        {catalog_error(@catalog_state)}
+        <button
+          id="org-model-picker-retry"
+          type="button"
+          phx-click="retry_org_model_catalog"
+          style="background:none;border:none;padding:0;font:inherit;color:var(--link);cursor:pointer;"
+        >
+          Retry
+        </button>
+      </div>
+
+      <div
+        id="org-model-picker-results"
+        class="card2"
+        style="margin-top:9px;max-height:300px;overflow-y:auto;padding:2px 0;"
+      >
+        <div
+          :for={row <- @rows}
+          id={"org-model-row-#{row.dom_id}"}
+          style="display:flex;align-items:center;gap:8px;padding:7px 10px;"
+        >
+          <DS.provider_mark provider={:openrouter} size={18} radius={5} />
+          <span style="min-width:0;flex:1;">
+            <span style="font-size:12.5px;color:var(--tx-1);display:block;">{row.name}</span>
+            <span class="font-mono" style="font-size:11px;color:var(--tx-3);">{row.model_id}</span>
+          </span>
+          <span
+            id={"org-model-price-#{row.dom_id}"}
+            class="font-mono"
+            title="input / output price per 1M tokens"
+            style="font-size:11px;color:var(--tx-3);text-align:right;white-space:nowrap;"
+          >
+            {row.price}
+          </span>
+          <span class="font-mono" style="font-size:11px;color:var(--tx-3);white-space:nowrap;">
+            {row.context}
+          </span>
+          <DS.badge :if={row.selected?} tone={:ok} mono>selected</DS.badge>
+          <DS.btn
+            id={"select-org-model-#{row.dom_id}"}
+            variant="primary"
+            size="sm"
+            phx-click="select_org_model"
+            phx-value-target={@target}
+            phx-value-model-id={row.model_id}
+            disabled={row.selected?}
+          >
+            Select
+          </DS.btn>
+        </div>
+        <div
+          :if={@rows == [] and @catalog_state == :loaded}
+          id="org-model-picker-empty"
+          style="padding:10px;font-size:12.5px;color:var(--tx-3);"
+        >
+          No model matches this search.
+        </div>
+      </div>
+
+      <:footer>
+        <span style="font-size:12.5px;color:var(--tx-2);margin-right:auto;">
+          {model_target_label(@target)} is optional.
+        </span>
+        <DS.btn
+          :if={not blank?(@selected)}
+          id={"clear-#{@target}-model-from-picker"}
+          variant="ghost"
+          phx-click="clear_org_model"
+          phx-value-target={@target}
+        >
+          Clear
+        </DS.btn>
+        <DS.btn_link
+          id="org-model-picker-cancel"
+          variant="ghost"
+          patch={~p"/#{@org_slug}/settings?tab=general"}
+        >
+          Cancel
+        </DS.btn_link>
+      </:footer>
+    </DS.modal>
+    """
+  end
 
   attr :organization, :map, required: true
   attr :org_slug, :string, required: true

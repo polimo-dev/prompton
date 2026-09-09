@@ -23,6 +23,7 @@ defmodule PromptOn.Evals.ChatOnlyTest do
         ] do
       project = project_fixture()
       provider_key_fixture(organization_id(project))
+      select_judge_model(project)
       use_case = use_case_fixture(project)
       target = evaluatable_fixture(project, use_case: use_case, count: 5)
       run = evaluation_run_fixture(use_case, target.deployment, %{rubric: target.rubric})

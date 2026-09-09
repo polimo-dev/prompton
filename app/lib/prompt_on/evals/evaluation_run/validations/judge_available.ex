@@ -16,12 +16,20 @@ defmodule PromptOn.Evals.EvaluationRun.Validations.JudgeAvailable do
   def validate(changeset, _opts, _context) do
     changeset
     |> organization_id()
-    |> Judge.available?()
+    |> Judge.availability()
     |> case do
-      true ->
+      :ok ->
         :ok
 
-      false ->
+      {:error, :no_evaluation_model} ->
+        {:error,
+         Ash.Error.Changes.InvalidAttribute.exception(
+           field: :judge_model,
+           message:
+             "select an evaluation model in Organization settings before running an evaluation"
+         )}
+
+      {:error, :no_provider_key} ->
         {:error,
          Ash.Error.Changes.InvalidAttribute.exception(
            field: :judge_model,

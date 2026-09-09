@@ -20,14 +20,13 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   so nothing touches the network and the response is derived deterministically from the request
   (`echo_requests/0` swaps it out).
 
-  The model picker reads the OpenRouter list through `PromptOnWeb.ProviderCatalog`;
+  The model picker reads the OpenRouter list through `PromptOn.Catalog.ProviderCatalog`;
   `config :prompton, :provider_catalog_req_options` intercepts `Req`, so **no real HTTP happens**.
   The application environment is global, so this file is `async: false`.
   """
   use PromptOnWeb.ConnCase, async: false
 
   alias PromptOn.Accounts
-  alias PromptOn.Accounts.Organization
   alias PromptOn.Catalog
   alias PromptOn.Deployments
   alias PromptOn.EvalsFixtures
@@ -103,6 +102,8 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   end
 
   defp stub_openrouter(payload) do
+    PromptOn.Catalog.ProviderCatalog.reset_cache()
+
     Application.put_env(:prompton, :provider_catalog_req_options,
       plug: fn conn -> Req.Test.json(conn, payload) end
     )
@@ -111,6 +112,8 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       Application.put_env(:prompton, :provider_catalog_req_options,
         plug: fn conn -> Req.Test.json(conn, %{"data" => []}) end
       )
+
+      PromptOn.Catalog.ProviderCatalog.reset_cache()
     end)
   end
 
@@ -159,6 +162,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     })
 
     with_key(project)
+    EvalsFixtures.select_judge_model(project)
     rubric = EvalsFixtures.rubric_fixture(use_case)
     run = EvalsFixtures.evaluation_run_fixture(use_case, deployment, %{rubric: rubric})
     opts = [tenant: project.id, actor: Fixtures.system_actor()]
@@ -194,6 +198,17 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   # organization, not to the project.
   defp with_key(project),
     do: Fixtures.provider_key_fixture(project, provider: :openrouter, secret: "sk-or-seed")
+
+  defp select_draft_model(user) do
+    {:ok, organization} =
+      Accounts.set_organization_draft_model(
+        Fixtures.organization_for(user),
+        %{draft_model: "openai/o4-mini"},
+        actor: user
+      )
+
+    organization
+  end
 
   # The **order** of the rendered picker rows (`#pick-row-<dom-id>`): the contract of the sort
   # tests is the list order.
@@ -935,59 +950,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     end
   end
 
-  describe "ProviderCatalog: per token → per million tokens" do
-    test "does not die on odd values and unknown is nil", _context do
-      stub_openrouter(%{
-        "data" => [
-          %{
-            "id" => "a/normal",
-            "pricing" => %{"prompt" => "0.000003", "completion" => "0.000015"}
-          },
-          %{"id" => "b/sub-cent", "pricing" => %{"prompt" => "0.0000015"}},
-          # OpenRouter gives dynamic pricing as "-1": not a price but "unknown".
-          %{"id" => "c/dynamic", "pricing" => %{"prompt" => "-1", "completion" => "-1"}},
-          # A free model is a genuine 0 (0 and "unknown" are different).
-          %{"id" => "d/free", "pricing" => %{"prompt" => "0", "completion" => "0"}},
-          %{"id" => "e/garbage", "pricing" => %{"prompt" => "abc", "completion" => nil}},
-          %{"id" => "f/not-a-map", "pricing" => "cheap"},
-          %{"id" => "g/absent"}
-        ]
-      })
-
-      {:ok, models} = PromptOnWeb.ProviderCatalog.list_openrouter_models()
-      pricing = Map.new(models, &{&1.model_id, &1.pricing})
-
-      assert pricing["a/normal"] == %{input_per_m: 3.0, output_per_m: 15.0}
-      assert pricing["b/sub-cent"] == %{input_per_m: 1.5, output_per_m: nil}
-      assert pricing["c/dynamic"] == %{input_per_m: nil, output_per_m: nil}
-      assert pricing["d/free"] == %{input_per_m: 0.0, output_per_m: 0.0}
-      assert pricing["e/garbage"] == %{input_per_m: nil, output_per_m: nil}
-      assert pricing["f/not-a-map"] == %{input_per_m: nil, output_per_m: nil}
-      assert pricing["g/absent"] == %{input_per_m: nil, output_per_m: nil}
-    end
-
-    test "created is Unix seconds and nil when unknown", _context do
-      stub_openrouter(%{
-        "data" => [
-          %{"id" => "a/created", "created" => 1_700_000_000},
-          %{"id" => "b/string", "created" => "1700000001"},
-          # 0, negative and non-numeric are "unknown" (left as 0, the model would date from 1970).
-          %{"id" => "c/zero", "created" => 0},
-          %{"id" => "d/garbage", "created" => "soon"},
-          %{"id" => "e/absent"}
-        ]
-      })
-
-      {:ok, models} = PromptOnWeb.ProviderCatalog.list_openrouter_models()
-      created = Map.new(models, &{&1.model_id, &1.created})
-
-      assert created["a/created"] == 1_700_000_000
-      assert created["b/string"] == 1_700_000_001
-      assert created["c/zero"] == nil
-      assert created["d/garbage"] == nil
-      assert created["e/absent"] == nil
-    end
-
+  describe "catalog price labels" do
     test "0 is $0 and unknown is —", _context do
       alias PromptOnWeb.PromptEditorComponents, as: Components
 
@@ -1491,6 +1454,209 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
       fill_vars(view, %{"input" => "diary"})
       refute has_element?(view, "#arena-send[disabled]")
+    end
+  end
+
+  describe "arena: reusable inputs and dispatch history" do
+    setup %{project: project, use_case: use_case} do
+      echo_requests()
+      with_key(project)
+      {model, _other} = two_models(project)
+      %{use_case: pin(use_case, [model]), model: model}
+    end
+
+    test "typing and form recovery keep variables open; a manual toggle survives full screen", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, view, _html} = live(conn, arena_path(project, use_case))
+      render_async(view)
+      assert has_element?(view, "#arena-variables[open]")
+      fill_vars(view, %{"input" => "d"})
+      assert has_element?(view, "#arena-variables[open]")
+      fill_vars(view, %{"input" => "diary"})
+      assert has_element?(view, "#arena-variables[open]")
+
+      render_hook(view, "arena_variables_toggle", %{"open" => false})
+      view |> element("#arena-fullscreen") |> render_click()
+      refute has_element?(view, "#arena-variables[open]")
+      render_hook(view, "arena_variables_toggle", %{"open" => true})
+      view |> element("#arena-exit-full") |> render_click()
+      assert has_element?(view, "#arena-variables[open]")
+      assert view |> element("#arena-var-input") |> render() =~ "diary"
+    end
+
+    test "a selected log previews and imports matching variables without sending", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, use_case} =
+        Prompts.set_use_case_input_schema(
+          use_case,
+          %{
+            input_schema: @input_schema ++ [%{name: "note", type: :string, required?: false}]
+          },
+          scope(project)
+        )
+
+      [log] =
+        Fixtures.stored_generations_fixture(project, use_case, 1, %{
+          "input" => %{
+            "variables" => %{"input" => "real log value", "unknown" => "unused secret"}
+          }
+        })
+
+      {:ok, view, _html} = live(conn, arena_path(project, use_case, full: 1))
+      render_async(view)
+      fill_vars(view, %{"input" => "manual", "note" => "keep my note"})
+      view |> element("#arena-load-logs") |> render_click()
+      refute render(view) =~ "real log value"
+      view |> element("#arena-log-#{log.id}") |> render_click()
+      assert view |> element("#arena-log-modal") |> render() =~ "real log value"
+      refute render(view) =~ "unused secret"
+      assert arena_rows(use_case) == []
+      view |> element("#arena-apply-log") |> render_click()
+      refute has_element?(view, "#arena-log-modal")
+      assert has_element?(view, "#arena-fullscreen-overlay #arena-variables[open]")
+      assert view |> element("#arena-var-input") |> render() =~ "real log value"
+      assert view |> element("#arena-var-note") |> render() =~ "keep my note"
+      assert arena_rows(use_case) == []
+      send_message(view, "test imported values")
+      [user, _assistant] = arena_rows(use_case)
+      user = Ash.load!(user, :request_context, scope(project))
+
+      assert user.request_context["variables"] == %{
+               "input" => "real log value",
+               "note" => "keep my note"
+             }
+    end
+
+    test "a payload removed after preview cannot overwrite entered values", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      [log] = Fixtures.stored_generations_fixture(project, use_case, 1)
+      {:ok, view, _html} = live(conn, arena_path(project, use_case))
+      fill_vars(view, %{"input" => "keep this"})
+      view |> element("#arena-load-logs") |> render_click()
+      view |> element("#arena-log-#{log.id}") |> render_click()
+      payload = PromptOn.Observability.get_payload!(log.id, scope(project))
+      Ash.destroy!(payload, scope(project))
+      view |> element("#arena-apply-log") |> render_click()
+      assert has_element?(view, "#arena-log-modal")
+      assert has_element?(view, "#arena-apply-log[disabled]")
+      assert view |> element("#arena-var-input") |> render() =~ "keep this"
+      assert arena_rows(use_case) == []
+    end
+
+    test "no monitoring logs shows integration guidance while manual testing remains available",
+         %{
+           conn: conn,
+           project: project,
+           use_case: use_case
+         } do
+      {:ok, view, _html} = live(conn, arena_path(project, use_case, logs: 1))
+      assert has_element?(view, "#arena-log-modal")
+      assert view |> element("#arena-log-modal") |> render() =~ "Connect monitoring"
+      assert has_element?(view, "#arena-log-modal a[href$='#integration']")
+      view |> element("#arena-log-modal-backdrop") |> render_click()
+      fill_vars(view, %{"input" => "manual input"})
+      send_message(view, "no monitoring required")
+      assert length(arena_rows(use_case)) == 2
+    end
+
+    test "input history is frozen before a slow response and survives a remount", %{
+      conn: conn,
+      project: project,
+      use_case: use_case,
+      model: model
+    } do
+      parent = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(parent, {:arena_request, self(), request})
+
+        receive do
+          :finish -> {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+        after
+          5_000 -> {:error, :timeout}
+        end
+      end)
+
+      {:ok, view, _html} = live(conn, arena_path(project, use_case))
+      render_async(view)
+      fill_vars(view, %{"input" => "original variable"})
+      view |> form("#arena-send-form", send: %{input: "original question"}) |> render_submit()
+      assert_receive {:arena_request, task, request}
+      fill_vars(view, %{"input" => "edited variable"})
+      view |> element("#tab-editor") |> render_click()
+
+      view
+      |> form("#prompt-editor-form",
+        editor: %{
+          "messages" => %{"0" => %{"role" => "system", "content" => "Edited prompt"}}
+        }
+      )
+      |> render_change()
+
+      send(task, :finish)
+      render_async(view)
+      [user, assistant] = arena_rows(use_case) |> Ash.load!(:request_context, scope(project))
+      assert user.request_context == assistant.request_context
+      assert assistant.request_context["variables"] == %{"input" => "original variable"}
+      assert assistant.request_context["messages"] == request.messages
+      assert assistant.request_context["prompt"]["version_number"] == 1
+      assert assistant.request_context["model"]["model_id"] == model.model_id
+
+      {:ok, again, _html} = live(conn, arena_path(project, use_case, input: assistant.id))
+      html = again |> element("#arena-input-modal") |> render()
+      assert html =~ "original variable"
+      assert html =~ "original question"
+      refute html =~ "edited variable"
+      refute html =~ "Edited prompt"
+    end
+
+    test "older turns and foreign use case ids never use the current prompt as history", %{
+      conn: conn,
+      project: project,
+      use_case: use_case,
+      model: model
+    } do
+      {:ok, legacy} =
+        Prompts.append_arena_message(
+          %{
+            use_case_id: use_case.id,
+            model_id: model.id,
+            role: :user,
+            content: "Old turn"
+          },
+          scope(project)
+        )
+
+      {:ok, view, _html} = live(conn, arena_path(project, use_case, input: legacy.id))
+      assert view |> element("#arena-input-modal") |> render() =~ "not recorded"
+      foreign_case = Fixtures.use_case_fixture(project)
+
+      {:ok, foreign} =
+        Prompts.append_arena_message(
+          %{
+            use_case_id: foreign_case.id,
+            model_id: model.id,
+            role: :user,
+            content: "Foreign turn",
+            request_context: %{"variables" => %{"input" => "foreign secret"}}
+          },
+          scope(project)
+        )
+
+      render_patch(view, arena_path(project, use_case, input: foreign.id))
+      assert view |> element("#arena-input-modal") |> render() =~ "no longer available"
+      refute render(view) =~ "foreign secret"
+      render_patch(view, arena_path(project, use_case, input: "bad-id"))
+      assert view |> element("#arena-input-modal") |> render() =~ "no longer available"
     end
   end
 
@@ -2617,9 +2783,11 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
     test "opens the modal, receives a draft and swaps the message", %{
       conn: conn,
+      user: user,
       project: project,
       use_case: use_case
     } do
+      select_draft_model(user)
       PromptOn.LLM.Fake.set_response(%{content: "Instructions written by the AI"})
       on_exit(&PromptOn.LLM.Fake.reset/0)
 
@@ -2633,6 +2801,37 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       view |> element("#ai-replace") |> render_click()
 
       assert render(view) =~ "Instructions written by the AI"
+    end
+
+    test "an unset model disables drafts and forged requests until a model is selected", %{
+      conn: conn,
+      user: user,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, ai: 0))
+
+      assert has_element?(view, "button#message-0-ai[disabled]")
+      assert has_element?(view, "#draft-model-settings[href='/personal/settings']")
+      assert has_element?(view, "#ai-no-model")
+      assert has_element?(view, "#ai-model-settings-link[href='/personal/settings']")
+      assert has_element?(view, "#ai-generate[disabled]")
+
+      render_hook(view, "ai_generate", %{})
+      render_async(view)
+      refute_received {:ai_draft_request, _request}
+      refute has_element?(view, "#ai-result")
+
+      select_draft_model(user)
+      {:ok, enabled_view, _html} = live(conn, hub_path(project, use_case, ai: 0))
+
+      assert has_element?(enabled_view, "a#message-0-ai")
+      refute has_element?(enabled_view, "#ai-generate[disabled]")
+      refute has_element?(enabled_view, "#ai-no-model")
+
+      enabled_view |> element("#ai-generate") |> render_click()
+      render_async(enabled_view)
+      assert_received {:ai_draft_request, %{model: "openai/o4-mini"}}
     end
 
     test "uses the selected organization model and refreshes it after mount", %{
@@ -2666,7 +2865,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert_received {:ai_draft_request, %{model: "anthropic/claude-opus-4"}}
     end
 
-    test "clearing the model after mount restores the default for the next draft", %{
+    test "clearing the model after mount blocks the next draft without calling the provider", %{
       conn: conn,
       user: user,
       project: project,
@@ -2689,8 +2888,15 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       view |> element("#ai-generate") |> render_click()
       render_async(view)
 
-      default_model = Organization.default_draft_model()
-      assert_received {:ai_draft_request, %{model: ^default_model}}
+      refute_received {:ai_draft_request, _request}
+      assert has_element?(view, "#ai-no-model")
+      assert has_element?(view, "#ai-generate[disabled]")
+      assert has_element?(view, "button#message-0-ai[disabled]")
+      refute has_element?(view, "#ai-result")
+
+      render_hook(view, "ai_generate", %{})
+      render_async(view)
+      refute_received {:ai_draft_request, _request}
     end
 
     test "each organization uses its own model with the same user and project slug", %{
@@ -2742,9 +2948,11 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     # have no provider tab.
     test "without a key it gives only a link to the organization settings", %{
       conn: conn,
+      user: user,
       project: project,
       use_case: use_case
     } do
+      select_draft_model(user)
       PromptOn.LLM.Fake.set_response({:error, :no_provider_key})
       on_exit(&PromptOn.LLM.Fake.reset/0)
 
@@ -2784,9 +2992,11 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
     test "direct events on non-chat URLs cannot run LLMs or mutate arena history", %{
       conn: conn,
+      user: user,
       project: project,
       use_case: use_case
     } do
+      select_draft_model(user)
       parent = self()
 
       PromptOn.LLM.Fake.set_response(fn request ->
@@ -2819,9 +3029,11 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
 
     test "direct events on archived chat URLs cannot run LLMs or mutate arena history", %{
       conn: conn,
+      user: user,
       project: project,
       use_case: use_case
     } do
+      select_draft_model(user)
       parent = self()
 
       PromptOn.LLM.Fake.set_response(fn request ->

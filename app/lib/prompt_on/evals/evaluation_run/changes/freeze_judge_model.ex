@@ -4,14 +4,15 @@ defmodule PromptOn.Evals.EvaluationRun.Changes.FreezeJudgeModel do
   display copies of the rubric number and the deployment revision (ADR 0010 §4.4).
 
   Freezing matters: changing the organization's default judge model halfway through a run would
-  otherwise make the run's own numbers incomparable with themselves. The resolution order is the
-  rubric's override, then the organization's default, then `config :prompton, :judge_model`.
+  otherwise make the run's own numbers incomparable with themselves. The organization must have
+  selected an evaluation model; then a rubric override wins over that organization model.
   """
 
   use Ash.Resource.Change
 
   require Ash.Query
 
+  alias Ash.Error.Changes.InvalidAttribute
   alias PromptOn.Deployments.Deployment
   alias PromptOn.Evals.{Judge, Rubric}
 
@@ -24,11 +25,24 @@ defmodule PromptOn.Evals.EvaluationRun.Changes.FreezeJudgeModel do
          {:ok, %Deployment{} = deployment} <-
            read(Deployment, Ash.Changeset.get_attribute(changeset, :deployment_id), opts),
          {:ok, organization_id} <- organization_id(opts) do
-      Ash.Changeset.force_change_attributes(changeset, %{
-        judge_model: Judge.model(rubric, organization_id),
-        rubric_number: rubric.number,
-        deployment_revision: deployment.revision
-      })
+      case Judge.model(rubric, organization_id) do
+        nil ->
+          Ash.Changeset.add_error(
+            changeset,
+            InvalidAttribute.exception(
+              field: :judge_model,
+              message:
+                "select an evaluation model in Organization settings before running an evaluation"
+            )
+          )
+
+        judge_model ->
+          Ash.Changeset.force_change_attributes(changeset, %{
+            judge_model: judge_model,
+            rubric_number: rubric.number,
+            deployment_revision: deployment.revision
+          })
+      end
     else
       _other -> changeset
     end

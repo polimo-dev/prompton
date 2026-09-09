@@ -11,6 +11,7 @@ defmodule PromptOn.Evals.EvaluationRunTest do
 
     project = project_fixture()
     provider_key_fixture(organization_id(project))
+    select_judge_model(project)
     use_case = use_case_fixture(project)
 
     %{
@@ -210,8 +211,30 @@ defmodule PromptOn.Evals.EvaluationRunTest do
       assert Exception.message(error) =~ "no monitoring logs with stored log content in staging"
     end
 
+    test "refuses to start until the organization selects an evaluation model" do
+      project = project_fixture()
+      provider_key_fixture(organization_id(project))
+      use_case = use_case_fixture(project)
+      target = evaluatable_fixture(project, use_case: use_case)
+      overriding = rubric_fixture(use_case, %{judge_model: "anthropic/claude-haiku-4"})
+
+      assert {:error, error} =
+               Evals.start_evaluation(
+                 %{
+                   use_case_id: use_case.id,
+                   deployment_id: target.deployment.id,
+                   environment_id: target.environment.id,
+                   rubric_id: overriding.id
+                 },
+                 scope(project)
+               )
+
+      assert Exception.message(error) =~ "select an evaluation model"
+    end
+
     test "refuses to start without a provider key", %{project: project} do
       keyless = project_fixture()
+      select_judge_model(keyless)
       use_case = use_case_fixture(keyless)
       target = evaluatable_fixture(keyless, use_case: use_case)
 

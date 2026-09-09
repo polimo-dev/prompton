@@ -84,6 +84,8 @@ defmodule PromptOn.Application do
       # Decrypted BYOK key cache used by server-side LLM calls (arena, AI drafts, and later
       # auto-grading).
       PromptOn.Accounts.ProviderKeyCache,
+      # Public OpenRouter model catalog cache shared by server screens and management API calls.
+      PromptOn.Catalog.ProviderCatalog.Cache,
       # Start to serve requests, typically the last entry
       PromptOnWeb.Endpoint,
       {AshAuthentication.Supervisor, [otp_app: :prompton]}

@@ -101,11 +101,9 @@ config :prompton,
 
 # Evals (ADR 0010).
 #
-# `:judge_model` is the last fallback of the judge model chain (rubric → organization → this key).
 # `:entitlements_plan_override`, when set to `:free | :team | :pro`, makes `PromptOn.Entitlements`
 # report that plan for every organization — the one switch a self-hosted operator needs so that
 # plan limits do not apply to a single-tenant install (README "Embedding").
-config :prompton, :judge_model, "openai/gpt-4o-mini"
 config :prompton, :entitlements_plan_override, nil
 
 # The channel through which the server calls LLMs directly (Playground/Experiment/judge only,

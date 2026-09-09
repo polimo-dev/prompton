@@ -11,6 +11,7 @@ defmodule PromptOn.Evals.JudgeTest do
     on_exit(&PromptOn.LLM.Fake.reset/0)
 
     project = project_fixture()
+    select_judge_model(project)
 
     %{project: project, use_case: use_case_fixture(project)}
   end
@@ -136,6 +137,22 @@ defmodule PromptOn.Evals.JudgeTest do
       assert {:error, :no_provider_key} =
                Judge.draft_rubric(use_case, [sample(1, 5)], judge_opts(project))
     end
+
+    test "rejects a direct call when the organization has no selected evaluation model" do
+      project = project_fixture()
+      use_case = use_case_fixture(project)
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn _request ->
+        send(test_pid, :unexpected_judge_call)
+        {:error, :unexpected_judge_call}
+      end)
+
+      assert {:error, :no_evaluation_model} =
+               Judge.draft_rubric(use_case, [sample(1, 5)], judge_opts(project))
+
+      refute_received :unexpected_judge_call
+    end
   end
 
   describe "score_sample/5" do
@@ -220,7 +237,7 @@ defmodule PromptOn.Evals.JudgeTest do
   end
 
   describe "model/2" do
-    test "resolves rubric, then organization, then the app default", %{
+    test "requires organization selection before honoring rubric overrides", %{
       project: project,
       use_case: use_case
     } do
@@ -228,9 +245,13 @@ defmodule PromptOn.Evals.JudgeTest do
       plain = rubric_fixture(use_case)
       overriding = rubric_fixture(use_case, %{judge_model: "anthropic/claude-haiku-4"})
 
+      unselected_project = project_fixture()
+      unselected_use_case = use_case_fixture(unselected_project)
+      unselected = rubric_fixture(unselected_use_case, %{judge_model: "anthropic/claude-haiku-4"})
+
+      assert is_nil(Judge.model(unselected, organization_id(unselected_project)))
+      assert Judge.model(plain, organization_id) == "openai/gpt-4o-mini"
       assert Judge.model(overriding, organization_id) == "anthropic/claude-haiku-4"
-      assert Judge.model(plain, organization_id) == Judge.default_model()
-      assert Judge.model(nil, organization_id) == "openai/gpt-4o-mini"
 
       organization =
         Ash.get!(PromptOn.Accounts.Organization, organization_id, actor: system_actor())
@@ -247,20 +268,30 @@ defmodule PromptOn.Evals.JudgeTest do
     end
   end
 
-  describe "available?/1" do
-    test "is true with an organization key and false without one", %{project: project} do
+  describe "availability/1" do
+    test "requires a selected evaluation model and a provider key" do
+      project = project_fixture()
       organization_id = organization_id(project)
 
       refute Judge.available?(organization_id)
+      assert Judge.availability(organization_id) == {:error, :no_evaluation_model}
+
+      select_judge_model(project)
+
+      refute Judge.available?(organization_id)
+      assert Judge.availability(organization_id) == {:error, :no_provider_key}
 
       provider_key_fixture(organization_id)
 
       assert Judge.available?(organization_id)
+      assert Judge.availability(organization_id) == :ok
     end
 
     test "falls back to the app-wide key", %{project: project} do
       Application.put_env(:prompton, :openrouter_api_key, "sk-or-v1-test")
       on_exit(fn -> Application.delete_env(:prompton, :openrouter_api_key) end)
+
+      select_judge_model(project)
 
       assert Judge.available?(organization_id(project))
     end

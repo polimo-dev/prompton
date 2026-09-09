@@ -121,10 +121,18 @@ claiming a URL in **Organization settings** before inviting people, transferring
 deleting it. Team organization deletion requires typing its name; ownership transfer requires an
 explicit confirmation. Existing plan limits continue to apply.
 
-Organization settings includes **AI models** for owners and admins: **Evaluation model** scores
-evaluations, while **Draft model** writes AI drafts in the prompt editor. Each setting is independent;
-leaving it blank uses the displayed application default. Draft generation reads the current setting
-on each request, including changes made while the editor is open.
+Organization settings includes **AI models** for owners and admins: search the OpenRouter catalog
+to select an **Evaluation model** for evaluations or a **Draft model** for AI drafts in the prompt
+editor. Both settings start unselected and can be cleared independently. Without a selection, the
+corresponding AI feature is unavailable; there are no application or built-in model defaults.
+Each AI request checks the current organization setting, including changes made while an editor
+is open.
+
+Arena, organization settings and management API model registration share
+`PromptOn.Catalog.ProviderCatalog`. Server nodes cache the public OpenRouter catalog for 15 minutes
+and combine concurrent fetches. A failed refresh retains the last successful list and backs off
+for 30 seconds; explicit retries can refresh immediately. Library mode can fetch without starting
+the cache. Organization model selections and provider keys are never part of this shared cache.
 
 ## Self-hosting
 

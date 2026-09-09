@@ -43,7 +43,8 @@ defmodule PromptOn.Prompts.ArenaMessage do
   use Ash.Resource,
     otp_app: :prompton,
     domain: PromptOn.Prompts,
-    fragments: [PromptOn.ProjectScoped]
+    fragments: [PromptOn.ProjectScoped],
+    extensions: [AshCloak]
 
   @raw_string [allow_empty?: true, trim?: false]
 
@@ -62,6 +63,12 @@ defmodule PromptOn.Prompts.ArenaMessage do
       index [:project_id, :use_case_id, :model_id, :inserted_at, :id],
         name: "arena_messages_use_case_model_index"
     end
+  end
+
+  cloak do
+    vault(PromptOn.Vault)
+    attributes([:request_context])
+    decrypt_by_default([])
   end
 
   actions do
@@ -86,7 +93,8 @@ defmodule PromptOn.Prompts.ArenaMessage do
         :input_tokens,
         :output_tokens,
         :cost_usd,
-        :author_id
+        :author_id,
+        :request_context
       ]
 
       validate PromptOn.Prompts.ArenaMessage.Validations.ChatParent
@@ -184,6 +192,11 @@ defmodule PromptOn.Prompts.ArenaMessage do
     end
 
     attribute :params, :map, allow_nil?: false, public?: true, default: %{}
+
+    attribute :request_context, :map do
+      description "Encrypted snapshot of the arena request context. Loaded explicitly for history details."
+      public? true
+    end
 
     attribute :latency_ms, :integer, public?: true, constraints: [min: 0]
     attribute :input_tokens, :integer, public?: true, constraints: [min: 0]
