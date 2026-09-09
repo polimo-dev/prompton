@@ -56,10 +56,13 @@ defmodule PromptOnWeb.Endpoint do
   # `externalTrafficPolicy: Local`.
   plug RemoteIp, headers: ["x-forwarded-for"]
 
-  # The sign-in code travels only in the POST body (`code`) and
-  # `config :phoenix, :filter_parameters` masks it - no request carries a secret in its path, so
-  # request logs are written as-is.
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  # Sign-in codes travel only in the POST body (`code`) and
+  # `config :phoenix, :filter_parameters` masks them. Invitation tokens do travel in the path, so
+  # the endpoint logger is disabled for `/invitations/*`; the router dispatch log for those routes
+  # is disabled in `PromptOnWeb.Router` as well.
+  plug Plug.Telemetry,
+    event_prefix: [:phoenix, :endpoint],
+    log: {__MODULE__, :log_level, []}
 
   # Body cap: `POST /api/v1/logs` is ≤5MB (plan.md §6.1 - batches of ≤200 records). The other
   # APIs have a 1MB convention, but the parser is global so it stays at 5MB (lowered from the
@@ -74,4 +77,7 @@ defmodule PromptOnWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
   plug PromptOnWeb.Router
+
+  def log_level(%Plug.Conn{path_info: ["invitations" | _]}), do: false
+  def log_level(_conn), do: :info
 end

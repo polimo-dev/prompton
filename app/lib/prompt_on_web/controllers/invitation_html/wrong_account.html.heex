@@ -1,0 +1,15 @@
+<.auth_page id="invitation-wrong-account-card" flash={@flash}>
+  <h2 class="auth-h2">Use the invited email</h2>
+  <p class="auth-info">
+    This invitation was sent to <strong>{@invited_email}</strong>. You are signed in with a different account.
+  </p>
+
+  <a
+    id="invitation-sign-out"
+    class="auth-submit"
+    href={~p"/sign-out"}
+    style="display:block;text-align:center;text-decoration:none;"
+  >
+    Sign out
+  </a>
+</.auth_page>

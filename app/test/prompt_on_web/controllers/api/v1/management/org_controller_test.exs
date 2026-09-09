@@ -68,7 +68,7 @@ defmodule PromptOnWeb.API.V1.Management.OrgControllerTest do
 
       {:ok, _membership} =
         PromptOn.Accounts.add_member(
-          %{organization_id: org.id, user_id: member.id, role: :editor},
+          %{organization_id: org.id, user_id: member.id, role: :member},
           actor: system_actor()
         )
 

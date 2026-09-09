@@ -176,7 +176,7 @@ defmodule PromptOn.EntitlementsEnforcementTest do
 
       # the organization inherited :team from its creator, so the second member goes in
       assert {:ok, _} =
-               Accounts.add_member(%{organization_id: team.id, user_id: mate.id, role: :editor},
+               Accounts.add_member(%{organization_id: team.id, user_id: mate.id, role: :member},
                  actor: Fixtures.system_actor()
                )
 
@@ -185,7 +185,7 @@ defmodule PromptOn.EntitlementsEnforcementTest do
       third = Fixtures.user_fixture()
 
       assert {:error, error} =
-               Accounts.add_member(%{organization_id: team.id, user_id: third.id, role: :editor},
+               Accounts.add_member(%{organization_id: team.id, user_id: third.id, role: :member},
                  actor: Fixtures.system_actor()
                )
 
@@ -203,7 +203,7 @@ defmodule PromptOn.EntitlementsEnforcementTest do
       # must always be creatable, so the validation does not run here at all
       assert {:ok, _} =
                Accounts.add_member(
-                 %{organization_id: personal.id, user_id: mate.id, role: :viewer},
+                 %{organization_id: personal.id, user_id: mate.id, role: :member},
                  actor: Fixtures.system_actor()
                )
     end

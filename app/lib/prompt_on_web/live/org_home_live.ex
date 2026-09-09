@@ -40,6 +40,7 @@ defmodule PromptOnWeb.OrgHomeLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Accounts
+  alias PromptOn.Accounts.Permissions
   alias PromptOn.Prompts
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.OrgSettingsLive
@@ -86,9 +87,17 @@ defmodule PromptOnWeb.OrgHomeLive do
     assign(socket, :provider_keys, keys)
   end
 
-  @doc "Whether to draw the setup card: no key at all, and not dismissed in this session."
+  @doc "Whether to draw the setup card: no key at all, manager-only, and not dismissed."
   @spec show_setup?(map()) :: boolean()
-  def show_setup?(assigns), do: assigns.provider_keys == [] and not assigns.setup_dismissed?
+  def show_setup?(%{provider_keys: [], setup_dismissed?: false} = assigns),
+    do: provider_setup_manage?(assigns)
+
+  def show_setup?(_assigns), do: false
+
+  defp provider_setup_manage?(%{current_user: user, organization: %{id: organization_id}}),
+    do: Permissions.manage?(user, organization_id)
+
+  defp provider_setup_manage?(_assigns), do: false
 
   defp build_form(socket, params) do
     PromptOn.Projects.Project

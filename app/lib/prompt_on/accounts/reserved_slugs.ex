@@ -42,6 +42,7 @@ defmodule PromptOn.Accounts.ReservedSlugs do
     live
     health
     images
+    invitations
     js
     oban
     p

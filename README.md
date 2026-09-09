@@ -84,6 +84,30 @@ Manifests remain in the deployment repository (`deployment/macmini/prompton/`).
 `make test-worktrees` checks lifecycle/path safety and deployment ordering in disposable Git
 repositories with Docker/Kubernetes mocked; it never deploys anything.
 
+## Members and invitations
+
+Open an organization's **Members** page to invite people by email, choose a role and select their
+projects. The recipient signs in with the invited email address, then clicks **Join** on the
+invitation page. Opening the email link does not accept it. Links expire after seven days, are
+single-use, and can be revoked from Members. Only a hash of the invitation token is stored.
+Invitations use the same mail adapter and `PTN_MAIL_FROM` as sign-in codes; local development can
+inspect them in `/dev/mailbox`.
+
+| Role | Access |
+|---|---|
+| `member` | All operations in assigned projects except deleting a project. New projects they create grant access automatically. They can invite other members only to projects they created. |
+| `admin` | All projects and organization settings, invitations and member-to-admin promotion. Cannot remove or demote another admin. |
+| `owner` | All admin capabilities, including admin removal/demotion, organization deletion and ownership transfer to an existing member. The previous owner becomes an admin. |
+
+Membership and project permissions apply to the browser and management API. A project grant alone
+does not grant access after its organization membership is removed. Invitation acceptance checks
+current inviter permissions and the organization's member limit again.
+
+Personal organizations have one owner and use `/personal`. Convert one to a team organization by
+claiming a URL in **Organization settings** before inviting people, transferring ownership or
+deleting it. Team organization deletion requires typing its name; ownership transfer requires an
+explicit confirmation. Existing plan limits continue to apply.
+
 ## Self-hosting
 
 The container image is `ghcr.io/polimo-dev/prompton` (tags: `main`, `sha-<commit>`, and `X.Y.Z` / `X.Y` /

@@ -1,0 +1,22 @@
+<.auth_page id="invitation-card" flash={@flash}>
+  <h2 class="auth-h2">Join {@organization_name}</h2>
+  <p class="auth-info">
+    You were invited as <strong>{@role}</strong> with <strong>{@invited_email}</strong>.
+  </p>
+
+  <div :if={@projects != []} id="invitation-projects" style="margin:14px 0;">
+    <div class="auth-label" style="margin-bottom:8px;">Projects</div>
+    <ul style="margin:0;padding-left:18px;color:var(--tx-1);font-size:13px;line-height:1.7;">
+      <li :for={project <- @projects}>{project_name(project)}</li>
+    </ul>
+  </div>
+
+  <.form
+    for={%{}}
+    id="join-invitation-form"
+    action={~p"/invitations/#{@token}/join"}
+    method="post"
+  >
+    <button id="join-invitation" type="submit" class="auth-submit">Join</button>
+  </.form>
+</.auth_page>

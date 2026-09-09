@@ -40,6 +40,7 @@ defmodule PromptOnWeb.SettingsLive do
     {:ok,
      assign(socket,
        page_title: "Settings · #{socket.assigns.project.slug}",
+       can_delete?: false,
        modal: nil,
        form: nil,
        general_form: to_form(%{"name" => socket.assigns.project.name}, as: :project),
@@ -49,6 +50,16 @@ defmodule PromptOnWeb.SettingsLive do
 
   @impl Phoenix.LiveView
   def handle_params(params, _uri, socket) do
+    socket =
+      assign(
+        socket,
+        :can_delete?,
+        PromptOn.Accounts.Permissions.manage?(
+          socket.assigns.current_user,
+          socket.assigns.organization.id
+        )
+      )
+
     {:noreply, socket |> load_env_rows() |> apply_modal(params)}
   end
 
@@ -102,7 +113,11 @@ defmodule PromptOnWeb.SettingsLive do
   end
 
   defp apply_modal(socket, %{"delete" => "1"}) do
-    assign(socket, modal: :delete, form: to_form(%{"slug" => ""}, as: :confirm))
+    if socket.assigns.can_delete? do
+      assign(socket, modal: :delete, form: to_form(%{"slug" => ""}, as: :confirm))
+    else
+      close_modal(socket)
+    end
   end
 
   defp apply_modal(socket, _params), do: close_modal(socket)
@@ -245,6 +260,7 @@ defmodule PromptOnWeb.SettingsLive do
         <.project_settings
           org_slug={@org_slug}
           project={@project}
+          can_delete?={@can_delete?}
           general_form={@general_form}
           env_rows={@env_rows}
         />
@@ -272,6 +288,7 @@ defmodule PromptOnWeb.SettingsLive do
   attr :project, :map, required: true
   attr :general_form, :map, required: true
   attr :env_rows, :list, required: true
+  attr :can_delete?, :boolean, required: true
 
   defp project_settings(assigns) do
     ~H"""
@@ -347,6 +364,7 @@ defmodule PromptOnWeb.SettingsLive do
       </SC.setting_card>
 
       <SC.setting_card
+        :if={@can_delete?}
         id="danger-card"
         title="Delete project"
         danger

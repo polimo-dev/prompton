@@ -1,7 +1,8 @@
 defmodule PromptOn.Checks.OrganizationMember do
   @moduledoc """
   Is the User actor a member of the target record's organization? (filter check, folded into the
-  read query).
+  read query). Stored legacy roles still count as membership; authorization-specific checks
+  normalize those roles separately.
 
   The `path:` option gives the relationship path to the organization.
   - `Organization` itself: `[]` (default) -> `exists(memberships, user_id == actor.id)`

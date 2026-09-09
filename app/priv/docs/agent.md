@@ -181,6 +181,12 @@ prompton use --org personal     # or a team slug; verified against the server
 
 Confirm the identity back to the human (`Logged in as ada@example.com`, organization `personal`) before going on.
 
+The CLI session has the user's current permissions. A `member` sees only assigned projects and
+projects they created; `admin` and `owner` can use all projects in an organization. Organization
+membership alone does not imply project access. Invitations are accepted in the browser: the
+recipient signs in with the invited email and explicitly clicks **Join** before the CLI can use the
+new organization and project grants.
+
 ### Step 5 — write the migration plan, then stop
 
 Write the plan as a document the human can read and correct. It is derived from what step 3 found, not from a template you filled in blind. Cover, in this order:

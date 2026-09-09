@@ -264,6 +264,24 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       refute has_element?(view, "#provider-setup-card")
     end
 
+    test "members do not see the provider setup card", %{user: owner} do
+      org = Fixtures.team_org_fixture(%{user: owner, slug: "member-provider-hidden"})
+      Fixtures.set_plan(org, :team)
+      member = Fixtures.user_fixture(%{email: "provider-member@example.com"})
+
+      {:ok, _membership} =
+        Accounts.add_member(
+          %{organization_id: org.id, user_id: member.id, role: :member},
+          actor: Fixtures.system_actor()
+        )
+
+      {:ok, view, html} = live(log_in_user(build_conn(), member), ~p"/#{org.slug}")
+
+      refute has_element?(view, "#provider-setup-card")
+      refute has_element?(view, "#provider-setup-form")
+      refute html =~ "Connect OpenRouter"
+    end
+
     test "shows the same way on a freshly created team organization", %{conn: conn, user: user} do
       org = Fixtures.team_org_fixture(%{user: user, slug: "fresh-co"})
 

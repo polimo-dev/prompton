@@ -1521,21 +1521,27 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   def handle_event("ai_generate", _params, socket) do
-    case is_integer(socket.assigns.ai_index) &&
-           Enum.at(socket.assigns.messages, socket.assigns.ai_index) do
-      message when not is_map(message) ->
-        {:noreply, socket}
+    case ensure_project_access(socket) do
+      :ok ->
+        case is_integer(socket.assigns.ai_index) &&
+               Enum.at(socket.assigns.messages, socket.assigns.ai_index) do
+          message when not is_map(message) ->
+            {:noreply, socket}
 
-      message ->
-        request = ai_request(socket.assigns, message)
-        organization_id = socket.assigns.project.organization_id
+          message ->
+            request = ai_request(socket.assigns, message)
+            organization_id = socket.assigns.project.organization_id
 
-        {:noreply,
-         socket
-         |> assign(ai_stage: :running, ai_result: nil, ai_error: nil)
-         |> start_async({:ai_draft, socket.assigns.ai_index}, fn ->
-           PromptOn.LLM.complete(request, organization_id: organization_id)
-         end)}
+            {:noreply,
+             socket
+             |> assign(ai_stage: :running, ai_result: nil, ai_error: nil)
+             |> start_async({:ai_draft, socket.assigns.ai_index}, fn ->
+               PromptOn.LLM.complete(request, organization_id: organization_id)
+             end)}
+        end
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
     end
   end
 
@@ -1853,9 +1859,22 @@ defmodule PromptOnWeb.PromptEditorLive do
   # Arena runs
 
   defp ensure_runnable(socket) do
-    case arena_blocker(socket.assigns) do
-      nil -> if arena_running?(socket.assigns), do: {:error, "Still running — wait."}, else: :ok
-      message -> {:error, message}
+    with :ok <- ensure_project_access(socket) do
+      case arena_blocker(socket.assigns) do
+        nil -> if arena_running?(socket.assigns), do: {:error, "Still running — wait."}, else: :ok
+        message -> {:error, message}
+      end
+    end
+  end
+
+  # AI requests use the organization's provider key outside Ash actions. Recheck access before
+  # spending that key because project grants can change while the editor remains connected.
+  defp ensure_project_access(socket) do
+    case PromptOn.Projects.get_project(socket.assigns.project.id,
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, %{archived_at: nil}} -> :ok
+      _ -> {:error, "Project access is no longer available."}
     end
   end
 

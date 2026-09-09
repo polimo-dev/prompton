@@ -1,7 +1,7 @@
 defmodule PromptOnWeb.Plugs.RequireUserWithReturnTo do
   @moduledoc """
-  Requires sign-in **and remembers where to return to**. Currently used by `/device` (CLI device
-  approval).
+  Requires sign-in **and remembers where to return to**. Used by `/device` (CLI device approval)
+  and emailed invitation links.
 
   The `:live_user_required` hook in `PromptOnWeb.LiveUserAuth` also requires sign-in, but a LiveView
   hook cannot write to the session (there are no session writes on the socket) — so it cannot send
@@ -22,9 +22,15 @@ defmodule PromptOnWeb.Plugs.RequireUserWithReturnTo do
       conn
     else
       conn
-      |> put_session(:return_to, Phoenix.Controller.current_path(conn))
+      |> put_session(:return_to, return_to_path(conn))
       |> Phoenix.Controller.redirect(to: "/sign-in")
       |> halt()
     end
   end
+
+  defp return_to_path(%Plug.Conn{method: "POST", path_info: ["invitations", token, "join"]}) do
+    "/invitations/#{URI.encode(token)}"
+  end
+
+  defp return_to_path(conn), do: Phoenix.Controller.current_path(conn)
 end

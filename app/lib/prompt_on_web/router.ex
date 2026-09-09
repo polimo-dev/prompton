@@ -230,6 +230,9 @@ defmodule PromptOnWeb.Router do
   scope "/", PromptOnWeb do
     pipe_through [:browser, PromptOnWeb.Plugs.RequireUserWithReturnTo]
 
+    get "/invitations/:token", InvitationController, :show, log: false
+    post "/invitations/:token/join", InvitationController, :join, log: false
+
     ash_authentication_live_session :device_routes,
       on_mount: [{PromptOnWeb.LiveUserAuth, :live_user_required}] do
       live "/device", DeviceLive
