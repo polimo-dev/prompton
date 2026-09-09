@@ -9,7 +9,7 @@ defmodule PromptOnWeb.SignInController do
   |---|---|
   | `GET  /sign-in` | Email field; with a **pending address** in the session (`:sign_in_email`), its code field |
   | `POST /sign-in` | `SignIn.request/2` -> address into the session, then `/sign-in` (code field + "We emailed a 6-digit code…") |
-  | `POST /sign-in/verify` | `SignIn.verify/3` -> seed the session (`PromptOnWeb.UserSession.sign_in/2`) -> return-to path or `/personal` |
+  | `POST /sign-in/verify` | `SignIn.verify/3` -> seed the session (`PromptOnWeb.UserSession.sign_in/2`) -> return-to path or home organization |
   | `POST /sign-in/resend` | `request/2` again for the pending address (same throttle) |
   | `POST /sign-in/reset` | "Use a different email" - drops the pending address |
 
@@ -17,7 +17,7 @@ defmodule PromptOnWeb.SignInController do
   does not, or hit the throttle. A code failure is also a single sentence ("That code didn't
   work…"). Only the inline error for a value not shaped like an email looks different.
 
-  A signed-in user goes to `/personal` on any request. CSRF is `protect_from_forgery` in the
+  A signed-in user goes to their home organization on any request. CSRF is `protect_from_forgery` in the
   `:browser` pipeline. The client IP (the throttle key) is `PromptOn.ClientIp.from_conn/1`.
   """
 
@@ -25,6 +25,7 @@ defmodule PromptOnWeb.SignInController do
 
   alias PromptOn.Accounts.SignIn
   alias PromptOn.ClientIp
+  alias PromptOnWeb.LiveProjectScope
   alias PromptOnWeb.UserSession
 
   plug :redirect_signed_in
@@ -93,7 +94,7 @@ defmodule PromptOnWeb.SignInController do
     {conn, return_to} =
       conn
       |> delete_session(@pending)
-      |> UserSession.pop_return_to(~p"/personal")
+      |> UserSession.pop_return_to(LiveProjectScope.home_path(user))
 
     conn
     |> UserSession.sign_in(user)
@@ -127,7 +128,7 @@ defmodule PromptOnWeb.SignInController do
 
   defp redirect_signed_in(conn, _opts) do
     if conn.assigns[:current_user] do
-      conn |> redirect(to: ~p"/personal") |> halt()
+      conn |> redirect(to: LiveProjectScope.home_path(conn.assigns.current_user)) |> halt()
     else
       conn
     end

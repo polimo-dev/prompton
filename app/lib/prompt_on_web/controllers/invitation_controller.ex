@@ -29,7 +29,7 @@ defmodule PromptOnWeb.InvitationController do
       if matching_email?(conn.assigns.current_user, view) do
         case Accounts.accept_invitation(token, actor: conn.assigns.current_user) do
           {:ok, accepted} ->
-            redirect_to = organization_path(accepted) || organization_path(view) || ~p"/personal"
+            redirect_to = organization_path(accepted) || organization_path(view) || ~p"/"
 
             conn
             |> put_flash(:info, "You joined #{view.organization_name}.")

@@ -386,7 +386,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
     {:noreply,
      socket
      |> put_flash(:info, "Organization deleted")
-     |> push_navigate(to: ~p"/personal")}
+     |> push_navigate(to: PromptOnWeb.LiveProjectScope.home_path(socket.assigns.current_user))}
   end
 
   @impl Phoenix.LiveView

@@ -219,6 +219,46 @@ defmodule PromptOnWeb.SignInControllerTest do
       assert length(memberships) == 1
     end
 
+    test "after conversion sign-in opens the newest organization without recreating personal", %{
+      conn: conn
+    } do
+      user = Fixtures.user_fixture()
+
+      {:ok, _converted} =
+        Accounts.claim_organization_slug(Fixtures.organization_for(user), %{slug: "converted"},
+          actor: user
+        )
+
+      newest = Fixtures.team_org_fixture(%{user: user, name: "Newest", slug: "newest"})
+      {conn, _code} = sign_in(conn, to_string(user.email))
+
+      assert redirected_to(conn) == "/#{newest.slug}"
+      assert {:ok, view, _html} = live(conn, redirected_to(conn))
+      assert has_element?(view, "#org-home-screen")
+      assert {:ok, nil} = Accounts.personal_organization_for(user.id, actor: user)
+      assert {:ok, organizations} = Accounts.list_organizations_for(user.id, actor: user)
+      assert length(organizations) == 2
+    end
+
+    test "sign-in without any remaining organizations lands on an accessible account", %{
+      conn: conn
+    } do
+      user = Fixtures.user_fixture()
+
+      {:ok, converted} =
+        Accounts.claim_organization_slug(Fixtures.organization_for(user), %{slug: "converted"},
+          actor: user
+        )
+
+      :ok = Accounts.destroy_organization(converted, actor: user)
+      {conn, _code} = sign_in(conn, to_string(user.email))
+
+      assert redirected_to(conn) == "/account"
+      assert {:ok, view, _html} = live(conn, redirected_to(conn))
+      assert has_element?(view, "#account-screen")
+      assert {:ok, []} = Accounts.list_organizations_for(user.id, actor: user)
+    end
+
     test "email case does not matter", %{conn: conn} do
       email = Fixtures.unique_email()
       {conn, _code} = sign_in(conn, String.upcase(email))
@@ -453,6 +493,43 @@ defmodule PromptOnWeb.SignInControllerTest do
   end
 
   describe "return_to" do
+    test "conversion preserves a device return path and safely resolves an old personal path" do
+      user = Fixtures.user_fixture()
+
+      {:ok, organization} =
+        Accounts.claim_organization_slug(Fixtures.organization_for(user), %{slug: "converted"},
+          actor: user
+        )
+
+      for path <- ["/device?code=ABCD-EFGH", "/personal/settings"] do
+        conn = build_conn() |> init_test_session(%{return_to: path})
+        {conn, _code} = sign_in(conn, to_string(user.email))
+        assert redirected_to(conn) == path
+        refute get_session(conn, :return_to)
+
+        if path == "/personal/settings" do
+          assert {:error, {:redirect, %{to: destination}}} = live(conn, path)
+          assert destination == "/#{organization.slug}"
+          assert {:ok, view, _html} = live(conn, destination)
+          assert has_element?(view, "#org-home-screen")
+        end
+      end
+    end
+
+    test "an external return path falls back to the converted organization" do
+      user = Fixtures.user_fixture()
+
+      {:ok, organization} =
+        Accounts.claim_organization_slug(Fixtures.organization_for(user), %{slug: "converted"},
+          actor: user
+        )
+
+      conn = build_conn() |> init_test_session(%{return_to: "https://evil.example"})
+      {conn, _code} = sign_in(conn, to_string(user.email))
+      assert redirected_to(conn) == "/#{organization.slug}"
+      refute get_session(conn, :return_to)
+    end
+
     test "a visitor who started at /device?code=… lands back there after the code" do
       email = Fixtures.unique_email()
 
