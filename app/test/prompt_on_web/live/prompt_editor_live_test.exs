@@ -1830,6 +1830,65 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     end
   end
 
+  describe "message size estimates" do
+    test "counts follow editing, autosave, clearing and message removal", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+
+      assert has_element?(view, "#message-0-stats-characters", "16 ch")
+      assert has_element?(view, "#message-0-stats-tokens", "~4 tokens")
+      assert has_element?(view, "#message-1-stats-tokens", "~3 tokens")
+
+      view
+      |> form("#prompt-editor-form",
+        editor: %{
+          "messages" => %{"0" => %{"role" => "system", "content" => "안녕하세요 👩‍💻"}}
+        }
+      )
+      |> render_change()
+
+      assert has_element?(view, "#message-0-stats-characters", "7 ch")
+      assert has_element?(view, "#message-0-stats-tokens", "~7 tokens")
+      assert has_element?(view, "#message-1-stats-tokens", "~3 tokens")
+
+      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+      assert has_element?(view, "#message-0-stats-tokens", "~7 tokens")
+
+      view |> element("#add-message") |> render_click()
+      assert has_element?(view, "#message-2-stats-characters", "0 ch")
+      assert has_element?(view, "#message-2-stats-tokens", "~0 tokens")
+
+      view
+      |> form("#prompt-editor-form",
+        editor: %{"messages" => %{"0" => %{"role" => "system", "content" => ""}}}
+      )
+      |> render_change()
+
+      assert has_element?(view, "#message-0-stats-characters", "0 ch")
+      assert has_element?(view, "#message-0-stats-tokens", "~0 tokens")
+
+      view |> element("#message-0-remove") |> render_click()
+      assert has_element?(view, "#message-0-stats-tokens", "~3 tokens")
+      assert has_element?(view, "#message-1-stats-tokens", "~0 tokens")
+      refute has_element?(view, "#message-2-stats")
+    end
+
+    test "text prompts use the same estimate without requiring a model", %{
+      conn: conn,
+      project: project
+    } do
+      use_case = Fixtures.use_case_fixture(project, %{key: "token_estimate", kind: :text})
+      Fixtures.prompt_version_fixture(use_case, %{text_template: "Hello, world!"})
+
+      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+      assert has_element?(view, "#message-0-stats-characters", "13 ch")
+      assert has_element?(view, "#message-0-stats-tokens", "~4 tokens")
+    end
+  end
+
   describe "draft autosave" do
     test "an edit is saved on the spot and a remount revives it as is (no version is added)", %{
       conn: conn,
@@ -1921,6 +1980,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       view |> element("#prompt-ko") |> render_click()
       assert_patch(view, hub_path(project, use_case, prompt: "ko"))
       refute render(view) =~ "default-draft text"
+      assert has_element?(view, "#message-0-stats-tokens", "~0 tokens")
 
       view
       |> form("#prompt-editor-form",
@@ -1933,6 +1993,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert_patch(view, hub_path(project, use_case))
       assert render(view) =~ "default-draft text"
       refute render(view) =~ "ko-draft text"
+      assert has_element?(view, "#message-0-stats-tokens", "~5 tokens")
 
       assert %{"messages" => [%{"content" => "ko-draft text"} | _rest]} = reload_draft(ko)
     end
@@ -1972,6 +2033,9 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert has_element?(view, "#preview-badge")
       assert has_element?(view, "#version-preview")
       assert render(view) =~ "You are helpful."
+      assert has_element?(view, "#preview-message-0-stats-characters", "16 ch")
+      assert has_element?(view, "#preview-message-0-stats-tokens", "~4 tokens")
+      assert has_element?(view, "#preview-message-1-stats-tokens", "~3 tokens")
 
       # Read-only: neither the edit form nor the AI draft modal.
       refute has_element?(view, "#prompt-editor-form")
@@ -1995,6 +2059,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert render(view) =~ "Restored v1 to the draft."
       assert has_element?(view, "#prompt-editor-form")
       assert %{"messages" => [%{"content" => "You are helpful."} | _rest]} = reload_draft(prompt)
+      assert has_element?(view, "#message-0-stats-tokens", "~4 tokens")
 
       # Restoring creates no version.
       assert [%{number: 1}, %{number: 2}] = versions(prompt)

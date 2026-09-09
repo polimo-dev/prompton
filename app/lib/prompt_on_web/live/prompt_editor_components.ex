@@ -12,7 +12,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
   | `new_prompt_modal/1` | "New prompt" modal (`?new_prompt=1`) |
   | `model_picker_modal/1` | **Search-style model picker** (`?models=1`): multi-select from the project catalog and OpenRouter in one list |
   | `arena_bar/1` | Head of the Arena tab: the selected-model chip row plus "Add models" |
-  | `message_card/1` | Message card (role select, char count, Draft with AI, HighlightedEditor) |
+  | `message_card/1` | Message card (role select, character/token estimate, Draft with AI, HighlightedEditor) |
   | `version_preview/1` | `?v=` read-only preview plus "Restore this version to draft" |
   | `variables_card/1` | Detected variables chips, schema comparison banner and declaration editor (declare with one click) |
   | `arena/1` | Arena: one pane per model, each pane with a **persistent conversation history**, one shared input below |
@@ -553,7 +553,10 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
     ~H"""
     <div id={"message-#{@index}"} class="card2" style="overflow:hidden;">
-      <div class="hair-b" style="padding:7px 10px;display:flex;align-items:center;gap:8px;">
+      <div
+        class="hair-b"
+        style="padding:7px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
+      >
         <DS.ds_select
           id={"message-#{@index}-role"}
           name={"editor[messages][#{@index}][role]"}
@@ -562,9 +565,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
           w={104}
           mono
         />
-        <span class="font-mono" style="font-size:11px;color:var(--tx-3);">
-          {String.length(@message.content)} ch
-        </span>
+        <.message_stats id={"message-#{@index}-stats"} content={@message.content} />
         <span style="margin-left:auto;display:flex;align-items:center;gap:2px;">
           <.link id={"message-#{@index}-ai"} patch={@ai_patch} class="tr" style={accent_chip()}>
             <DSIcons.icon name="sparkles" size={12} /> Draft with AI
@@ -594,6 +595,33 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   defp min_height("system"), do: 150
   defp min_height(_role), do: 110
+
+  # The ~4 bytes/token BPE average is a rough sizing heuristic, not a model tokenizer:
+  # https://github.com/openai/tiktoken#what-is-bpe-anyway
+  # Count UTF-8 bytes so multibyte text is not treated like ASCII. Keep raw template syntax;
+  # rendered variables and request framing are unknown while editing. Never use this for billing.
+  attr :id, :string, required: true
+  attr :content, :string, required: true
+
+  defp message_stats(assigns) do
+    assigns = assign(assigns, :tokens, div(byte_size(assigns.content) + 3, 4))
+
+    ~H"""
+    <span
+      id={@id}
+      class="font-mono"
+      style="display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px;color:var(--tx-3);"
+    >
+      <span id={"#{@id}-characters"}>{String.length(@content)} ch</span>
+      <span aria-hidden="true">·</span>
+      <span
+        id={"#{@id}-tokens"}
+        aria-label={"Approximately #{@tokens} tokens; model-dependent estimate of template source only"}
+        title="Rough estimate: UTF-8 bytes / 4, rounded up. Varies by model and language. Template source only; excludes variable values and message overhead."
+      >~{@tokens} tokens</span>
+    </span>
+    """
+  end
 
   # Helper so the mockup's `@accent_chip` constant is used as a module attribute instead of being
   # passed through assigns.
@@ -649,9 +677,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
       >
         <div class="hair-b" style="padding:7px 10px;display:flex;align-items:center;gap:8px;">
           <DS.badge tone={DS.role_tone(message.role)} mono>{message.role}</DS.badge>
-          <span class="font-mono" style="font-size:11px;color:var(--tx-3);">
-            {String.length(message.content)} ch
-          </span>
+          <.message_stats id={"preview-message-#{index}-stats"} content={message.content} />
         </div>
         <pre style="margin:0;padding:10px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--tx-1);">{message.content}</pre>
       </div>
