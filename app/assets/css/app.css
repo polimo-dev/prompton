@@ -203,7 +203,9 @@ html.sidebar-collapsed { --sidebar-w: 60px; }
 .sidebar-org { padding: 12px 10px 8px; display: flex; align-items: center; gap: 6px; }
 
 .sidebar-nav { padding: 2px 10px; display: flex; flex-direction: column; gap: 1px; flex: 1; overflow-y: auto; }
-.sidebar-subnav { position: relative; padding-left: 0; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-mainnav { display: flex; flex-direction: column; gap: 1px; }
+.sidebar-subnav { position: relative; padding-left: 22px; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-subnav::before { content: ""; position: absolute; left: 10px; top: 4px; bottom: 4px; width: 1px; background: var(--line-2); }
 .sidebar-user > summary { padding: 10px; display: flex; align-items: center; gap: 9px; cursor: pointer;
   border-radius: var(--r-sm); margin: 6px; }
 .sidebar-user > summary:hover, .sidebar-user[open] > summary { background: var(--bg-3); }
@@ -222,6 +224,7 @@ html.sidebar-collapsed .sidebar-full { display: none !important; }
 html.sidebar-collapsed .sidebar-org { flex-direction: column; gap: 4px; padding: 10px 0 6px; }
 html.sidebar-collapsed .sidebar-nav { padding-left: 6px; padding-right: 6px; }
 html.sidebar-collapsed .sidebar-subnav { padding-left: 0; }
+html.sidebar-collapsed .sidebar-subnav::before { display: none; }
 html.sidebar-collapsed .sidebar-switch { padding-left: 0 !important; padding-right: 0 !important; }
 html.sidebar-collapsed .navitem { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }
 html.sidebar-collapsed .dsswitch { flex: none !important; }

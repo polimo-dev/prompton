@@ -317,13 +317,14 @@ written in English.
   project Settings has **no tabs**. Playground, Models and Deployments are neither screens nor menu
   entries (the hub absorbed them) — a model is registered the moment the hub's searchable picker
   selects it. `/use-cases/:key` is a redirect to the hub.
-- **The sidebar is the hierarchy itself** (amended 2026-09-01, `PromptOnWeb.Layouts`): top = the
-  current organization (`#org-menu` popup — Projects, Members, Usage, Organization settings + the
-  organization switch list + New organization), middle = the project (switcher + the four screens
-  above), bottom = the account (`#user-menu` popup — Account settings, Sign out). The collapse
+- **The sidebar is the hierarchy itself** (`PromptOnWeb.Layouts`): top = the current organization
+  (`#org-menu` popup — organization switch list + New organization), middle = the current scope
+  (Projects, Members, Usage, Organization settings when no project is selected; otherwise the
+  project switcher + the four project screens indented along a vertical guide), bottom = the
+  account (`#user-menu` popup — Account settings, Sign out). The collapse
   toggle (`#sidebar-toggle`) is a small icon at the right of the organization row, and its state is
   `localStorage["pon:sidebar"]` + `<html>.sidebar-collapsed` (not URL state). A new sidebar entry
-  attaches to **its own layer** among the three popups.
+  attaches to **its own scope**; organization screen links belong in the main sidebar navigation.
 - **Organization screens** (amended 2026-09-02): `/{org}` (project list), `/{org}/settings`
   (General + **Provider Keys** only — the "Management keys" tab was deleted along with the keys.
   Coding AIs/CLIs get a person's CLI session token via `prompton login` (→ `/device`)),

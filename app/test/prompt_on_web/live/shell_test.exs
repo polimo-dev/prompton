@@ -2,10 +2,10 @@ defmodule PromptOnWeb.ShellTest do
   @moduledoc """
   App shell (sidebar + `DS.screen`) and routing wiring tests.
 
-  The sidebar draws the hierarchy as it is (2026-09-01 restructure, `PromptOnWeb.Layouts`
-  moduledoc): **top = the current organization** (`#org-menu` popup + organization switching),
-  **middle = the project** (switcher + the four screens), **bottom = the account** (`#user-menu`
-  popup). The collapse toggle is the small icon on the right of the organization row.
+  The sidebar draws the hierarchy as it is (`PromptOnWeb.Layouts` moduledoc): **top = the current
+  organization** (`#org-menu` popup + organization switching), **middle = organization or project
+  navigation**, **bottom = the account** (`#user-menu` popup). The collapse toggle is the small icon
+  on the right of the organization row.
   """
   use PromptOnWeb.ConnCase, async: true
 
@@ -69,7 +69,8 @@ defmodule PromptOnWeb.ShellTest do
 
       assert has_element?(view, "#sidebar")
       assert has_element?(view, "#org-home-screen")
-      assert has_element?(view, "#org-projects.is-current")
+      assert has_element?(view, "#organization-nav #org-projects.active[aria-current='page']")
+      refute has_element?(view, "#project-switcher")
       assert has_element?(view, "#project-cards")
     end
 
@@ -147,27 +148,68 @@ defmodule PromptOnWeb.ShellTest do
       assert has_element?(view, "#user-menu #app-version")
     end
 
-    test "the organization menu holds the four organization screens", %{
+    test "the organization menu only holds organization switching actions", %{
       conn: conn,
       project: project
     } do
-      {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases")
-
-      assert has_element?(view, "#org-projects[href='/personal']")
-      assert has_element?(view, "#org-members[href='/personal/members']")
-      assert has_element?(view, "#org-usage[href='/personal/usage']")
-      assert has_element?(view, "#org-settings[href='/personal/settings']")
-      assert has_element?(view, "#new-organization")
+      for path <- [~p"/personal/#{project.slug}/use-cases", ~p"/personal"] do
+        {:ok, view, _html} = live(conn, path)
+        refute has_element?(view, "#org-menu #org-projects")
+        refute has_element?(view, "#org-menu #org-members")
+        refute has_element?(view, "#org-menu #org-usage")
+        refute has_element?(view, "#org-menu #org-settings")
+        assert has_element?(view, "#switch-org-personal[href='/personal']")
+        assert has_element?(view, "#new-organization")
+      end
     end
 
-    test "on an organization screen that item is marked current", %{conn: conn} do
-      for {path, selector} <- [
-            {~p"/personal/members", "#org-members"},
-            {~p"/personal/usage", "#org-usage"},
-            {~p"/personal/settings", "#org-settings"}
+    test "organization screens render their nav in the sidebar body", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/personal")
+
+      assert has_element?(view, ".sidebar-nav > #organization-nav")
+      assert has_element?(view, "#organization-nav #org-projects.navitem[href='/personal']")
+
+      assert has_element?(
+               view,
+               "#organization-nav #org-members.navitem[href='/personal/members']"
+             )
+
+      assert has_element?(view, "#organization-nav #org-usage.navitem[href='/personal/usage']")
+
+      assert has_element?(
+               view,
+               "#organization-nav #org-settings.navitem[href='/personal/settings']"
+             )
+
+      refute has_element?(view, ".sidebar-subnav #org-projects")
+    end
+
+    test "organization screens select the active item without project controls", %{
+      conn: conn,
+      user: user
+    } do
+      team = Fixtures.team_org_fixture(%{user: user})
+
+      for org_slug <- ["personal", team.slug],
+          {suffix, selector} <- [
+            {"", "#org-projects"},
+            {"/members", "#org-members"},
+            {"/usage", "#org-usage"},
+            {"/settings", "#org-settings"}
           ] do
+        path = "/#{org_slug}#{suffix}"
         {:ok, view, _html} = live(conn, path)
-        assert has_element?(view, "#{selector}.is-current"), "#{path}: #{selector} is not current"
+
+        assert has_element?(
+                 view,
+                 "#organization-nav #{selector}.active[aria-current='page'][href='#{path}']"
+               ),
+               "#{path}: #{selector} is not active"
+
+        assert has_element?(view, "#{selector}[title]"), "#{path}: #{selector} has no rail title"
+        assert has_element?(view, "#{selector} .sidebar-label")
+        refute has_element?(view, "#project-switcher")
+        refute has_element?(view, ".sidebar-subnav")
       end
     end
 
@@ -226,22 +268,38 @@ defmodule PromptOnWeb.ShellTest do
     } do
       {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases")
 
-      assert has_element?(view, "#nav-overview[href='/personal/#{project.slug}']")
-      assert has_element?(view, "#nav-usecases[href='/personal/#{project.slug}/use-cases']")
-      assert has_element?(view, "#nav-apikeys[href='/personal/#{project.slug}/api-keys']")
-      assert has_element?(view, "#nav-settings[href='/personal/#{project.slug}/settings']")
+      assert has_element?(view, ".sidebar-subnav #nav-overview[href='/personal/#{project.slug}']")
 
-      # Projects moved up into the organization menu; Playground, Models and Deployments live
-      # inside the hub.
+      assert has_element?(
+               view,
+               ".sidebar-subnav #nav-usecases[href='/personal/#{project.slug}/use-cases']"
+             )
+
+      assert has_element?(
+               view,
+               ".sidebar-subnav #nav-apikeys[href='/personal/#{project.slug}/api-keys']"
+             )
+
+      assert has_element?(
+               view,
+               ".sidebar-subnav #nav-settings[href='/personal/#{project.slug}/settings']"
+             )
+
+      assert has_element?(view, "#project-switcher")
+      refute has_element?(view, "#organization-nav")
+      refute has_element?(view, "#org-projects")
+
+      # Projects belongs to the organization nav; Playground, Models and Deployments live in the hub.
       refute has_element?(view, "#nav-projects")
       refute has_element?(view, "#nav-playground")
       refute has_element?(view, "#nav-models")
       refute has_element?(view, "#nav-deployments")
     end
 
-    test "with no project (organization home) there is no project nav either", %{conn: conn} do
+    test "with no project (organization home) there is no project switcher or nav", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/personal")
 
+      refute has_element?(view, "#project-switcher")
       refute has_element?(view, "#nav-overview")
       refute has_element?(view, "#nav-usecases")
     end

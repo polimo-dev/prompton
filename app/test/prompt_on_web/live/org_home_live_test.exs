@@ -43,17 +43,19 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       assert card =~ "staging"
     end
 
-    test "the sidebar switcher and the card use the same color for the same project", %{
+    test "the project switcher and the card use the same color for the same project", %{
       conn: conn,
       project: project
     } do
       # The mockups (`sidebar.jsx`, `s_overview.jsx`) give each project one color. Keeping two
       # palettes would make the sidebar tile and the card tile disagree on the same screen.
-      {:ok, view, _html} = live(conn, ~p"/personal")
+      {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases")
 
       color = PromptOnWeb.DS.project_color(project.slug)
 
       assert view |> element("#switch-to-acme") |> render() =~ color
+
+      {:ok, view, _html} = live(conn, ~p"/personal")
       assert view |> element("#project-card-acme") |> render() =~ color
     end
 
@@ -65,7 +67,7 @@ defmodule PromptOnWeb.OrgHomeLiveTest do
       Fixtures.use_case_fixture(project, %{key: "chat_response"})
 
       {:ok, view, _html} = live(conn, ~p"/personal")
-      assert view |> element("#switch-to-acme") |> render() =~ "2 uc"
+      refute has_element?(view, "#project-switcher")
 
       {:ok, view, _html} = live(conn, ~p"/personal/acme/use-cases")
       assert view |> element("#switch-to-acme") |> render() =~ "2 uc"

@@ -11,16 +11,18 @@ defmodule PromptOnWeb.Layouts do
 
   ## The sidebar draws the hierarchy as it is — organization → project → account
 
-  Three layers stand top to bottom (2026-09-01 reorganization):
+  Three layers stand top to bottom:
 
   1. **Top = the current organization** (`#org-menu`). This is where the brand block (the PromptOn
      logo) used to be — the tab title already says the app's name, and what belongs in that spot is
-     "which organization am I looking at". Clicking it opens the organization menu: Projects ·
-     Members · Usage · Organization settings, plus the **switch organization** list of the
-     organizations the user belongs to (personal organization first) + New organization.
+     "which organization am I looking at". Clicking it opens the organization menu: the **switch
+     organization** list of the organizations the user belongs to (personal organization first) +
+     New organization.
      The collapse toggle (`#sidebar-toggle`) is the small icon at the right end of this row (in the
      rail it drops below the mark).
-  2. **Middle = the project**. The project switcher + that project's four screens (`nav_items/0`).
+  2. **Middle = organization screens or project screens**. On an organization screen, the middle
+     shows Projects · Members · Usage · Organization settings. On a project screen, it shows the
+     project switcher + that project's four screens (`nav_items/0`), indented along a vertical guide.
   3. **Bottom = the account** (`#user-menu`). A click-to-open popup holds Account settings · Sign
      out.
 
@@ -64,10 +66,10 @@ defmodule PromptOnWeb.Layouts do
     %{id: :settings, label: "Settings", icon: "settings", path: "/settings"}
   ]
 
-  # Organization menu (`#org-menu`) items — the four organization-level screens. The organization
-  # home has no suffix. `id` is the DOM id (`#org-<id>`); `nav` is the `nav` value used for the
-  # active marker (the two differ — the organization settings nav value is `:org_settings` to keep
-  # it apart from project settings, but its DOM id is `#org-settings`).
+  # Organization nav items — the four organization-level screens. The organization home has no
+  # suffix. `id` is the DOM id (`#org-<id>`); `nav` is the `nav` value used for the active marker
+  # (the two differ — the organization settings nav value is `:org_settings` to keep it apart from
+  # project settings, but its DOM id is `#org-settings`).
   @org_items [
     %{id: "projects", nav: :projects, label: "Projects", icon: "layers", path: ""},
     %{id: "members", nav: :members, label: "Members", icon: "user", path: "/members"},
@@ -84,7 +86,7 @@ defmodule PromptOnWeb.Layouts do
   @doc """
   App shell — a 236px sidebar + body. The body slot usually holds a single `DS.screen/1`.
 
-  `nav` is the active sidebar item (shared by the organization menu and the project nav).
+  `nav` is the active sidebar item for the current organization or project scope.
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
   attr :current_user, :map, default: nil
@@ -94,7 +96,9 @@ defmodule PromptOnWeb.Layouts do
     doc:
       "the **raw path segment** of the current organization (`\"personal\"` or a team slug) — every link uses it"
 
-  attr :project, :map, default: nil, doc: "the current project (nil on the organization home)"
+  attr :project, :map,
+    default: nil,
+    doc: "the current project (nil on organization/account screens)"
 
   attr :projects, :list,
     default: [],
@@ -162,7 +166,6 @@ defmodule PromptOnWeb.Layouts do
           org_slug={@org_slug}
           organization={@organization}
           organizations={@organizations}
-          nav={@nav}
         />
         <button
           id="sidebar-toggle"
@@ -217,8 +220,19 @@ defmodule PromptOnWeb.Layouts do
       </div>
 
       <nav class="sidebar-nav">
-        <div class="sidebar-switch" style="padding:2px 2px 5px;">
+        <div :if={@project} class="sidebar-switch" style="padding:2px 2px 5px;">
           <.project_switcher org_slug={@org_slug} project={@project} projects={@projects} />
+        </div>
+
+        <div :if={is_nil(@project)} id="organization-nav" class="sidebar-mainnav">
+          <.nav_item
+            :for={item <- org_items()}
+            id={"org-#{item.id}"}
+            label={item.label}
+            icon={item.icon}
+            navigate={"/#{@org_slug}#{item.path}"}
+            active={@nav == item.nav}
+          />
         </div>
 
         <div :if={@project} class="sidebar-subnav">
@@ -281,7 +295,6 @@ defmodule PromptOnWeb.Layouts do
   attr :org_slug, :string, required: true
   attr :organization, :map, default: nil
   attr :organizations, :list, default: []
-  attr :nav, :atom, default: nil
 
   defp org_menu(assigns) do
     ~H"""
@@ -306,17 +319,6 @@ defmodule PromptOnWeb.Layouts do
         class="fadeup dsmenu"
         style="position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:32;"
       >
-        <.link
-          :for={item <- org_items()}
-          id={"org-#{item.id}"}
-          navigate={"/#{@org_slug}#{item.path}"}
-          class={["dsmenu-item", @nav == item.nav && "is-current"]}
-        >
-          <DSIcons.icon name={item.icon} size={13} class="tx2" />
-          <span style="font-size:14px;flex:1;text-align:left;">{item.label}</span>
-        </.link>
-
-        <div style="height:1px;background:var(--line);margin:5px 0;" />
         <div class="mono-label" style="padding:5px 8px 4px;">Switch organization</div>
         <.link
           :for={org <- @organizations}
@@ -473,7 +475,7 @@ defmodule PromptOnWeb.Layouts do
   @doc "Sidebar project nav item definitions (`nav` value → label/icon/path)."
   def nav_items, do: @nav_items
 
-  @doc "Organization menu item definitions (`nav` value → label/icon/suffix after `/{org}`)."
+  @doc "Organization nav item definitions (`nav` value → label/icon/suffix after `/{org}`)."
   def org_items, do: @org_items
 
   # `org_slug` is the raw path segment — when viewing the personal organization it carries

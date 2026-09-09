@@ -116,7 +116,7 @@ defmodule PromptOnWeb.OrgScopeTest do
       # Links keep the viewer's addressing: under a team organization they carry the team slug.
       assert has_element?(view, "#nav-overview[href='/#{org.slug}/#{p.slug}']")
       assert has_element?(view, "#nav-settings[href='/#{org.slug}/#{p.slug}/settings']")
-      assert has_element?(view, "#org-projects[href='/#{org.slug}']")
+      refute has_element?(view, "#org-menu #org-projects")
       assert has_element?(view, "#switch-org-#{org.slug}.is-current")
     end
 
@@ -180,11 +180,11 @@ defmodule PromptOnWeb.OrgScopeTest do
       org = Fixtures.team_org_fixture(%{user: user, slug: "acme-inc"})
       Fixtures.project_fixture(%{user: user, organization: org, slug: "teamed"})
 
-      {:ok, view, _html} = live(conn, ~p"/personal")
+      {:ok, view, _html} = live(conn, ~p"/personal/solo/use-cases")
       assert has_element?(view, "#switch-to-solo")
       refute has_element?(view, "#switch-to-teamed")
 
-      {:ok, view, _html} = live(conn, ~p"/#{org.slug}")
+      {:ok, view, _html} = live(conn, ~p"/#{org.slug}/teamed/use-cases")
       assert has_element?(view, "#switch-to-teamed")
       refute has_element?(view, "#switch-to-solo")
     end
