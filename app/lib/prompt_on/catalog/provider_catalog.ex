@@ -15,7 +15,7 @@ defmodule PromptOn.Catalog.ProviderCatalog do
   price as 0 would make the screen lie that the model is "free".
 
   `created` is OpenRouter's `"created"`, the **Unix seconds** at which the model appeared in the
-  list. It is the only value the picker's "Newest" sort looks at, so it is carried from here. When
+  list. The catalog is ordered newest first by this value, with unknown dates last. When
   it is missing or does not read as a positive integer it is `nil` ("unknown"): writing an unknown
   time as `0` would make the model date from 1970 and the sort would lie.
 
@@ -64,7 +64,13 @@ defmodule PromptOn.Catalog.ProviderCatalog do
     case Req.request(request) do
       {:ok, %Req.Response{status: status, body: %{"data" => data}}}
       when status in 200..299 and is_list(data) ->
-        {:ok, data |> Enum.map(&normalize/1) |> Enum.reject(&is_nil/1)}
+        models =
+          data
+          |> Enum.map(&normalize/1)
+          |> Enum.reject(&is_nil/1)
+          |> Enum.sort_by(&{-(&1.created || 0), String.downcase(&1.display_name), &1.model_id})
+
+        {:ok, models}
 
       {:ok, %Req.Response{status: status}} when status in 200..299 ->
         {:error, "unexpected response from openrouter"}

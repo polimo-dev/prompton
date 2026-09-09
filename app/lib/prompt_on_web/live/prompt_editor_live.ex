@@ -43,7 +43,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   | `?versions=1` | The version list drawer is open |
   | `?diff=<number>` | Diff mode comparing this version with the selected version |
   | `?models=1` | The model search picker is open |
-  | `?msort=relevance\\|cheapest\\|newest\\|context` | Picker sort (default relevance; unknown values too) |
+  | `?msort=relevance\\|cheapest\\|newest\\|context` | Picker sort (default newest; unknown values too) |
   | `?deploy=1` | The Deploy modal is open |
   | `?ai=<message-index>` | The AI draft modal for that message is open |
   | `?var=<name>` | That declared variable row is expanded |
@@ -128,7 +128,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   @draft_option "draft"
   @prompt_changed_notice "Prompt changed — the next turns use the updated prompt (history is kept)."
   @picker_limit 50
-  @model_sorts ~w(relevance cheapest newest context)
+  @model_sorts ~w(newest relevance cheapest context)
 
   @sort_labels %{
     "relevance" => "Relevance",
@@ -949,6 +949,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     arena_ids = MapSet.new(assigns.arena_models, & &1.id)
     history_ids = history_model_ids(assigns)
     picks = assigns.model_picks
+    catalog_created = Map.new(assigns.model_catalog, &{&1.model_id, &1.created})
 
     project =
       Enum.map(assigns.models, fn model ->
@@ -971,9 +972,7 @@ defmodule PromptOnWeb.PromptEditorLive do
           input_per_m: input,
           output_per_m: output,
           context_length: model.context_length,
-          # The listing time exists only in the provider list, so a project model is "unknown"
-          # (last under Newest).
-          created: nil
+          created: if(model.provider == :openrouter, do: Map.get(catalog_created, model.model_id))
         }
       end)
 
@@ -1035,7 +1034,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   defp descending(value), do: {0, -value}
 
   # The sort is held by the URL too: the segments are patch links, not events. The default
-  # (relevance) omits the parameter entirely to keep the URL clean (`editor_path/2` drops nil
+  # (newest) omits the parameter entirely to keep the URL clean (`editor_path/2` drops nil
   # values).
   defp picker_sort_options(assigns) do
     Enum.map(@model_sorts, fn sort ->

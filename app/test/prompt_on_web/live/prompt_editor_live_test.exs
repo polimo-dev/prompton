@@ -798,7 +798,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   end
 
   describe "model picker: sorting (?msort)" do
-    test "the default is Relevance: the project catalog first, then OpenRouter", %{
+    test "the default is Newest and Relevance remains an explicit option", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -808,6 +808,11 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       {:ok, view, _html} = live(conn, hub_path(project, use_case, models: 1))
       render_async(view)
 
+      assert picker_order(view) == ["y-pricey", "z-cheap", mid.id, "x-unknown"]
+      assert has_element?(view, "#model-sort-newest.on")
+
+      view |> element("#model-sort-relevance") |> render_click()
+      assert assert_patch(view) =~ "msort=relevance"
       assert picker_order(view) == [mid.id, "x-unknown", "y-pricey", "z-cheap"]
       assert has_element?(view, "#model-sort-relevance.on")
     end
@@ -833,13 +838,13 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       use_case: use_case
     } do
       mid = sort_stage(project)
+      newest = Fixtures.model_fixture(project, %{model_id: "y/pricey", display_name: "Newest"})
 
       {:ok, view, _html} = live(conn, hub_path(project, use_case, models: 1, msort: "newest"))
       render_async(view)
 
-      # The project model has no listing time: it goes to the back with `x/unknown`, and between
-      # those two the default order holds.
-      assert picker_order(view) == ["y-pricey", "z-cheap", mid.id, "x-unknown"]
+      # Registering a model preserves its provider listing time; unmatched models go last.
+      assert picker_order(view) == [newest.id, "z-cheap", mid.id, "x-unknown"]
     end
 
     test "Context is context length descending and unknown rows go last", %{
@@ -856,7 +861,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert picker_order(view) == ["y-pricey", mid.id, "z-cheap", "x-unknown"]
     end
 
-    test "an unknown msort folds into Relevance", %{
+    test "an unknown msort folds into Newest", %{
       conn: conn,
       project: project,
       use_case: use_case
@@ -866,8 +871,8 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       {:ok, view, _html} = live(conn, hub_path(project, use_case, models: 1, msort: "bananas"))
       render_async(view)
 
-      assert picker_order(view) == [mid.id, "x-unknown", "y-pricey", "z-cheap"]
-      assert has_element?(view, "#model-sort-relevance.on")
+      assert picker_order(view) == ["y-pricey", "z-cheap", mid.id, "x-unknown"]
+      assert has_element?(view, "#model-sort-newest.on")
     end
 
     test "the sort is carried by the URL: applied via patch and revived by a remount", %{

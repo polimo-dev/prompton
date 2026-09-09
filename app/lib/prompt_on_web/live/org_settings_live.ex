@@ -809,7 +809,6 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
     assigns.model_catalog
     |> Enum.filter(&model_matches?(&1, query))
-    |> Enum.sort_by(&String.downcase(&1.display_name))
     |> Enum.take(50)
     |> Enum.map(fn entry ->
       %{

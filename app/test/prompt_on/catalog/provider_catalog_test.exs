@@ -58,6 +58,9 @@ defmodule PromptOn.Catalog.ProviderCatalogTest do
       {:ok, models} = ProviderCatalog.list_openrouter_models(cache: false)
       created = Map.new(models, &{&1.model_id, &1.created})
 
+      assert Enum.map(models, & &1.model_id) ==
+               ["b/string", "a/created", "c/zero", "d/garbage", "e/absent"]
+
       assert created["a/created"] == 1_700_000_000
       assert created["b/string"] == 1_700_000_001
       assert created["c/zero"] == nil

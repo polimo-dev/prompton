@@ -22,7 +22,7 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
         "id" => "openai/gpt-4.1-mini",
         "name" => "OpenAI: GPT 4.1 mini",
         "context_length" => 128_000,
-        "created" => 1_745_000_000,
+        "created" => 1_747_000_000,
         "supported_parameters" => ["tools", "response_format"],
         "pricing" => %{"prompt" => "0.0000004", "completion" => "0.0000016"}
       },
@@ -403,6 +403,7 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
       html = render_async(view)
       assert html =~ "OpenAI: GPT 4.1 mini"
       assert has_element?(view, "#org-model-row-openai-gpt-4-1-mini")
+      assert has_element?(view, "#org-model-row-openai-gpt-4-1-mini:first-child")
 
       view
       |> form("#org-model-search-form", picker: %{"q" => "not-real"})
@@ -427,6 +428,7 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
 
       view |> element("#open-draft-model-picker") |> render_click()
       render_async(view)
+      assert has_element?(view, "#org-model-row-openai-gpt-4-1-mini:first-child")
       view |> element("#select-org-model-anthropic-claude-sonnet-4") |> render_click()
 
       assert render(view) =~ "Draft model saved"
