@@ -182,6 +182,7 @@ defmodule PromptOnWeb.API.V1.Management.JSON do
       "params" => deployment.params || %{},
       "provider_options" => deployment.provider_options || %{},
       "prompt_pins" => deployment.prompt_pins || %{},
+      "prompt_version_id" => PromptOn.Deployments.Deployment.prompt_version_id(deployment),
       "created_at" => timestamp(deployment.inserted_at)
     }
 

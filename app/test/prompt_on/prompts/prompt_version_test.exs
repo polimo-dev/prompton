@@ -23,15 +23,10 @@ defmodule PromptOn.Prompts.PromptVersionTest do
     %{project: project, use_case: use_case, prompt: default_prompt(use_case)}
   end
 
-  test "commits are numbered 1, 2, ... per prompt; other prompts have their own sequence", ctx do
+  test "commits are numbered 1, 2, ... for the canonical default prompt", ctx do
     v1 = prompt_version_fixture(ctx.prompt)
     v2 = prompt_version_fixture(ctx.prompt)
     assert {v1.number, v2.number} == {1, 2}
-
-    {:ok, ko} =
-      Prompts.open_prompt(%{use_case_id: ctx.use_case.id, name: "ko"}, scope(ctx.project))
-
-    assert prompt_version_fixture(ko).number == 1
 
     # concurrent commits: two processes numbering in their own transactions never collide
     parent = self()
@@ -180,18 +175,37 @@ defmodule PromptOn.Prompts.PromptVersionTest do
     assert fork.content_sha256 == source.content_sha256
     assert fork.detected_variables == source.detected_variables
 
-    {:ok, ko} =
-      Prompts.open_prompt(%{use_case_id: ctx.use_case.id, name: "ko"}, scope(ctx.project))
+    ko_id = legacy_prompt_row(ctx.project, ctx.use_case.id, "ko")
 
-    {:ok, fork_ko} =
-      Prompts.fork_prompt_version(source.id, %{prompt_id: ko.id}, scope(ctx.project))
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.fork_prompt_version(source.id, %{prompt_id: ko_id}, scope(ctx.project))
 
-    assert fork_ko.prompt_id == ko.id
-    assert fork_ko.number == 1
-    assert fork_ko.parent_version_id == source.id
+    assert Exception.message(error) =~ "only the default prompt can be versioned"
 
     assert {:error, %Ash.Error.Invalid{}} =
              Prompts.fork_prompt_version(Ash.UUIDv7.generate(), %{}, scope(ctx.project))
+  end
+
+  test "commit rejects archived or legacy nondefault prompts", ctx do
+    ko_id = legacy_prompt_row(ctx.project, ctx.use_case.id, "ko")
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.commit_prompt_version(
+               %{prompt_id: ko_id, messages: @messages},
+               scope(ctx.project)
+             )
+
+    assert Exception.message(error) =~ "only the default prompt can be versioned"
+
+    {:ok, archived} = Prompts.archive_prompt(ctx.prompt, scope(ctx.project))
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.commit_prompt_version(
+               %{prompt_id: archived.id, messages: @messages},
+               scope(ctx.project)
+             )
+
+    assert Exception.message(error) =~ "archived prompts cannot be versioned"
   end
 
   test "author_id is set from a User actor", ctx do
@@ -248,5 +262,20 @@ defmodule PromptOn.Prompts.PromptVersionTest do
 
     # another project's versions are not visible
     assert {:ok, []} = Prompts.list_prompt_versions(ctx.prompt.id, scope(project, owner))
+  end
+
+  defp legacy_prompt_row(project, use_case_id, name) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO prompts (project_id, use_case_id, name)
+        VALUES ($1, $2, $3)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), Ecto.UUID.dump!(use_case_id), name]
+      )
+
+    id
   end
 end

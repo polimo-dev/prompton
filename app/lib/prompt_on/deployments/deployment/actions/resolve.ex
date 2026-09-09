@@ -7,9 +7,10 @@ defmodule PromptOn.Deployments.Deployment.Actions.Resolve do
   delegates to `PromptOnSDK.Resolver.resolve/3`, so the server and the SDK run **the same code**
   (ADR 0007).
 
-  Context conditions are gone, so the only argument is a single prompt name (`prompt`, default
-  `"default"`). Passing a past revision id simulates that revision (it does not displace the live
-  revision). The result is a `%PromptOnSDK.UseCase{}` unpacked into a map.
+  Context conditions and prompt selection are gone. The optional `prompt` argument exists for
+  compatibility and must be omitted or set to `"default"`; non-default names are rejected before
+  the SDK resolver runs. Passing a past revision id simulates that revision (it does not displace
+  the live revision). The result is a `%PromptOnSDK.UseCase{}` unpacked into a map.
   """
 
   use Ash.Resource.Actions.Implementation
@@ -23,9 +24,8 @@ defmodule PromptOn.Deployments.Deployment.Actions.Resolve do
     deployment_id = input.arguments.deployment_id
     prompt = input.arguments[:prompt]
 
-    resolve_opts = if is_nil(prompt), do: [], else: [prompt: prompt]
-
-    with {:ok, %Deployment{} = deployment} <- fetch_deployment(deployment_id, opts),
+    with :ok <- default_prompt_only(prompt),
+         {:ok, %Deployment{} = deployment} <- fetch_deployment(deployment_id, opts),
          {:ok, snapshot} <-
            Snapshot.build(
              deployment.environment_id,
@@ -34,7 +34,7 @@ defmodule PromptOn.Deployments.Deployment.Actions.Resolve do
          {:ok, data, _warnings} <- UseCaseDocument.decode(snapshot.map),
          {:ok, key} <- use_case_key(snapshot.map, deployment.use_case_id),
          {:ok, resolution} <-
-           Resolver.resolve(data, key, resolve_opts ++ [etag: snapshot.etag]) do
+           Resolver.resolve(data, key, prompt_opts(prompt) ++ [etag: snapshot.etag]) do
       {:ok, Map.from_struct(resolution)}
     else
       {:error, :unknown_use_case} ->
@@ -55,6 +55,15 @@ defmodule PromptOn.Deployments.Deployment.Actions.Resolve do
         {:error, error}
     end
   end
+
+  defp default_prompt_only(nil), do: :ok
+  defp default_prompt_only("default"), do: :ok
+
+  defp default_prompt_only(prompt),
+    do: {:error, invalid(:prompt, "only the default prompt is supported: #{inspect(prompt)}")}
+
+  defp prompt_opts(nil), do: []
+  defp prompt_opts(prompt), do: [prompt: prompt]
 
   defp fetch_deployment(id, opts) do
     case Ash.get(Deployment, id, Keyword.take(opts, [:actor, :tenant, :authorize?])) do

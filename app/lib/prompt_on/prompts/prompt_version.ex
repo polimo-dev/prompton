@@ -121,14 +121,14 @@ defmodule PromptOn.Prompts.PromptVersion do
     end
 
     attribute :messages, {:array, PromptOn.Prompts.MessageTemplate} do
-      description "The kind :chat template. Empty array for :text."
+      description "The active chat template. Historical non-chat rows may have an empty array."
       allow_nil? false
       public? true
       default []
     end
 
     attribute :text_template, :string do
-      description "The kind :text template (e.g. the Groq STT `prompt`). nil for :chat."
+      description "Historical text template content. Active chat versions keep this nil."
       public? true
       constraints @raw_string
     end

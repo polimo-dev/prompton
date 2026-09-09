@@ -4,11 +4,11 @@ This page is the whole contract. Everything an agent needs to move an app's LLM 
 
 ## 0. What PromptOn is
 
-- A **control plane** for prompts and models: per use case and per environment it holds one **pin** = prompt version(s) + one model + params.
+- A **control plane** for prompts and models: per use case and per environment it holds one **pin** = one prompt version + one model + params.
 - **Config-fetch, not a proxy.** The app fetches the pin (`GET /api/v1/use-cases` or `POST /api/v1/use-cases/:key/prompt`) and then calls the LLM provider **itself, with its own provider key and its own HTTP client**. PromptOn is never in the request path and never sees the provider key.
 - **Monitoring logs** are batched `POST /api/v1/logs` calls the app sends after each provider call (successes and failures).
 - Two credentials, two doors: a **CLI session token** (from `prompton login`, a human's identity) provisions things under `/api/v1/me` and `/api/v1/orgs/…`; a **runtime API key** (`ptn_<project_slug>_…`, one per project) reads config and sends logs. Neither opens the other door (401).
-- Hierarchy: Organization (`personal` or a team slug) → Project (environments `production`, `staging`) → Use case (one per LLM call site) → prompts by name (`default`, `ko`, …) → immutable versions → deployment revisions (pins).
+- Hierarchy: Organization (`personal` or a team slug) → Project (environments `production`, `staging`) → Use case (one per LLM call site) → one prompt → immutable versions → deployment revisions (pins).
 
 ### What to tell the human
 
@@ -98,7 +98,7 @@ Search the codebase for provider SDKs and for raw HTTP to provider hosts: `opena
 | a stable snake_case name for the call site (`support_reply`) | use case `key` (cannot change later) |
 | the chat messages sent to the provider | `kind`: `chat` |
 | every value interpolated into the prompt (f-strings, template placeholders, string concatenation) | `input_schema` variables and `{{ name }}` placeholders |
-| language/tone/tenant variants of the same prompt | prompt names (`default`, `ko`, …) |
+| language/tone/tenant variants of the same prompt | variables plus Liquid `if`/`case`-style branching in the single prompt |
 | the model id string and the params (`temperature`, `max_tokens`, …) | `model` and `params` of the deployment pin |
 | where the prompt text lives today (hard-coded string, config file, database row, prompt-management SaaS, env var) | the "current state" section of the migration plan |
 | whether the call runs on the server or in a browser / mobile client | fit, and whether the runtime key is safe there |
@@ -193,7 +193,7 @@ Write the plan as a document the human can read and correct. It is derived from 
 
 1. **Current state.** Where prompts live today (hard-coded strings, config files, a database table, a prompt-management SaaS, env vars), who edits them, and what shipping a prompt change costs today (a redeploy? a migration? a dashboard click?).
 2. **The inventory**, as the table from step 3: one row per call site with its file and line, proposed use case key, `kind`, variables, current model and params, current prompt location.
-3. **What gets created in PromptOn.** Organization and project slug, environments used (`production`, `staging`), one use case per call site with its key/kind/`input_schema`/`default_params`, prompt names per use case (`default` plus any real variant), and the model + params each environment pins. Same models and params the app uses today — a migration changes *where* config lives, not what the app sends.
+3. **What gets created in PromptOn.** Organization and project slug, environments used (`production`, `staging`), one use case per call site with its key/kind/`input_schema`/`default_params`, one prompt per use case, and the model + params each environment pins. Same models and params the app uses today — a migration changes *where* config lives, not what the app sends.
 4. **The code change per call site.** For each row: which function changes, what `use_case`, `messages`, and `track` replace, what stays (provider key, HTTP client, retry logic, parsing, function signature), and what gets deleted (the hard-coded prompt text, model id and params).
 5. **SDK or hand-written client.** Which the project's language gets, with the registry check that decided it (§1.8).
 6. **Resilience.** The use-case document cache (memory + disk), the bundled use-case document committed into the repo for cold starts, and the rule that a provider call never fails because PromptOn did (§1.9).
@@ -244,12 +244,12 @@ cat > messages.json <<'EOF'
 [{"role": "system", "content": "You are a friendly support agent for Acme. Answer in two or three sentences; if you are not sure, say so and offer to escalate."},
  {"role": "user", "content": "{{ question }}"}]
 EOF
-prompton prompts commit support_reply default --file messages.json \
+prompton prompts commit support_reply --file messages.json \
   --message "migrated from the app's hardcoded prompt"
 
 # a second name only if the app already branched (e.g. by language)
-prompton prompts open support_reply ko --description Korean --idempotent
-prompton prompts commit support_reply ko --file messages.ko.json
+# Put language/tone/tenant variants in variables and Liquid branches.
+# If the purpose differs, create another use case.
 
 # register the model with the provider the app actually calls, BEFORE deploying:
 # `prompton deploy` registers an unknown model as provider `openrouter`, which is wrong
@@ -270,7 +270,7 @@ PTN_KEY=$(prompton api-keys issue --name 'Helpdesk server' --quiet)
 
 **The model string is the app's, byte for byte.** `model_id` is the exact string the app already passes to its provider client — `gpt-4o-mini` for the OpenAI SDK, `claude-sonnet-4-5-20250929` for the Anthropic SDK, `openai/gpt-4o-mini` only when the app really calls OpenRouter. Do not reformat it to match the examples on this page: the app reads it back out of the use-case document and sends it to the provider unchanged, so a "normalised" id is a 404 on every call, at runtime, after the migration looks finished. The provider is a property of the **catalog entry**, not of the deployment: `prompton models register <model-id> --provider openrouter|openai|anthropic|google|groq` sets it, and registering first is the only way to keep an app that calls a provider directly from being pointed at OpenRouter.
 
-Template rules: engine `liquid` (default) or `raw`; allowed tags `for` `if` `unless` `assign` `break` `continue`, allowed filters `size` `join` `default`, no whitespace-control markers (`{%-`, `-%}`); anything else (e.g. `{% include %}`) is rejected at commit with 400. `detected_variables` in the commit response is the list to mirror in `input_schema`. A chat use case is born with a prompt named `default`; if `default` exists it must be pinned.
+Template rules: engine `liquid` (default) or `raw`; allowed tags `for` `if` `unless` `assign` `break` `continue`, allowed filters `size` `join` `default`, no whitespace-control markers (`{%-`, `-%}`); anything else (e.g. `{% include %}`) is rejected at commit with 400. `detected_variables` in the commit response is the list to mirror in `input_schema`. A chat use case has one prompt; deployments pin one prompt version. `default` may appear in wire payloads as a compatibility key.
 
 Prove the pin renders before touching code:
 
@@ -328,7 +328,7 @@ git -C ../<repo>-prompton diff "$BASE"...prompton-migration   # $BASE from 6a; n
 
 Alongside it, hand the human:
 
-- **What exists in PromptOn now:** project slug, each use case key, each prompt name and version number, the pinned model and params per environment, and the runtime key's name (never the secret).
+- **What exists in PromptOn now:** project slug, each use case key, the prompt version number, the pinned model and params per environment, and the runtime key's name (never the secret).
 - **What the app needs to run:** `PTN_API_KEY` in the server environment, and any config the new module reads.
 - **How to roll back:** `prompton rollback <use-case> --revision N --environment production` puts an older pin back as a new revision (`prompton deployments list <use-case> --environment production` shows the revisions); `git worktree remove ../<repo>-prompton` and deleting the branch throws the code change away; nothing in PromptOn is destroyed by either.
 - **What to check first in staging:** that the rendered prompt matches the old hard-coded one byte for byte, and that logs are arriving on `https://<host>/{org}/{project}`.
@@ -351,7 +351,7 @@ Use the official SDK when one exists for the project's language. Eight do — Py
 | **Rust** | **Written, in the repository — not published yet** — crate `prompton-sdk`, `use prompton::…` (Apache-2.0, repository [prompton-rust](https://github.com/polimo-dev/prompton-rust)) | check crates.io first. If it resolves, `prompton-sdk = "0.2"`. If it does not, depend on the repository: `prompton-sdk = { git = "https://github.com/polimo-dev/prompton-rust", branch = "main" }`. Rust 1.85 or newer |
 | **Elixir** | **Written, in the repository — not published yet** — `prompton_sdk`, module `PromptOnSDK` (Apache-2.0, repository [prompton-elixir](https://github.com/polimo-dev/prompton-elixir)) | check `mix hex.info prompton_sdk` first. If it resolves, `{:prompton_sdk, "~> 0.2"}`. If it does not, depend on the repository: `{:prompton_sdk, github: "polimo-dev/prompton-elixir"}`. Either way, start `{PromptOnSDK, []}` in the supervision tree |
 
-All eight implement the same contract and pass the same conformance suite, and that contract is also the specification a hand-written client has to meet in any other language: a **use-case document store** that polls `GET /use-cases` with `If-None-Match` behind a 10-second cache, keeps the document in memory, mirrors it to a disk cache and falls back to a bundled use-case document, so the app keeps running when PromptOn is unreachable and a `429` or a 5xx only means the last document keeps serving; a **UseCase** object that turns a use case key (plus an optional prompt name) into model, params, provider options and the pinned prompt template, with a `/use-cases/:key/prompt` client for smoke tests; `messages(vars)` that renders that template locally on the Liquid subset; and **logs** — `log()` and `flush()`, plus `track()` to time your provider call and log the returned `Result` — with app-generated UUIDv7 ids, content truncation, batching, retries and a drain on shutdown. None of them needs a database, Redis or any other external service. Each SDK's README in its repository is the reference for its configuration keys, its bundle export and its test mode.
+All eight implement the same contract and pass the same conformance suite, and that contract is also the specification a hand-written client has to meet in any other language: a **use-case document store** that polls `GET /use-cases` with `If-None-Match` behind a 10-second cache, keeps the document in memory, mirrors it to a disk cache and falls back to a bundled use-case document, so the app keeps running when PromptOn is unreachable and a `429` or a 5xx only means the last document keeps serving; a **UseCase** object that turns a use case key into model, params, provider options and the pinned prompt template, with a `/use-cases/:key/prompt` client for smoke tests; `messages(vars)` that renders that template locally on the Liquid subset; and **logs** — `log()` and `flush()`, plus `track()` to time your provider call and log the returned `Result` — with app-generated UUIDv7 ids, content truncation, batching, retries and a drain on shutdown. None of them needs a database, Redis or any other external service. Each SDK's README in its repository is the reference for its configuration keys, its bundle export and its test mode.
 
 **Verify before you assume.** Every row of that table is a point-in-time view of a moving target:
 
@@ -370,7 +370,7 @@ The single most important behaviour of the migration. Tick every line, whether y
 - **Short-lived and multi-process runtimes.** With several worker processes (`uvicorn --workers 4`, a prefork server) each keeps its own memory cache and they may share one disk-cache file, so the write must stay atomic. In serverless or scale-to-zero runtimes (Lambda, Vercel functions, Cloud Run at zero) there is no 30–60 s poller and often no writable disk: fetch once per cold start with a hard timeout, fall back to the **bundled** use-case document immediately on failure — there it is the primary fallback, not a nicety — and never let that fetch block the first provider call.
 - **Serve the last good document on any PromptOn failure** — timeout, 5xx, DNS, `503`, an expired key. Log it, alert on it, keep serving.
 - **A provider call must never fail because PromptOn did.** Config is stale in the worst case, not absent.
-- **Never fall back to a hard-coded prompt.** A `404` with `error.code` `not_found` whose `details.reason` is `unresolved` or `unknown_prompt` (§4.2 — the discriminator is in `details`, not in `code`) is a bug in the deployment or the call, not a signal to reach for a copy of the old string. Fail that call loudly instead.
+- **Never fall back to a hard-coded prompt.** A `404` with `error.code` `not_found` whose `details.reason` is `unresolved` (§4.2 — the discriminator is in `details`, not in `code`) is a bug in the deployment or the call, not a signal to reach for a copy of the old string. Fail that call loudly instead.
 - **Refuse a use-case document from the wrong environment** (a `staging` process must not boot on a `production` bundle) and from an unsupported `schema_version`; keep polling for a good one.
 - **Batch monitoring logs** with app-generated UUIDv7 ids, flush on a size or time trigger, and never block the provider call on a log flush. Retry `429` and 5xx (honour `Retry-After`, back off otherwise), split a `413` batch in half, drop on any other 4xx, and cap the buffer by dropping the oldest.
 - **Prove it.** Before calling the migration done, run the app with PromptOn unreachable (wrong host, or the network cut) and confirm provider calls still happen on the cached use-case document.
@@ -389,14 +389,13 @@ Global flags on every command: `--host`, `--token`, `--org <slug|personal>`, `--
 | `projects list` | `prompton projects list --json` |
 | `projects create <slug> [--description D] [--timezone TZ]` | `prompton projects create helpdesk --description "Customer support app" --idempotent` |
 | `use-cases list` | `prompton use-cases list --json` |
-| `use-cases get <key>` | `prompton use-cases get support_reply --json` (prompts, versions, live deployments) |
+| `use-cases get <key>` | `prompton use-cases get support_reply --json` (prompt versions, live deployments) |
 | `use-cases create <key> [--name N] [--description D] [--input-schema-file F] [--default-params JSON] [--tags a,b]` | `prompton use-cases create support_reply --input-schema-file schema.json` |
 | `use-cases update <key> [--name] [--description] [--tags] [--input-schema-file] [--default-params]` | `prompton use-cases update support_reply --default-params '{"temperature":0.3}'` (schema/params replace, not merge) |
-| `prompts open <use-case> <name> [--description D]` | `prompton prompts open support_reply ko --description Korean` |
-| `prompts commit <use-case> <name> --file F [--engine liquid\|raw] [--message M]` | `prompton prompts commit support_reply default --file messages.json --message "v1"` (`--file -` reads stdin) |
+| `prompts commit <use-case> --file F [--engine liquid\|raw] [--message M]` | `prompton prompts commit support_reply --file messages.json --message "v1"` (`--file -` reads stdin) |
 | `models list` | `prompton models list --json` |
 | `models register <model-id> [--provider P] [--display-name N]` | `prompton models register openai/gpt-4o-mini` |
-| `deploy <use-case> --model M [--environment E] [--params JSON] [--provider-options JSON] [--pin name=version ...]` | `prompton deploy support_reply --model openai/gpt-4o-mini --pin default=1 --pin ko=latest` |
+| `deploy <use-case> --model M [--environment E] [--params JSON] [--provider-options JSON] [--version latest\|N\|UUID]` | `prompton deploy support_reply --model openai/gpt-4o-mini --version 1` |
 | `deployments list <use-case> [--environment E]` | `prompton deployments list support_reply --environment production` (history) |
 | `rollback <use-case> --revision N [--environment E]` | `prompton rollback support_reply --revision 2 --environment production` |
 | `api-keys issue [--name N] [--scopes read,logs]` | `PTN_KEY=$(prompton api-keys issue --quiet)` |
@@ -404,7 +403,7 @@ Global flags on every command: `--host`, `--token`, `--org <slug|personal>`, `--
 | `provider-key set [--secret S] [--label L]` | `PTN_OPENROUTER_KEY=sk-or-… prompton provider-key set` |
 | `provider-key status` | `prompton provider-key status --json` |
 
-- `--model` takes a provider string (`openai/gpt-4o-mini`, registered on the fly) or a catalog UUID. `--pin` takes a version number, `latest`, or a version UUID; omit `--pin` to pin the newest committed version of every prompt. Promote = same `deploy` with another `--environment`.
+- `--model` takes a provider string (`openai/gpt-4o-mini`, registered on the fly) or a catalog UUID. `--version` takes a version number, `latest`, or a version UUID; omit `--version` to pin the newest committed prompt version. Promote = same `deploy` with another `--environment`.
 - `--json`: stdout carries exactly one JSON document (create/get commands print the object; lists print `{"projects": [...]}` etc.); progress goes to stderr. Failures are JSON on stderr in the API envelope plus `"status"`: `{"error": {"code": "not_found", "message": "…", "status": 404, "details": {…}}}`.
 - Exit codes: `0` ok · `1` the server or network said no (including "already exists" without `--idempotent`) · `2` wrong invocation (retype the command).
 - `--idempotent`: creates that hit 409 print the existing resource and exit 0, so a provisioning script reruns cleanly.
@@ -466,13 +465,13 @@ POST /orgs/:org/projects/:project/use-cases
 // key required ([a-z0-9_], starts with a letter); kind chat (default); type string|number|boolean|list|map
 // 400 bad kind / schema · 409 {"details": {"use_case": {...}}}
 
-GET  /orgs/:org/projects/:project/use-cases/:key       // use case + prompts + live deployments
+GET  /orgs/:org/projects/:project/use-cases/:key       // use case + prompt versions + live deployments
 {"id": "…", "key": "support_reply", "kind": "chat", "input_schema": [...], "default_params": {...}, "tags": ["support"], "created_at": "…",
  "prompts": [{"id": "…", "name": "default", "description": null, "created_at": "…", "version_count": 2,
               "versions": [{"id": "…", "number": 2, "message": "shorter", "detected_variables": ["question"], "created_at": "…"}]}],
  "deployments": [{"id": "…", "revision": 3, "environment": "production", "model_id": "<catalog uuid>",
                   "model": "openai/gpt-4o-mini", "params": {...}, "provider_options": {...},
-                  "prompt_pins": {"default": "<version uuid>", "ko": "<version uuid>"}, "created_at": "…"}]}
+                  "prompt_pins": {"default": "<version uuid>"}, "created_at": "…"}]}
 // 404 {"details": {"use_case": "nope"}}; `versions` holds the 20 most recent
 
 PATCH /orgs/:org/projects/:project/use-cases/:key      // any of name, description, tags, input_schema, default_params (replace, not merge) → 200 use case
@@ -481,16 +480,13 @@ PATCH /orgs/:org/projects/:project/use-cases/:key      // any of name, descripti
 ### Prompts and versions
 
 ```jsonc
-POST /orgs/:org/projects/:project/use-cases/:key/prompts
-     {"name": "ko", "description": "Korean"}                      // 201 {"id","name","description","created_at"}; "default" already exists → 409 details.prompt
-
-POST /orgs/:org/projects/:project/use-cases/:key/prompts/:name/versions
+POST /orgs/:org/projects/:project/use-cases/:key/prompt/versions
      {"messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "{{ question }}"}],
       "engine": "liquid", "message": "migrated from the app"}
 // 201
 {"id": "…", "prompt_id": "…", "number": 1, "engine": "liquid", "messages": [...], "text_template": null,
  "detected_variables": ["question"], "message": "migrated from the app", "content_sha256": "…", "created_at": "…"}
-// 400 content does not match kind / lint failure / a message missing role or content · 404 unknown name {"details": {"prompt": "ja", "prompt_names": ["default"]}}
+// 400 content does not match chat / lint failure / a message missing role or content
 ```
 
 Versions are immutable; committing again yields `number + 1`. Committing alone changes nothing at runtime.
@@ -519,12 +515,12 @@ GET  /orgs/:org/projects/:project/use-cases/:key/deployments?environment=staging
 POST /orgs/:org/projects/:project/use-cases/:key/deployments
      {"environment": "production",                       // default production
       "model_id": "<catalog uuid>",                      // or "model": "openai/gpt-4o-mini" (registered if missing; model_id wins if both)
-      "prompt_pins": {"default": "<version uuid>", "ko": "<version uuid>"},   // omit → newest committed version of every prompt
+      "prompt_version_id": "<version uuid>",                  // omit → newest committed prompt version
       "params": {"temperature": 0.3},                    // layered over use case default_params
       "provider_options": {"allow_fallbacks": false}}    // layered over the model's provider_options
-// 201 {"id","revision","environment","model_id","model","params","provider_options","prompt_pins","created_at"}
+// 201 {"id","revision","environment","model_id","model","params","provider_options","prompt_pins","created_at"} // prompt_pins is default-only compatibility
 // 400 no model · 404 unknown model_id (details.model_id) / environment (details.environment)
-// 400 no committed prompt version · 400 pin names a prompt this use case lacks · 400 prompt_pins not an object of strings
+// 400 no committed prompt version · 404 unknown prompt_version_id
 
 POST /orgs/:org/projects/:project/use-cases/:key/deployments/rollback
      {"environment": "production", "revision": 1}       // revision: positive integer (not a string)
@@ -573,7 +569,7 @@ Response headers: `ETag: "sha256-<hex>"` (sha256 of the canonical body), `Last-M
  "deployments": {
    "support_reply": {"id": "…", "revision": 3, "model_id": "<catalog uuid>",
      "params": {"temperature": 0.3}, "provider_options": {"allow_fallbacks": false},
-     "prompt_pins": {"default": "<version uuid>", "ko": "<version uuid>"}}},
+     "prompt_pins": {"default": "<version uuid>"}}},
  "prompt_versions": {
    "<version uuid>": {"id": "…", "prompt_id": "…", "number": 2, "engine": "liquid",
      "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…"}], "text_template": null}},
@@ -586,7 +582,7 @@ Read locally (`<-` = shallow merge, right side wins):
 
 ```text
 deployment       = document.deployments[use_case]          # absent → no live deployment (error, not fallback)
-version          = document.prompt_versions[deployment.prompt_pins[prompt_name or "default"]]   # name not in prompt_pins → error
+version          = document.prompt_versions[deployment.prompt_pins["default"]]   # compatibility key for the single prompt
 model            = document.models[deployment.model_id]
 params           = document.use_cases[use_case].default_params <- deployment.params
 provider_options = model.provider_options <- deployment.provider_options
@@ -599,12 +595,11 @@ Poll every 10 s by default with `If-None-Match` (a `304` costs nothing); keep th
 ```jsonc
 // request
 {"environment": "production",             // default production
- "prompt": "ko",                          // default "default"; the only selection axis
  "variables": {"question": "My invoice shows two charges this month."}}   // present → rendered; absent → raw template
 // 200
 {"key": "support_reply", "kind": "chat",
  "deployment": {"id": "…", "revision": 3},
- "prompt": "ko", "prompt_names": ["default", "ko"],
+ "prompt": "default", "prompt_names": ["default"],
  "model_id": "<catalog uuid>", "model": "openai/gpt-4o-mini", "provider": "openrouter",
  "params": {"temperature": 0.3},
  "provider_options": {"only": ["OpenAI"], "allow_fallbacks": false},
@@ -614,7 +609,7 @@ Poll every 10 s by default with `If-None-Match` (a `304` costs nothing); keep th
  "warnings": [], "etag": "sha256-…"}
 ```
 
-Errors: 400 `invalid_request` — `variables` not an object, `prompt` not a non-empty string, environment not a string, or a required variable missing (`{"details": {"missing_variable": "question"}}`); 404 `not_found` — unknown use case (`{"details": {"key": "nope"}}`), no live deployment (`{"details": {"reason": "unresolved"}}`), unpinned prompt name (`{"details": {"reason": "unknown_prompt", "key": "support_reply", "prompt": "ja", "prompt_names": ["default", "ko"]}}`), unknown environment. Not cached: a just-committed revision shows immediately.
+Errors: 400 `invalid_request` — `variables` not an object, environment not a string, or a required variable missing (`{"details": {"missing_variable": "question"}}`); 404 `not_found` — unknown use case (`{"details": {"key": "nope"}}`), no live deployment (`{"details": {"reason": "unresolved"}}`), unknown environment. Not cached: a just-committed revision shows immediately. `prompt` and `prompt_names` may appear in responses as default-only compatibility fields; do not use them for selection.
 
 ### 4.3 `POST /logs?environment=production` — monitoring logs
 
@@ -662,7 +657,7 @@ Rules:
 - **Do** keep the provider key and the HTTP call in the app. **Never** route provider calls through PromptOn — there is no proxy endpoint.
 - **Do** treat `production` as the default environment everywhere (`/use-cases`, `/use-cases/:key/prompt`, `/logs`, `deploy`); name `staging` explicitly.
 - **Do** cache the use-case document (memory + disk) and poll with `If-None-Match`; **don't** call `/use-cases/:key/prompt` per request in a hot path.
-- **Do** treat a 404 `unknown_prompt` / `unresolved` as a bug in the app or the deployment, **never** as a signal to fall back to a hard-coded prompt.
+- **Do** treat a 404 `unresolved` as a bug in the app or the deployment, **never** as a signal to fall back to a hard-coded prompt.
 - **Do** batch monitoring logs with app-generated UUIDv7 ids; **don't** retry on 4xx.
 - **Don't** log secrets: no provider keys, no `PTN_API_KEY`, no user PII beyond `end_user_ref`, in `input`, `output`, `context` or `metadata`.
 - **Don't** ship the runtime key to a browser or mobile client; both runtime calls belong server-side.
@@ -679,9 +674,8 @@ Rules:
 | 401 on `/use-cases`, `/use-cases/:key/prompt`, `/logs` | runtime key missing/wrong/revoked, its project archived, or a **CLI token** used on the runtime door | issue a key: `prompton api-keys issue` |
 | 403 `forbidden` on the runtime API | key lacks the scope (`read` or `logs`) | issue a key with both scopes |
 | 404 `not_found` with `details.organization` / `details.project` | you are not a member, or it does not exist — non-members get 404, never 403 | `prompton orgs list`, `prompton projects list`; check `--org` |
-| 404 with `details.key` / `details.prompt` + `prompt_names` / `details.environment` | wrong name; the details list what exists | fix the name; open the prompt with `prompts open` |
+| 404 with `details.key` / `details.environment` | wrong use case or environment | fix the name in the app or deployment |
 | 404 `details.reason = "unresolved"` | the use case has no live deployment in that environment | `prompton deploy <use-case> --environment <env> --model …` |
-| 404 `details.reason = "unknown_prompt"` | the requested `prompt` is not pinned by the live revision | pin it (`--pin name=latest`) and redeploy, or send a pinned name |
 | 400 `details.missing_variable` | template needs a variable the call did not send | send it; mirror `detected_variables` in `input_schema` |
 | 409 `conflict` on a create | already exists; `details.<resource>` is the existing object | continue with it (`--idempotent`) |
 | 429 `rate_limited` on `/device/code` or `/device/token` | 20 code requests or 600 polls per 10 min per IP | wait `details.retry_after` seconds, then `prompton login` again |

@@ -6,17 +6,18 @@ defmodule PromptOnWeb.API.V1.UseCasePromptController do
   checks.
 
   Request `{"environment": "production", "prompt": "default", "variables": {}}` - with
-  `variables` present the templates are rendered as well. With deployments turning from routers
-  into **pins**, `ctx`, `target_id`, and `subject_key` are gone - the use case key is the URL
-  segment and the only remaining selection axis is the prompt name.
+  `variables` present the templates are rendered as well. `prompt` is optional and only `"default"`
+  is accepted for compatibility. With deployments turning from routers into **pins**, `ctx`,
+  `target_id`, `subject_key`, and prompt selection are gone - the use case key is the URL segment.
 
   Response: `key`, `deployment{id,revision}`, `prompt`, `model`/`params`/
-  `provider_options`, `prompt_version{id,number}`, `messages`, `prompt_names[]` (the names this
-  deployment pinned), and `etag`.
+  `provider_options`, `prompt_version{id,number}`, `messages`, `prompt_names[]` (the canonical
+  active prompt name, normally `["default"]`), and `etag`.
 
   Errors: unknown use case/environment -> 404, no deployment -> 404 (`details.reason =
-  "unresolved"`), a prompt name that is not pinned -> 404 (`details.reason = "unknown_prompt"` +
-  `details.prompt_names`), missing variable -> 400 (`details.missing_variable`).
+  "unresolved"`), a non-default `prompt` parameter -> 400, missing variable -> 400
+  (`details.missing_variable`). The `unknown_prompt` envelope remains for defensive handling of
+  malformed or historical documents.
 
   This endpoint is **not cached** (unlike `GET /use-cases`): it is the smoke test a person hits right
   after deploying and the debugging window, so "the use case just created, the revision just
@@ -60,9 +61,20 @@ defmodule PromptOnWeb.API.V1.UseCasePromptController do
 
   defp fetch_prompt(params) do
     case Map.get(params, "prompt") do
-      nil -> {:ok, nil}
-      name when is_binary(name) and name != "" -> {:ok, name}
-      _ -> {:error, {:invalid_request, "prompt must be a non-empty string"}}
+      nil ->
+        {:ok, nil}
+
+      "default" ->
+        {:ok, "default"}
+
+      name when is_binary(name) and name != "" ->
+        {:error,
+         {:invalid_request,
+          ~s|only the default prompt is supported; remove prompt or send "default"|,
+          %{"prompt" => name}}}
+
+      _ ->
+        {:error, {:invalid_request, "prompt must be a non-empty string"}}
     end
   end
 
@@ -95,9 +107,8 @@ defmodule PromptOnWeb.API.V1.UseCasePromptController do
     end
   end
 
-  # The 404 envelope for a prompt name that is not pinned. **Lists every name that could have been
-  # chosen** - in exchange for having no silent fallback (ADR 0007 revision), the app must be able
-  # to tell a typo from a missing deployment right away.
+  # Defensive envelope for a snapshot whose pins do not contain the default prompt. Active
+  # requests reject non-default prompt parameters before reaching the SDK resolver.
   defp unknown_prompt(data, use_case_key, requested) do
     name = requested || Resolver.default_prompt()
 

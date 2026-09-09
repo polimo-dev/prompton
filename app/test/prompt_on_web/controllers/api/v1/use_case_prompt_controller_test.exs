@@ -34,7 +34,6 @@ defmodule PromptOnWeb.API.V1.UseCasePromptControllerTest do
   test "happy path with render — golden byte-identical diary template", %{hd: hd, raw: raw} do
     conn =
       post_prompt(raw, "diary_generation", %{
-        prompt: "ko",
         variables: %{transcriptions: ["a", "b"], mode: "fresh"}
       })
 
@@ -43,8 +42,8 @@ defmodule PromptOnWeb.API.V1.UseCasePromptControllerTest do
     assert body["key"] == "diary_generation"
     assert body["kind"] == "chat"
     assert body["deployment"] == %{"id" => hd.deployments.diary.id, "revision" => 1}
-    assert body["prompt"] == "ko"
-    assert body["prompt_names"] == ["default", "ko"]
+    assert body["prompt"] == "default"
+    assert body["prompt_names"] == ["default"]
     assert body["model_id"] == hd.models.sonnet.id
     assert body["model"] == "anthropic/claude-sonnet-4"
     assert body["provider"] == "openrouter"
@@ -56,12 +55,12 @@ defmodule PromptOnWeb.API.V1.UseCasePromptControllerTest do
              "allow_fallbacks" => false
            }
 
-    assert body["prompt_version"] == %{"id" => hd.prompt_versions.diary_ko.id, "number" => 1}
+    assert body["prompt_version"] == %{"id" => hd.prompt_versions.diary.id, "number" => 1}
 
     assert [
              %{
                "role" => "system",
-               "content" => "You write diaries in Korean from voice transcriptions."
+               "content" => "You write diaries from voice transcriptions."
              },
              %{"role" => "user", "content" => @golden}
            ] = body["messages"]
@@ -114,16 +113,16 @@ defmodule PromptOnWeb.API.V1.UseCasePromptControllerTest do
     assert %{"error" => %{"code" => "invalid_request"}} = json_response(conn, 400)
   end
 
-  test "an unpinned prompt name is 404 and lists the pinned names", %{raw: raw} do
+  test "a non-default prompt name is rejected before resolution", %{raw: raw} do
     conn = post_prompt(raw, "diary_generation", %{prompt: "ja"})
 
-    assert %{"error" => %{"code" => "not_found", "message" => message, "details" => details}} =
-             json_response(conn, 404)
+    assert %{
+             "error" => %{"code" => "invalid_request", "message" => message, "details" => details}
+           } =
+             json_response(conn, 400)
 
-    assert message =~ ~s|"ja"|
-    assert details["reason"] == "unknown_prompt"
-    assert details["key"] == "diary_generation"
-    assert details["prompt_names"] == ["default", "ko"]
+    assert message =~ "only the default prompt"
+    assert details["prompt"] == "ja"
   end
 
   test "non-chat use cases are not exposed by the runtime prompt endpoint", %{raw: raw} do
@@ -177,11 +176,10 @@ defmodule PromptOnWeb.API.V1.UseCasePromptControllerTest do
   end
 
   test "the resolved prompt version is the one the live revision pins", %{hd: hd, raw: raw} do
-    body = json_response(post_prompt(raw, "diary_generation", %{prompt: "ko"}), 200)
-    pinned = Map.values(hd.deployments.diary.prompt_pins)
+    body = json_response(post_prompt(raw, "diary_generation", %{prompt: "default"}), 200)
 
-    assert body["prompt_version"]["id"] in pinned
-    assert body["prompt_version"]["id"] == hd.deployments.diary.prompt_pins["ko"]
+    assert body["prompt"] == "default"
+    assert body["prompt_version"]["id"] == hd.deployments.diary.prompt_pins["default"]
   end
 
   test "an environment with no deployment resolves nothing", %{raw: raw} do

@@ -22,63 +22,31 @@ defmodule PromptOnWeb.API.V1.Management.PromptControllerTest do
   end
 
   describe "POST /prompts" do
-    test "opens a second, named prompt", %{raw: raw, use_case: use_case, scope: scope} do
+    test "rejects creating additional prompts", %{raw: raw, use_case: use_case, scope: scope} do
       conn =
         api_post(
           raw,
           ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts",
-          %{
-            name: "ko",
-            description: "Korean"
-          }
-        )
-
-      body = json_response(conn, 201)
-
-      assert body["name"] == "ko"
-      assert body["description"] == "Korean"
-
-      assert {:ok, prompts} = Prompts.list_prompts(use_case.id, scope)
-      assert Enum.map(prompts, & &1.name) |> Enum.sort() == ["default", "ko"]
-    end
-
-    test "409 with the existing prompt (the default one is already there)", %{raw: raw} do
-      conn =
-        api_post(
-          raw,
-          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts",
-          %{
-            name: "default"
-          }
-        )
-
-      assert %{"error" => %{"code" => "conflict", "details" => details}} =
-               json_response(conn, 409)
-
-      assert details["prompt"]["name"] == "default"
-    end
-
-    test "400 without a name", %{raw: raw} do
-      conn =
-        api_post(
-          raw,
-          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts",
-          %{}
+          %{name: "ko", description: "Korean"}
         )
 
       assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
                json_response(conn, 400)
 
-      assert message =~ "name is required"
+      assert message =~ "only the default prompt"
+      assert {:ok, prompts} = Prompts.list_prompts(use_case.id, scope)
+      assert Enum.map(prompts, & &1.name) == ["default"]
     end
   end
 
-  describe "POST /prompts/:name/versions" do
-    test "commits an immutable version and extracts its variables", %{raw: raw} do
+  describe "POST /prompt/versions" do
+    test "commits an immutable version through the canonical route and extracts its variables", %{
+      raw: raw
+    } do
       conn =
         api_post(
           raw,
-          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts/default/versions",
+          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompt/versions",
           %{
             messages: [
               %{role: "system", content: "You write diaries."},
@@ -152,7 +120,7 @@ defmodule PromptOnWeb.API.V1.Management.PromptControllerTest do
       assert message =~ "messages"
     end
 
-    test "404 for an unknown prompt name, listing the ones that exist", %{raw: raw} do
+    test "400 for a non-default prompt name", %{raw: raw} do
       conn =
         api_post(
           raw,
@@ -160,11 +128,17 @@ defmodule PromptOnWeb.API.V1.Management.PromptControllerTest do
           %{messages: [%{role: "user", content: "x"}]}
         )
 
-      assert %{"error" => %{"code" => "not_found", "details" => details}} =
-               json_response(conn, 404)
+      assert %{
+               "error" => %{
+                 "code" => "invalid_request",
+                 "message" => message,
+                 "details" => details
+               }
+             } =
+               json_response(conn, 400)
 
+      assert message =~ "only the default prompt"
       assert details["prompt"] == "ja"
-      assert details["prompt_names"] == ["default"]
     end
 
     test "another organization's key cannot commit here", %{raw: _raw} do

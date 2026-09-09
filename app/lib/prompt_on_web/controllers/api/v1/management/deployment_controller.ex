@@ -13,9 +13,11 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
   ## A revision is a pin, not a router
 
   A revision holds exactly four things - **one** model (`model_id`), `params`, `provider_options`,
-  and a prompt **name -> version id** map (`prompt_pins`). There are no rules, conditions, weights,
-  or A/B. **It is live the moment it is committed** (the highest revision is live), and a rollback
-  is not a rewind but **committing a new revision** with the pins of a past one.
+  and the canonical default prompt version. The API prefers the scalar `prompt_version_id`; the
+  stored and v4-compatible shape remains `prompt_pins: %{"default" => version_id}`. There are no
+  rules, conditions, weights, A/B, or prompt-name selection. **It is live the moment it is
+  committed** (the highest revision is live), and a rollback is not a rewind but **committing a new
+  revision** with the contents of a past one.
 
   ## The model can be given in two ways
 
@@ -25,12 +27,12 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
     that lets onboarding (agent-first-spec §3.5, "pin v1 to the model already in use") skip a
     separate catalog registration.
 
-  ## Omitting the pins means "every latest committed version as of now"
+  ## Omitting the prompt version means "latest default as of now"
 
-  Without `prompt_pins`, the **most recently committed version** of each prompt in this use case is
-  pinned (the same default as Deploy in the use case hub). If no version has been committed at all
-  it is a 400 - it means there is nothing to deploy, and a revision committed without pins would
-  leave the app receiving `unresolved`.
+  Without `prompt_version_id` or default-only `prompt_pins`, the **most recently committed
+  version** of the default prompt in this use case is pinned. If no version has been committed at
+  all it is a 400 - it means there is nothing to deploy, and a revision committed without a default
+  prompt would leave the app receiving `unresolved`.
 
   A deployment revision has **no commit message field** (ADR 0007 - a revision is a pure pin). What
   changed and why is told by the prompt version's `message` and the revision number.
@@ -160,13 +162,28 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
        {:invalid_request,
         "model_id (a catalog model id) or model (a provider model string) is required"}}
 
-  # Pins are `{"name": "<prompt version id>"}` - the name is the `prompt` value the app sends with
-  # its request.
+  defp fetch_pins(_scope, _use_case, %{"prompt_version_id" => id} = params)
+       when is_binary(id) and id != "" do
+    case compatible_prompt_pins(params, id) do
+      :ok -> {:ok, %{"default" => id}}
+      {:error, message} -> {:error, {:invalid_request, message}}
+    end
+  end
+
+  defp fetch_pins(_scope, _use_case, %{"prompt_version_id" => _other}),
+    do: {:error, {:invalid_request, "prompt_version_id must be a non-empty string"}}
+
+  # Backward-compatible v4 shape. Only the canonical default prompt remains authorable.
   defp fetch_pins(_scope, _use_case, %{"prompt_pins" => pins}) when is_map(pins) do
-    if Enum.all?(pins, fn {name, id} -> is_binary(name) and is_binary(id) end) do
-      {:ok, pins}
-    else
-      {:error, {:invalid_request, "prompt_pins must map prompt names to prompt version ids"}}
+    cond do
+      not Enum.all?(pins, fn {name, id} -> is_binary(name) and is_binary(id) end) ->
+        {:error, {:invalid_request, "prompt_pins must map prompt names to prompt version ids"}}
+
+      Map.keys(pins) == ["default"] ->
+        {:ok, pins}
+
+      true ->
+        {:error, {:invalid_request, ~s|prompt_pins must contain only the "default" prompt|}}
     end
   end
 
@@ -181,8 +198,8 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
       _empty ->
         {:error,
          {:invalid_request,
-          "this use case has no committed prompt version to pin — commit one first, " <>
-            "or send prompt_pins explicitly", %{"use_case" => use_case.key}}}
+          "this use case has no committed default prompt version to pin — commit one first, " <>
+            "or send prompt_version_id explicitly", %{"use_case" => use_case.key}}}
     end
   end
 
@@ -195,8 +212,30 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
 
   defp latest_pin(prompt, scope) do
     case Prompts.list_prompt_versions(prompt.id, scope) do
-      {:ok, [latest | _rest]} -> [{prompt.name, latest.id}]
+      {:ok, [latest | _rest]} -> [{"default", latest.id}]
       _other -> []
+    end
+  end
+
+  defp compatible_prompt_pins(params, id) do
+    case Map.fetch(params, "prompt_pins") do
+      :error ->
+        :ok
+
+      {:ok, %{"default" => ^id} = pins} when map_size(pins) == 1 ->
+        :ok
+
+      {:ok, %{"default" => pinned_id} = pins} when map_size(pins) == 1 and is_binary(pinned_id) ->
+        {:error, "prompt_version_id must match prompt_pins.default when both are provided"}
+
+      {:ok, %{"default" => _pinned_id} = pins} when map_size(pins) == 1 ->
+        {:error, "prompt_pins must map prompt names to prompt version ids"}
+
+      {:ok, %{} = _pins} ->
+        {:error, ~s|prompt_pins must contain only the "default" prompt|}
+
+      {:ok, _other} ->
+        {:error, "prompt_pins must be an object"}
     end
   end
 

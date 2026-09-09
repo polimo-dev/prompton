@@ -147,7 +147,7 @@ defmodule PromptOnWeb.API.V1.Management.UseCaseControllerTest do
       body = json_response(conn, 200)
 
       assert body["key"] == "diary_generation"
-      assert Enum.map(body["prompts"], & &1["name"]) == ["default", "ko"]
+      assert Enum.map(body["prompts"], & &1["name"]) == ["default"]
 
       default = Enum.find(body["prompts"], &(&1["name"] == "default"))
       assert default["version_count"] == 1
@@ -159,10 +159,8 @@ defmodule PromptOnWeb.API.V1.Management.UseCaseControllerTest do
       assert deployment["model_id"] == hd.models.sonnet.id
       assert deployment["model"] == "anthropic/claude-sonnet-4"
 
-      assert deployment["prompt_pins"] == %{
-               "default" => hd.prompt_versions.diary.id,
-               "ko" => hd.prompt_versions.diary_ko.id
-             }
+      assert deployment["prompt_pins"] == %{"default" => hd.prompt_versions.diary.id}
+      assert deployment["prompt_version_id"] == hd.prompt_versions.diary.id
     end
 
     test "404 for an unknown use case key", %{raw: raw} do

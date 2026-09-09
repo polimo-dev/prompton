@@ -8,14 +8,13 @@ defmodule PromptOn.HeyDiaryImport do
   2. `plan/2` — dump → deterministic plan (`%PromptOn.HeyDiaryImport.Plan{}`), no DB.
   3. `apply/2` — runs the plan in one transaction (`PromptOn.HeyDiaryImport.Apply`).
   4. `PromptOn.HeyDiaryImport.Verify.compare/2` — reproduction of HeyDiary `build_llm_config` vs
-     `PromptOnSDK.Resolver` (every (task, language) — the plan axis is not in the pin, so it is not
-     compared).
-  5. `PromptOn.HeyDiaryImport.Export.sql/1` — snapshot (v3) →
+     `PromptOnSDK.Resolver` (every (task, language), rendered through the single default prompt — the plan axis is not in the pin, so it is not compared).
+  5. `PromptOn.HeyDiaryImport.Export.sql/2` — snapshot (v4) + original dump →
      `ai_tasks`/`ai_models`/`plan_ai_models` UPSERT SQL (for rollback, **lossy** — the same model
      for every plan).
 
   Deployments are **pins** (ADR 0007 revision 2026-09-01): one revision per use case = one model
-  plus one version per prompt name. HeyDiary's per-plan model hierarchy cannot be represented, so
+  plus one default prompt/version. Language-specific system prompts are preserved as branches in that default prompt. HeyDiary's per-plan model hierarchy cannot be represented, so
   it collapses to the free (common) default row and surfaces as a confirmation-gated warning —
   plan differentiation is now the app's job.
 

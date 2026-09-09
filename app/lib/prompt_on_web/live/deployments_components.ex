@@ -131,7 +131,7 @@ defmodule PromptOnWeb.DeploymentsComponents do
   # Pin (read-only; there is no editor)
 
   @doc """
-  Everything one revision pins: the model, a version per prompt name, params and provider options.
+  Everything one revision pins: the model, prompt version, params and provider options.
   With `live?` a `live` badge is attached to the header.
 
   The `score_badge` slot is where the Evals tab hangs this revision's evaluated average

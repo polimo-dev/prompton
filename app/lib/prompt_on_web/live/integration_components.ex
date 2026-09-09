@@ -12,15 +12,15 @@ defmodule PromptOnWeb.IntegrationComponents do
   1. `#integration-curl` — a curl that a **person** pastes as is. It is a **smoke test** that
      fetches this use case's deployed configuration (model, parameters, rendered prompt) verbatim
      through `POST /api/v1/use-cases/:key/prompt`. It comes filled in with this project's real host,
-     use case key, chosen environment, pinned prompt name, and example variables built from this use
+     use case key, chosen environment, and example variables built from this use
      case's `input_schema`, so it runs unchanged. Only the key is an environment variable
      (`$PTN_API_KEY`); the raw key is never drawn on the screen again (the issue screen shows it
      once).
   2. `#integration-prompt` — a brief to hand to the **user's coding AI**. It contains one paragraph
      on what PromptOn is, the SDK's deployed use-case document cache and the server-filled prompt
      endpoint, where to call the provider directly, the envelope for
-     reporting monitoring logs (`POST /api/v1/logs`), this use case's real key, prompt names
-     and variable table, an error table, and finally the "change it like this" instruction.
+     reporting monitoring logs (`POST /api/v1/logs`), this use case's real key,
+     variable table, an error table, and finally the "change it like this" instruction.
 
   The bodies are built by **pure functions** (`curl_snippet/1`, `ai_prompt/1`): they must be
   testable apart from the screen, and the two sets of wording must not drift apart. The copy button
@@ -32,8 +32,6 @@ defmodule PromptOnWeb.IntegrationComponents do
 
   alias PromptOnWeb.SettingsComponents, as: SC
 
-  @default_prompt "default"
-
   # The free plan's monitoring log quota (agent-first-spec §6). Not enforced yet; it is switched on
   # when billing arrives.
   @free_log_quota "10,000 logs / month, 7-day retention"
@@ -44,7 +42,7 @@ defmodule PromptOnWeb.IntegrationComponents do
   * `:host` — `https://app.example.com` (with scheme, no trailing slash)
   * `:use_case_key` — this use case
   * `:environment` — the currently selected environment slug
-  * `:prompts` — the prompt names this deployment pins (`[]` when none)
+  * `:prompt_pinned?` — whether this deployment pins the default prompt
   * `:variables` — `input_schema` as is (`%{name:, type:, required?:, description:, example:}`)
   """
   @type spec :: %{
@@ -52,7 +50,7 @@ defmodule PromptOnWeb.IntegrationComponents do
           use_case_key: String.t(),
           kind: atom(),
           environment: String.t(),
-          prompts: [String.t()],
+          prompt_pinned?: boolean(),
           variables: [map()]
         }
 
@@ -66,7 +64,7 @@ defmodule PromptOnWeb.IntegrationComponents do
 
       iex> PromptOnWeb.IntegrationComponents.curl_snippet(%{
       ...>   host: "https://app.example.com", use_case_key: "support_reply", kind: :chat,
-      ...>   environment: "production", prompts: ["default"], variables: []
+      ...>   environment: "production", prompt_pinned?: true, variables: []
       ...> }) =~ "https://app.example.com/api/v1/use-cases/support_reply/prompt"
       true
   """
@@ -91,12 +89,10 @@ defmodule PromptOnWeb.IntegrationComponents do
   """
   @spec request_example(spec()) :: Jason.OrderedObject.t()
   def request_example(spec) do
-    values = [{"environment", spec.environment}] ++ prompt_entry(spec) ++ variables_entry(spec)
+    values = [{"environment", spec.environment}] ++ variables_entry(spec)
 
     %Jason.OrderedObject{values: values}
   end
-
-  defp prompt_entry(spec), do: [{"prompt", first_prompt(spec.prompts)}]
 
   defp variables_entry(%{variables: variables}) do
     case required_examples(variables) do
@@ -138,7 +134,7 @@ defmodule PromptOnWeb.IntegrationComponents do
 
   @doc """
   The integration brief pasted whole to a coding AI (in English). It carries this use case's real
-  key, prompt names and variable table.
+  key and variable table.
 
       iex> PromptOnWeb.IntegrationComponents.ai_prompt(%{
       ...>   host: "https://app.example.com", use_case_key: "support_reply", kind: :chat,
@@ -209,7 +205,6 @@ defmodule PromptOnWeb.IntegrationComponents do
     | field | required | meaning |
     |---|---|---|
     | `environment` | no | environment slug, default `"production"` (this deployment: `"#{spec.environment}"`) |
-    | `prompt` | no | which named prompt to use, default `"default"`#{prompt_note(spec.prompts)} |
     | `variables` | no | template variables; when present the response is **rendered**, when absent you get the raw template |
 
     Response 200:
@@ -217,11 +212,11 @@ defmodule PromptOnWeb.IntegrationComponents do
     ```json
     {"key": "#{spec.use_case_key}", "kind": "#{spec.kind}",
      "deployment": {"id": "…", "revision": 12},
-    #{resolve_prompt_line(spec)}
+     "prompt_version": {"id": "…", "number": 7},
+     "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…"}],
      "model_id": "…", "model": "openai/gpt-4o-mini", "provider": "openrouter",
      "params": {"temperature": 0.3},
      "provider_options": {"allow_fallbacks": false}, "source": "remote",
-    #{resolve_pin_lines()}
      "warnings": [], "etag": "sha256-…"}
     ```
 
@@ -248,7 +243,7 @@ defmodule PromptOnWeb.IntegrationComponents do
 
     ```
     deployment = document.deployments[use_case_key]        # missing => no live deployment
-    version    = document.prompt_versions[deployment.prompt_pins[prompt_name]]
+    version    = document.prompt_versions[deployment.prompt_pins["default"]]
     model      = document.models[deployment.model_id]
 
     params           = document.use_cases[use_case_key].default_params <- deployment.params
@@ -257,8 +252,6 @@ defmodule PromptOnWeb.IntegrationComponents do
 
     (`<-` is a shallow merge, right-hand side wins.) `version` gives you `messages` plus `engine`: \
     `"liquid"` means render `{{ variable }}` placeholders, `"raw"` means send the text verbatim. \
-    A `prompt` name that is not a key of `prompt_pins` is an **error, not a silent fallback** — the \
-    pinned names are the whole selection axis.
 
     ## 2. Call the provider yourself
 
@@ -329,7 +322,7 @@ defmodule PromptOnWeb.IntegrationComponents do
     ## This use case
 
     Key `#{spec.use_case_key}`, kind `#{spec.kind}`, environment `#{spec.environment}`. \
-    Prompts pinned by this deployment: #{prompt_list(spec.prompts)}.
+    Prompt version pinned by this deployment: #{pinned_label(spec)}.
 
     #{variable_table(spec.variables)}
 
@@ -340,7 +333,7 @@ defmodule PromptOnWeb.IntegrationComponents do
     | 400 | `invalid_request` | the request is wrong — a missing template variable is named in `details.missing_variable`. Fix the call; do not retry. |
     | 401 | `unauthorized` | the API key is missing, wrong, revoked, or its project is archived. |
     | 403 | `forbidden` | the key lacks the scope this endpoint needs (`read` or `logs`). |
-    | 404 | `not_found` | unknown use-case key or `environment`; no live deployment (`details.reason = "unresolved"`); or a `prompt` name that is not pinned (`details.reason = "unknown_prompt"`, `details.prompt_names` lists the ones that are). |
+    | 404 | `not_found` | unknown use-case key or `environment`, or no live deployment (`details.reason = "unresolved"`). |
     | 413 | `payload_too_large` | the body is over 5MB — split the batch and resend. |
     | 503 | `unavailable` | PromptOn is degraded. Honour `Retry-After`. **Config fetch must fall back to the cached document; a provider call must never fail because PromptOn did.** |
 
@@ -358,26 +351,11 @@ defmodule PromptOnWeb.IntegrationComponents do
     """
   end
 
-  defp prompt_note([]), do: ""
+  defp pinned_label(%{prompt_pinned?: true}), do: "yes"
+  defp pinned_label(_spec), do: "none"
 
-  defp prompt_note(names),
-    do: ". This deployment pins: " <> Enum.map_join(names, ", ", &"`#{&1}`")
-
-  defp prompt_list([]), do: "none (this deployment pins no prompt)"
-  defp prompt_list(names), do: Enum.map_join(names, ", ", &"`#{&1}`")
-
-  defp resolve_prompt_line(spec),
-    do:
-      ~s| "prompt": "#{first_prompt(spec.prompts)}", "prompt_names": | <>
-        Jason.encode!(spec.prompts) <> ","
-
-  defp resolve_pin_lines do
-    ~s| "prompt_version": {"id": "…", "number": 7},\n| <>
-      ~s| "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…"}],|
-  end
-
-  defp log_pin_line(spec) do
-    ~s|   "prompt": "#{first_prompt(spec.prompts)}", "prompt_version_id": "…",\n| <>
+  defp log_pin_line(_spec) do
+    ~s|   "prompt_version_id": "…",\n| <>
       ~s|   "source": "remote",|
   end
 
@@ -408,9 +386,6 @@ defmodule PromptOnWeb.IntegrationComponents do
     do: "e.g. " <> String.replace(example, "|", "\\|")
 
   defp describe(_variable), do: "—"
-
-  defp first_prompt([]), do: @default_prompt
-  defp first_prompt(names), do: if(@default_prompt in names, do: @default_prompt, else: hd(names))
 
   # ---------------------------------------------------------------------------
   # Components

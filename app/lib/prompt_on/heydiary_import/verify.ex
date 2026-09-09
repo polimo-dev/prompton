@@ -20,18 +20,17 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   (`{:language_temperatures_flattened, …}` warning), and the plan report shows that loss.
   Counting it as a mismatch again here would make every normal import fail.
 
-  ## The language axis = the prompt name (routing moved to the app)
+  ## The language axis = a template variable
 
   HeyDiary `get_task` was "the language row if there is one, else the NULL row". The PromptOn
-  resolver does not fall back (`{:error, :unknown_prompt}`), so **that fallback became the app's
-  rule**: the app sends `prompt: "<language>"` when a prompt for that language is deployed, else
-  `prompt: "default"`. This module reproduces that rule as is (`app_prompt_name/3`) and checks
-  that both sides pick the same document.
+  import now has one prompt named `default`; the app passes `language` as a variable and the system
+  template branches inside that prompt. This module checks that the single prompt renders the same
+  system prompt bytes for every supported language/fallback case.
 
   Compared fields: `model`, `temperature`, `providers` (`provider_options["only"]`),
-  `allow_fallbacks`, `system_prompt` (the first message content rendered with empty variables —
-  this also checks that the escapes come back as the original). When both sides have "no config"
-  (HeyDiary no rows ↔ PromptOn resolution failure), that is a match.
+  `allow_fallbacks`, `system_prompt` (the first message content rendered with `%{"language" => language}`).
+  When both sides have "no config" (HeyDiary no rows ↔ PromptOn no rendered prompt), that is a
+  match.
 
   `diary_content_removal` computes the HeyDiary side as the `diary_generation` config + the code
   default 0.3.
@@ -82,18 +81,9 @@ defmodule PromptOn.HeyDiaryImport.Verify do
     end)
   end
 
-  @doc """
-  The prompt name the app must send — the language when an `ai_tasks` row for that language
-  exists, else `"default"` (HeyDiary `get_task`'s fallback reproduced on the app side).
-  """
+  @doc "The prompt name the app sends for migrated HeyDiary use cases: always `default`."
   @spec app_prompt_name(Dump.t(), String.t(), String.t() | nil) :: String.t()
-  def app_prompt_name(dump, task_name, language) do
-    rows = Dump.task_rows(dump, task_name)
-
-    if is_binary(language) and language != "" and Enum.any?(rows, &(&1.language == language)),
-      do: language,
-      else: Planner.prompt_name(nil)
-  end
+  def app_prompt_name(_dump, _task_name, _language), do: Planner.prompt_name(nil)
 
   # ---------------------------------------------------------------------------
 
@@ -105,7 +95,7 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   defp compare_case(dump, snapshot, spec, language) do
     prompt = app_prompt_name(dump, spec.source_task, language)
     expected = heydiary(dump, spec, language)
-    actual = prompton(snapshot, spec, prompt)
+    actual = prompton(snapshot, spec, prompt, language)
     base = %{use_case: spec.key, language: language, prompt: prompt}
 
     case {expected, actual} do
@@ -156,7 +146,7 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   # ---------------------------------------------------------------------------
   # PromptOn side (PromptOnSDK.Resolver.resolve)
 
-  defp prompton(snapshot, spec, prompt) do
+  defp prompton(snapshot, spec, prompt, language) do
     case Resolver.resolve(snapshot, spec.key, prompt: prompt) do
       {:ok, resolution} ->
         %{
@@ -164,7 +154,7 @@ defmodule PromptOn.HeyDiaryImport.Verify do
           temperature: param(spec, resolution),
           providers: provider_option(spec, resolution, "only"),
           allow_fallbacks: provider_option(spec, resolution, "allow_fallbacks"),
-          system_prompt: system_prompt(spec, resolution)
+          system_prompt: system_prompt(spec, resolution, language)
         }
 
       {:error, _} ->
@@ -185,15 +175,15 @@ defmodule PromptOn.HeyDiaryImport.Verify do
       Map.get(resolution, :provider_options) ||
         %{}
 
-  defp system_prompt(_spec, %{messages: [%{content: content} | _], engine: engine}),
-    do: render(content, engine)
+  defp system_prompt(_spec, %{messages: [%{content: content} | _], engine: engine}, language),
+    do: render(content, %{"language" => language}, engine)
 
-  defp system_prompt(_spec, _resolution), do: nil
+  defp system_prompt(_spec, _resolution, _language), do: nil
 
-  defp render(nil, _engine), do: nil
+  defp render(nil, _vars, _engine), do: nil
 
-  defp render(source, engine) do
-    case Template.render(source, %{}, engine: engine || :liquid) do
+  defp render(source, vars, engine) do
+    case Template.render(source, vars, engine: engine || :liquid) do
       {:ok, rendered} -> rendered
       {:error, reason} -> {:render_error, reason}
     end

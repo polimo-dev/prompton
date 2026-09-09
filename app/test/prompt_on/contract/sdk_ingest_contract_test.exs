@@ -38,11 +38,11 @@ defmodule PromptOn.Contract.SdkIngestContractTest do
          fx: fx,
          key: key
        } do
-    assert {:ok, use_case} = PromptOnSDK.use_case("diary_generation", prompt: "ko")
+    assert {:ok, use_case} = PromptOnSDK.use_case("diary_generation")
 
-    assert use_case.prompt == "ko"
+    assert use_case.prompt == "default"
     assert use_case.deployment.id
-    assert use_case.prompt_version.id == fx.prompt_versions.diary_ko.id
+    assert use_case.prompt_version.id == fx.prompt_versions.diary.id
     assert use_case.model =~ "/"
 
     # A name that is not pinned is an error, not a silent fallback
@@ -123,7 +123,7 @@ defmodule PromptOn.Contract.SdkIngestContractTest do
 
     assert Enum.all?(
              rows,
-             &(&1.prompt == "ko" and &1.deployment_id == use_case.deployment.id and
+             &(&1.prompt == "default" and &1.deployment_id == use_case.deployment.id and
                  &1.prompt_version_id == use_case.prompt_version.id)
            )
 

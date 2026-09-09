@@ -58,10 +58,10 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert summary.counts == %{
                models: 4,
                use_cases: 7,
-               prompts: 10,
-               prompt_versions: 10,
+               prompts: 7,
+               prompt_versions: 7,
                deployments: 7,
-               pins: 10
+               pins: 7
              }
 
       # Flattening warnings are carried in the summary as is (the very list the mix task asked to
@@ -95,11 +95,10 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
                "#{use_case.key} does not pin every prompt"
       end
 
-      # A use case with two language rows has two Prompts, each at v1 (a committed immutable
-      # version)
+      # A use case with language rows has one default Prompt at v1 (a committed immutable version)
       {:ok, diary} = Prompts.get_use_case_by_key("diary_generation", scope)
       {:ok, prompts} = Prompts.list_prompts(diary.id, scope)
-      assert prompts |> Enum.map(& &1.name) |> Enum.sort() == ["default", "ko"]
+      assert prompts |> Enum.map(& &1.name) |> Enum.sort() == ["default"]
 
       for prompt <- prompts do
         {:ok, [version]} = Prompts.list_prompt_versions(prompt.id, scope)
@@ -111,7 +110,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       {:ok, deployment} = Deployments.current_deployment(diary.id, summary.environment_id, scope)
       assert deployment.params == %{"temperature" => 0.4}
       assert deployment.provider_options == %{"allow_fallbacks" => true}
-      assert map_size(deployment.prompt_pins) == 2
+      assert map_size(deployment.prompt_pins) == 1
     end
 
     test "refuses to import twice into a non-empty project unless forced, then reuses", %{
@@ -187,12 +186,13 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
   end
 
   describe "snapshot after import" do
-    test "resolves by prompt name and Verify.compare reports no mismatches", %{
-      dump: dump,
-      plan: plan,
-      org: org,
-      actor: actor
-    } do
+    test "resolves default prompt with language variables and Verify.compare reports no mismatches",
+         %{
+           dump: dump,
+           plan: plan,
+           org: org,
+           actor: actor
+         } do
       summary = import!(plan, org, actor)
       {map, snapshot} = snapshot!(summary, actor)
 
@@ -207,10 +207,10 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       refute Map.has_key?(map["deployments"], "voice_transcription")
       refute Map.has_key?(map["deployments"], "diary_embedding")
 
-      # Language branching = the prompt name. Model and params are one regardless of the name.
-      {:ok, ko} = Resolver.resolve(snapshot, "diary_generation", prompt: "ko")
+      # Language branching = a variable inside the default prompt. Model and params are shared.
+      {:ok, ko} = Resolver.resolve(snapshot, "diary_generation")
       assert ko.model == "google/gemini-3.6-flash"
-      assert ko.prompt == "ko"
+      assert ko.prompt == "default"
       assert resolution_params(ko) == %{"temperature" => 0.4}
 
       assert resolution_provider_options(ko) == %{
@@ -223,19 +223,20 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert ko.deployment_revision == 1
 
       assert [%{role: "system", content: ko_system}, %{role: "user"}] = ko.messages
-      assert ko_system == Dump.task(dump, "diary_generation", "ko").system_prompt
+
+      assert {:ok, Dump.task(dump, "diary_generation", "ko").system_prompt} ==
+               PromptOnSDK.Template.render(ko_system, %{"language" => "ko"})
 
       {:ok, default} = Resolver.resolve(snapshot, "diary_generation")
       assert default.prompt == "default"
       assert [%{role: "system", content: system}, %{role: "user"}] = default.messages
-      assert system == Dump.task(dump, "diary_generation", nil).system_prompt
+
+      assert {:ok, Dump.task(dump, "diary_generation", nil).system_prompt} ==
+               PromptOnSDK.Template.render(system, %{})
+
       assert default.model == ko.model
 
-      # An unpinned name is an error, not a silent fallback
-      assert {:error, :unknown_prompt} =
-               Resolver.resolve(snapshot, "diary_generation", prompt: "ja")
-
-      assert {:ok, ["default", "ko"]} = Resolver.prompt_names(snapshot, "diary_generation")
+      assert {:ok, ["default"]} = Resolver.prompt_names(snapshot, "diary_generation")
 
       # provider.only: null contract survives (gpt-5.4 has providers null) — here the free default
       # row is gemini, so chat_response is gemini too (the plan hierarchy collapsed)
@@ -259,7 +260,11 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert Verify.compare(dump, map) == []
       assert Verify.compare(dump, snapshot) == []
       assert length(Verify.cases(dump)) >= 8
-      assert %{use_case: "diary_generation", language: "ko", prompt: "ko"} in Verify.cases(dump)
+
+      assert %{use_case: "diary_generation", language: "ko", prompt: "default"} in Verify.cases(
+               dump
+             )
+
       assert %{use_case: "chat_response", language: "xx", prompt: "default"} in Verify.cases(dump)
     end
 
@@ -303,7 +308,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
     end
   end
 
-  describe "Export.sql/1 round trip (lossy)" do
+  describe "Export.sql/2 round trip (lossy)" do
     test "regenerates ai_models / ai_tasks / plan_ai_models from the single pin", %{
       dump: dump,
       plan: plan,
@@ -312,7 +317,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
     } do
       summary = import!(plan, org, actor)
       {map, _} = snapshot!(summary, actor)
-      sql = Export.sql(map)
+      sql = Export.sql(map, dump)
 
       # The lossiness warning is stamped at the top of the SQL
       assert String.starts_with?(sql, "-- WARNING: this export is LOSSY.")
@@ -333,7 +338,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       refute sql =~ "'anthropic/claude-sonnet-4.5'"
       refute sql =~ "'openai/gpt-5.4'"
 
-      # ai_tasks: the pin's prompt names → (task, language). The original (unescaped) comes back.
+      # ai_tasks: the original dump supplies language rows; the single prompt renders each original system prompt.
       for t <- dump.ai_tasks,
           exportable_task?(t.task_name),
           t.task_name != "chat_response" or is_nil(t.language) do

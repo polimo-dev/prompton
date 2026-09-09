@@ -3,7 +3,7 @@ defmodule PromptOnWeb.UseCaseLiveTest do
   Use case detail path (`/p/:slug/use-cases/:key`): only the redirect to the hub remains.
 
   Everything about a use case now lives in the hub (`/p/:slug/use-cases/:key/prompt`). This path
-  stays alive for old links and bookmarks, and carries `?tab`/`?prompt` over.
+  stays alive for old links and bookmarks, and carries supported tab state over.
   """
   use PromptOnWeb.ConnCase, async: true
 
@@ -24,7 +24,11 @@ defmodule PromptOnWeb.UseCaseLiveTest do
     assert to == "/personal/acme/use-cases/diary_generation/prompt"
   end
 
-  test "carries the tab and the prompt over", %{conn: conn, project: project, use_case: use_case} do
+  test "carries the tab over and drops prompt selection", %{
+    conn: conn,
+    project: project,
+    use_case: use_case
+  } do
     assert {:error, {:live_redirect, %{to: to}}} =
              live(
                conn,
@@ -33,7 +37,7 @@ defmodule PromptOnWeb.UseCaseLiveTest do
 
     assert to =~ "/prompt?"
     assert to =~ "tab=deployments"
-    assert to =~ "prompt=ko"
+    refute to =~ "prompt=ko"
   end
 
   test "the old prompts tab is the hub's default tab, so it is dropped", %{

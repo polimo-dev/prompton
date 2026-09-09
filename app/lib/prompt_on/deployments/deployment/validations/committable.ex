@@ -8,17 +8,14 @@ defmodule PromptOn.Deployments.Deployment.Validations.Committable do
   1. **Exactly one model, and it is required**: a `status :active`, non-archived Model of the same
      project.
   2. **The use case must be chat**. Historical text/embedding rows can be loaded but not deployed.
-  3. **A chat use case needs at least one pin**, and if this use case has a live `default` prompt
-     it **must** pin `default`, because that is the prompt an app receives when it sends no name.
-  4. **Each pin name must be a live Prompt name of this use case** (unknown names are rejected), and
-     its value must be a PromptVersion of the same tenant that **belongs to the Prompt of that
-     name**.
+  3. **A chat use case deploys exactly the canonical default prompt**. `prompt_pins` must contain
+     only `"default"` and must provide a non-empty version id.
+  4. The default prompt version must belong to the same tenant and to this use case's live
+     non-archived default Prompt.
 
-  Rule 4 enforces "the pin map agrees with the prompt names that exist". Conversely, it does **not**
-  demand that **every** prompt be pinned: that would make `:rollback` to a past revision impossible
-  forever the moment a prompt is added. A request for a name that is not pinned fails at resolution
-  with `{:error, :unknown_prompt}` (no silent fallback). Deploy in the use case hub pins **all**
-  committed prompts; that is the UI default, and the four rules above are the domain's floor.
+  Rollback can read historical revisions that stored multi-prompt or non-default pins, but
+  `CopyFromSource` normalizes those through the consolidation lookup before this validation runs.
+  If no canonical equivalent exists, rollback fails instead of reactivating unsupported pins.
   """
 
   use Ash.Resource.Validation
@@ -65,7 +62,7 @@ defmodule PromptOn.Deployments.Deployment.Validations.Committable do
 
   defp fetch_prompts(use_case_id, opts) do
     Prompt
-    |> Ash.Query.filter(use_case_id == ^use_case_id and is_nil(archived_at))
+    |> Ash.Query.filter(use_case_id == ^use_case_id and is_nil(archived_at) and name == "default")
     |> Ash.read(opts)
     |> case do
       {:ok, prompts} -> {:ok, Map.new(prompts, &{&1.name, &1})}
@@ -120,22 +117,25 @@ defmodule PromptOn.Deployments.Deployment.Validations.Committable do
 
   defp pin_errors(%UseCase{} = use_case, pins, prompts, _versions) when pins == %{} do
     if map_size(prompts) == 0 do
-      [invalid(:prompt_pins, "this use case has no prompt to pin")]
+      [invalid(:prompt_pins, "this use case has no default prompt to pin")]
     else
-      [invalid(:prompt_pins, "at least one prompt must be pinned for #{use_case.kind} use cases")]
+      [invalid(:prompt_pins, "the default prompt must be pinned for #{use_case.kind} use cases")]
     end
   end
 
   defp pin_errors(%UseCase{}, pins, prompts, versions) do
-    default_error =
-      if Map.has_key?(prompts, "default") and not Map.has_key?(pins, "default"),
-        do: [invalid(:prompt_pins, ~s|the "default" prompt must be pinned|)],
-        else: []
+    case Map.keys(pins) do
+      ["default"] ->
+        pin_error(
+          "default",
+          pins["default"],
+          Map.get(prompts, "default"),
+          Map.get(versions, pins["default"])
+        )
 
-    default_error ++
-      Enum.flat_map(pins, fn {name, version_id} ->
-        pin_error(name, version_id, Map.get(prompts, name), Map.get(versions, version_id))
-      end)
+      _other ->
+        [invalid(:prompt_pins, ~s|prompt_pins must contain only the "default" prompt|)]
+    end
   end
 
   defp pin_error(name, _version_id, nil, _version),

@@ -97,7 +97,7 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
              Prompts.append_arena_message(Map.delete(base, :use_case_id), scope(ctx.project))
   end
 
-  test "append rejects legacy non-chat parents", ctx do
+  test "append rejects archived and legacy non-chat parents", ctx do
     legacy_id = legacy_use_case_row(ctx.project, "diary_embedding", :embedding)
 
     assert {:error, %Ash.Error.Invalid{} = error} =
@@ -112,6 +112,21 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
              )
 
     assert Exception.message(error) =~ "not chat"
+
+    {:ok, archived} = Prompts.archive_use_case(ctx.use_case, scope(ctx.project))
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.append_arena_message(
+               %{
+                 use_case_id: archived.id,
+                 model_id: ctx.sonnet.id,
+                 role: :user,
+                 content: "x"
+               },
+               scope(ctx.project)
+             )
+
+    assert Exception.message(error) =~ "archived"
   end
 
   test "for_use_case returns every column in insert order, and filters by model", ctx do

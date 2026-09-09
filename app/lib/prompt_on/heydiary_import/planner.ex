@@ -12,12 +12,11 @@ defmodule PromptOn.HeyDiaryImport.Planner do
     `provider.only: null`/`[]` as is).
   - **UseCase**: the 7 chat use cases of `Spec.use_cases/0`. `default_params.temperature` = the temperature of
     the source task's common (NULL-language) row (when present).
-  - **Prompt/PromptVersion**: per (task × language) a Prompt `default` (NULL) / `<language>` with
-    one committed version — `messages = [system: original (escaped), user: §12.3 Liquid template]`,
-    `chat_response` is system only,
-    `diary_content_removal` copies the `diary_generation` rows + the removal template. The engine
-    is always `:liquid` — `{{`/`{%` in the original are turned into literal output by
-    `Spec.escape_literal/1`.
+  - **Prompt/PromptVersion**: one Prompt named `default` per UseCase with one committed version.
+    The system message is a Liquid template that branches on optional `language` and renders each
+    imported HeyDiary `ai_tasks` row byte-identically; the user message is the §12.3 Liquid
+    template. `chat_response` is system only. `diary_content_removal` copies the
+    `diary_generation` rows + the removal template.
   - **Deployment**: **one** per use case (`use_case × production`), and it is **one pin**:
     - model = the model of the **free (= common) default row** of `plan_ai_models`
       (`pinned_plan_model/2`). The per-plan model hierarchy cannot be represented because a
@@ -25,8 +24,7 @@ defmodule PromptOn.HeyDiaryImport.Planner do
       reports it (plan differentiation is the app's job).
     - `params.temperature = coalesce(pm.temperature, ai_tasks common-row temperature, code
       default)`, `provider_options %{"allow_fallbacks" => pm.allow_fallbacks}`.
-    - `prompt_names` = **every** prompt name of that use case (`default` + the languages). All of
-      them are pinned.
+    - `prompt_names` = `["default"]`. Language is a template variable, not a prompt selector.
 
   See the `PromptOn.HeyDiaryImport.Plan` moduledoc for the list of warnings.
   """
@@ -131,10 +129,10 @@ defmodule PromptOn.HeyDiaryImport.Planner do
     if rows == [] do
       {:ok, warn(acc, {:missing_task, spec.key, spec.source_task})}
     else
-      with {:ok, versions} <- chat_versions(spec, rows) do
+      with {:ok, version} <- chat_version(spec, rows) do
         acc =
           acc
-          |> add_prompts(spec, rows, versions)
+          |> add_prompt(spec, rows, version)
           |> maybe_warn_no_default_prompt(spec, rows)
 
         if plan_models == [] do
@@ -147,7 +145,7 @@ defmodule PromptOn.HeyDiaryImport.Planner do
             model: {:openrouter, pin.model},
             params: params(spec, rows, pin),
             provider_options: %{"allow_fallbacks" => pin.allow_fallbacks},
-            prompt_names: prompt_names(rows),
+            prompt_names: [prompt_name(nil)],
             description:
               "HeyDiary plan_ai_models #{pin.id} (#{pin.plan}#{if pin.is_default, do: ", default", else: ""})"
           }
@@ -166,31 +164,75 @@ defmodule PromptOn.HeyDiaryImport.Planner do
     end
   end
 
-  defp chat_versions(spec, rows) do
+  defp chat_version(spec, rows) do
     user_template = Spec.user_template(spec.key)
 
-    Enum.reduce_while(rows, {:ok, []}, fn row, {:ok, acc} ->
+    with {:ok, system} <- system_template(rows) do
+      messages =
+        [%{role: :system, content: system}] ++
+          if(is_nil(user_template), do: [], else: [%{role: :user, content: user_template}])
+
+      {:ok,
+       %{
+         use_case_key: spec.key,
+         prompt_name: prompt_name(nil),
+         engine: :liquid,
+         messages: messages,
+         text_template: nil,
+         commit_message: commit_message(rows)
+       }}
+    end
+  end
+
+  defp system_template(rows) do
+    rows = Enum.sort_by(rows, &{is_nil(&1.language), &1.language || ""})
+    default = Enum.find(rows, &is_nil(&1.language))
+    language_rows = Enum.reject(rows, &is_nil(&1.language))
+
+    with {:ok, escaped} <- escaped_rows(rows) do
+      template =
+        case language_rows do
+          [] ->
+            Map.fetch!(escaped, default.id)
+
+          [_ | _] ->
+            language_branches(language_rows, escaped) <>
+              "{% else %}" <> default_system(default, escaped) <> "{% endif %}"
+        end
+
+      case PromptOnSDK.Template.lint(template) do
+        :ok -> {:ok, template}
+        {:error, reason} -> {:error, {:unlintable_system_template, reason}}
+      end
+    end
+  end
+
+  defp escaped_rows(rows) do
+    Enum.reduce_while(rows, {:ok, %{}}, fn row, {:ok, acc} ->
       case Spec.escape_literal(row.system_prompt) do
         {:ok, system} ->
-          messages =
-            [%{role: :system, content: system}] ++
-              if(is_nil(user_template), do: [], else: [%{role: :user, content: user_template}])
-
-          version = %{
-            use_case_key: spec.key,
-            prompt_name: prompt_name(row.language),
-            engine: :liquid,
-            messages: messages,
-            text_template: nil,
-            commit_message: commit_message(row)
-          }
-
-          {:cont, {:ok, acc ++ [version]}}
+          {:cont, {:ok, Map.put(acc, row.id, system)}}
 
         {:error, reason} ->
           {:halt, {:error, {:unescapable_system_prompt, row.task_name, row.language, reason}}}
       end
     end)
+  end
+
+  defp language_branches(rows, escaped) do
+    rows
+    |> Enum.with_index()
+    |> Enum.map_join(fn {row, index} ->
+      tag = if index == 0, do: "if", else: "elsif"
+      "{% #{tag} language == #{liquid_string(row.language)} %}" <> Map.fetch!(escaped, row.id)
+    end)
+  end
+
+  defp default_system(nil, _escaped), do: ""
+  defp default_system(row, escaped), do: Map.fetch!(escaped, row.id)
+
+  defp liquid_string(value) do
+    ~s("#{value |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")}")
   end
 
   # ---------------------------------------------------------------------------
@@ -316,44 +358,43 @@ defmodule PromptOn.HeyDiaryImport.Planner do
   # ---------------------------------------------------------------------------
   # helpers
 
-  defp add_prompts(acc, spec, rows, versions) do
+  defp add_prompt(acc, spec, rows, version) do
     acc
-    |> Map.update!(:prompts, &(&1 ++ Enum.map(rows, fn row -> prompt_entry(spec, row) end)))
-    |> Map.update!(:prompt_versions, &(&1 ++ versions))
+    |> Map.update!(:prompts, &(&1 ++ [prompt_entry(spec, rows)]))
+    |> Map.update!(:prompt_versions, &(&1 ++ [version]))
   end
 
-  defp prompt_entry(spec, row) do
+  defp prompt_entry(spec, rows) do
     %{
       use_case_key: spec.key,
-      name: prompt_name(row.language),
-      language: row.language,
-      description: prompt_description(spec, row)
+      name: prompt_name(nil),
+      language: nil,
+      description: prompt_description(spec, rows)
     }
   end
 
-  defp prompt_description(%{key: "diary_content_removal"}, row),
+  defp prompt_description(%{key: "diary_content_removal"}, rows),
     do:
-      "Kept identical to diary_generation (system prompt copied from ai_tasks diary_generation/#{row.language || "NULL"} at import, plan.md §12.4)"
+      "Single default prompt; system branches by language and copies diary_generation ai_tasks rows " <>
+        languages_description(rows) <> " at import (plan.md §12.4)"
 
-  defp prompt_description(_spec, row), do: "HeyDiary " <> task_description(row)
+  defp prompt_description(_spec, rows),
+    do:
+      "Single default prompt; system branches by language from HeyDiary " <>
+        rows_description(rows)
+
+  defp rows_description(rows), do: Enum.map_join(rows, ", ", &task_description/1)
+
+  defp languages_description(rows),
+    do: Enum.map_join(rows, ", ", &(&1.language || "NULL"))
 
   defp task_description(row), do: "ai_tasks #{row.task_name}/#{row.language || "NULL"}"
 
-  defp commit_message(row),
-    do: "import from HeyDiary ai_tasks (#{row.task_name}/#{row.language || "NULL"})"
+  defp commit_message(rows), do: "import from HeyDiary " <> rows_description(rows)
 
-  @doc "Prompt name: NULL language → `default`, otherwise the language."
+  @doc "The single Prompt name used by HeyDiary imports."
   @spec prompt_name(String.t() | nil) :: String.t()
-  def prompt_name(nil), do: "default"
-  def prompt_name(language), do: language
-
-  # The prompt names that go into the pin — `default` first, then the languages in lexical order.
-  defp prompt_names(rows) do
-    rows
-    |> Enum.map(&prompt_name(&1.language))
-    |> Enum.uniq()
-    |> Enum.sort_by(&{&1 != "default", &1})
-  end
+  def prompt_name(_language), do: "default"
 
   @doc "Model identifier → name fragment (`google/gemini-3.6-flash` → `google-gemini-3-6-flash`)."
   @spec slug(String.t()) :: String.t()

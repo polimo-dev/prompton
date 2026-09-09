@@ -18,7 +18,7 @@ defmodule PromptOn.Prompts.PromptVersion.Validations.ContentMatchesKind do
     messages = Ash.Changeset.get_attribute(changeset, :messages) || []
     text_template = Ash.Changeset.get_attribute(changeset, :text_template)
 
-    case use_case_kind(prompt_id, changeset) do
+    case prompt_context(prompt_id, changeset) do
       {:ok, kind} -> check(kind, messages, text_template)
       {:error, error} -> {:error, error}
     end
@@ -37,20 +37,41 @@ defmodule PromptOn.Prompts.PromptVersion.Validations.ContentMatchesKind do
   defp check(:embedding, _messages, _text),
     do: invalid(:prompt_id, "embedding use cases are no longer supported for prompt versions")
 
-  defp use_case_kind(nil, _changeset),
+  defp prompt_context(nil, _changeset),
     do:
       {:error,
        Ash.Error.Changes.InvalidAttribute.exception(field: :prompt_id, message: "is required")}
 
-  defp use_case_kind(prompt_id, changeset) do
+  defp prompt_context(prompt_id, changeset) do
     Prompt
     |> Ash.Query.filter(id == ^prompt_id)
-    |> Ash.Query.load(use_case: [:kind])
+    |> Ash.Query.load(use_case: [:kind, :archived_at])
     |> Ash.read_one(
       tenant: changeset.to_tenant || changeset.tenant,
       actor: PromptOn.SystemActor.new()
     )
     |> case do
+      {:ok, %Prompt{name: name}} when name != "default" ->
+        {:error,
+         Ash.Error.Changes.InvalidAttribute.exception(
+           field: :prompt_id,
+           message: "only the default prompt can be versioned"
+         )}
+
+      {:ok, %Prompt{archived_at: archived_at}} when not is_nil(archived_at) ->
+        {:error,
+         Ash.Error.Changes.InvalidAttribute.exception(
+           field: :prompt_id,
+           message: "archived prompts cannot be versioned"
+         )}
+
+      {:ok, %Prompt{use_case: %{archived_at: archived_at}}} when not is_nil(archived_at) ->
+        {:error,
+         Ash.Error.Changes.InvalidAttribute.exception(
+           field: :prompt_id,
+           message: "archived use cases cannot receive prompt versions"
+         )}
+
       {:ok, %Prompt{use_case: %{kind: kind}}} ->
         {:ok, kind}
 

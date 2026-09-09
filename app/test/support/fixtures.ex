@@ -254,16 +254,14 @@ defmodule PromptOn.Fixtures do
   A whole HeyDiary-shaped project (plan.md §6.2). Only the production environment has live
   Deployments; staging is empty.
 
-  Deployments are **pins**: one model per use case + one version per prompt name. Only
-  `diary_generation` has two prompts (`default`, `ko`), so the language branch (= prompt name
-  selection) can be tested.
+  Deployments are **pins**: one model per use case + one version of the canonical default prompt.
 
   Returned map:
   - `:project`, `:user`, `:production`, `:staging`
   - `:models` — `%{sonnet, mini, opus}`
   - `:use_cases` — `%{diary, chat}` (keys `diary_generation`, `chat_response`)
-  - `:prompts` — `%{diary_default, diary_ko, chat}`
-  - `:prompt_versions` — `%{diary, diary_ko, chat}`
+  - `:prompts` — `%{diary_default, chat}`
+  - `:prompt_versions` — `%{diary, chat}`
   - `:deployments` — `%{diary, chat}` (production live revision #1)
   """
   def heydiary_project_fixture(attrs \\ %{}) do
@@ -330,11 +328,8 @@ defmodule PromptOn.Fixtures do
         default_params: %{"temperature" => 0.7}
       })
 
-    # --- Prompts (per name) + versions ------------------------------------------
+    # --- Prompts + versions ------------------------------------------------------
     diary_default = default_prompt(diary)
-
-    {:ok, diary_ko_prompt} =
-      Prompts.open_prompt(%{use_case_id: diary.id, name: "ko"}, scope(project))
 
     diary_v1 =
       prompt_version_fixture(diary_default, %{
@@ -343,14 +338,6 @@ defmodule PromptOn.Fixtures do
           %{role: :user, content: @heydiary_diary_user_template}
         ],
         commit_message: "import from ai_tasks"
-      })
-
-    diary_ko_v1 =
-      prompt_version_fixture(diary_ko_prompt, %{
-        messages: [
-          %{role: :system, content: "You write diaries in Korean from voice transcriptions."},
-          %{role: :user, content: @heydiary_diary_user_template}
-        ]
       })
 
     chat_v1 =
@@ -363,13 +350,13 @@ defmodule PromptOn.Fixtures do
         ]
       })
 
-    # --- Deployment (production): a revision is a pin, one model + one version per prompt name --
+    # --- Deployment (production): a revision is a pin, one model + one default version --
     d_diary =
       deployment_fixture(diary, production, %{
         model_id: sonnet.id,
         params: %{"temperature" => 0.4},
         provider_options: %{"allow_fallbacks" => false},
-        prompt_pins: %{"default" => diary_v1.id, "ko" => diary_ko_v1.id}
+        prompt_pins: %{"default" => diary_v1.id}
       })
 
     d_chat =
@@ -386,12 +373,8 @@ defmodule PromptOn.Fixtures do
       staging: staging,
       models: %{sonnet: sonnet, mini: mini, opus: opus},
       use_cases: %{diary: diary, chat: chat},
-      prompts: %{
-        diary_default: diary_default,
-        diary_ko: diary_ko_prompt,
-        chat: default_prompt(chat)
-      },
-      prompt_versions: %{diary: diary_v1, diary_ko: diary_ko_v1, chat: chat_v1},
+      prompts: %{diary_default: diary_default, chat: default_prompt(chat)},
+      prompt_versions: %{diary: diary_v1, chat: chat_v1},
       deployments: %{diary: d_diary, chat: d_chat}
     }
   end

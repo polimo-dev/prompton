@@ -30,9 +30,9 @@ defmodule PromptOn.HeyDiaryImport.Export do
   - `ai_models` — the `openrouter` models pinned by the live Deployments of the migrated UseCases.
     Upserted via the `model` UNIQUE. (`plan_ai_models.ai_model_id` is joined with a
     `(SELECT id FROM ai_models WHERE model = …)` subquery.)
-  - `ai_tasks` — the pin's prompt names → `(task, language)` rows (`default` → `language NULL`,
-    any other name as is). The system prompt is the first message of the pinned PromptVersion
-    rendered with empty variables (escapes restored).
+  - `ai_tasks` — with `sql/2`, the original dump supplies the `(task, language)` rows and the
+    single pinned `default` PromptVersion is rendered once per language. With legacy `sql/1`, only
+    the default-language row can be inferred from the snapshot. Escapes are restored by rendering.
     `temperature` is the revision's effective temperature (else `UseCase.default_params`). Because
     UNIQUE(task_name, language) does not distinguish NULLs, the upsert is
     `UPDATE … WHERE language IS NOT DISTINCT FROM` + `INSERT … WHERE NOT EXISTS`.
@@ -55,17 +55,22 @@ defmodule PromptOn.HeyDiaryImport.Export do
     "-- the app's job now (see docs/adr/0007 — \"deployments are pins\")."
   ]
 
-  @doc "Use-case document (`%UseCaseDocument{}` or map) → SQL string."
+  @doc "Use-case document (`%UseCaseDocument{}` or map) → SQL string. Without a dump, only default-language rows can be exported."
   @spec sql(UseCaseDocument.t() | map()) :: String.t()
-  def sql(snapshot) do
+  def sql(snapshot), do: sql(snapshot, nil)
+
+  @doc "Use-case document plus original HeyDiary dump → SQL string, preserving the original language rows."
+  @spec sql(UseCaseDocument.t() | map(), Dump.t() | map() | nil) :: String.t()
+  def sql(snapshot, dump) do
     snapshot = decode!(snapshot)
+    dump = parse_dump!(dump)
     specs = exportable_specs()
 
     statements =
       @lossy_warning ++
         ["", "BEGIN;", ""] ++
         section("ai_models", ai_models_sql(snapshot, specs)) ++
-        section("ai_tasks", ai_tasks_sql(snapshot, specs)) ++
+        section("ai_tasks", ai_tasks_sql(snapshot, specs, dump)) ++
         section("plan_ai_models", plan_ai_models_sql(snapshot, specs)) ++
         ["COMMIT;"]
 
@@ -115,22 +120,33 @@ defmodule PromptOn.HeyDiaryImport.Export do
   # ---------------------------------------------------------------------------
   # ai_tasks
 
-  defp ai_tasks_sql(snapshot, specs) do
+  defp ai_tasks_sql(snapshot, specs, dump) do
     Enum.flat_map(specs, fn spec ->
       case deployment(snapshot, spec.key) do
-        %{prompt_pins: pins} when pins != %{} -> ai_task_rows(snapshot, spec, pins)
+        %{prompt_pins: pins} when pins != %{} -> ai_task_rows(snapshot, spec, pins, dump)
         _ -> []
       end
     end)
   end
 
-  defp ai_task_rows(snapshot, spec, pins) do
+  defp ai_task_rows(snapshot, spec, pins, nil) do
     temperature = effective_temperature(snapshot, spec)
 
     for {name, version_id} <- Enum.sort_by(pins, fn {name, _} -> {name != "default", name} end),
-        prompt = system_prompt(snapshot, version_id),
+        prompt = system_prompt(snapshot, version_id, nil),
         not is_nil(prompt) do
       ai_task_upsert(spec.source_task, language_of(name), prompt, temperature)
+    end
+  end
+
+  defp ai_task_rows(snapshot, spec, pins, dump) do
+    version_id = Map.fetch!(pins, "default")
+    temperature = effective_temperature(snapshot, spec)
+
+    for row <- Dump.task_rows(dump, spec.source_task),
+        prompt = system_prompt(snapshot, version_id, row.language),
+        not is_nil(prompt) do
+      ai_task_upsert(spec.source_task, row.language, prompt, temperature)
     end
   end
 
@@ -154,10 +170,10 @@ defmodule PromptOn.HeyDiaryImport.Export do
       "WHERE NOT EXISTS (SELECT 1 FROM ai_tasks WHERE #{where});"
   end
 
-  defp system_prompt(snapshot, version_id) do
+  defp system_prompt(snapshot, version_id, language) do
     case Map.get(snapshot.prompt_versions, version_id) do
       nil -> nil
-      version -> render(template_source(version), version.engine)
+      version -> render(template_source(version), %{"language" => language}, version.engine)
     end
   end
 
@@ -166,10 +182,10 @@ defmodule PromptOn.HeyDiaryImport.Export do
 
   # Turns escapes (`{{ "{{" }}`) back into the original text — when rendering fails, the raw
   # template is used as is.
-  defp render(nil, _engine), do: nil
+  defp render(nil, _vars, _engine), do: nil
 
-  defp render(source, engine) do
-    case Template.render(source, %{}, engine: engine || :liquid) do
+  defp render(source, vars, engine) do
+    case Template.render(source, vars, engine: engine || :liquid) do
       {:ok, rendered} -> rendered
       _ -> source
     end
@@ -235,6 +251,16 @@ defmodule PromptOn.HeyDiaryImport.Export do
 
   defp jsonb(nil), do: "NULL"
   defp jsonb(value), do: str(Jason.encode!(value)) <> "::jsonb"
+
+  defp parse_dump!(nil), do: nil
+  defp parse_dump!(%Dump{} = dump), do: dump
+
+  defp parse_dump!(dump) when is_map(dump) do
+    case Dump.parse(dump) do
+      {:ok, dump} -> dump
+      {:error, reason} -> raise ArgumentError, "invalid dump: #{inspect(reason)}"
+    end
+  end
 
   defp decode!(%UseCaseDocument{} = snapshot), do: snapshot
 

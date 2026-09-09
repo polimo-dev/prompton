@@ -31,9 +31,9 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
     assert output =~ "chat_response"
     refute output =~ "voice_transcription"
     refute output =~ "diary_embedding"
-    assert output =~ "Deployments (7; 10 pinned prompts — one model each, no rules)"
-    assert output =~ "pinned prompts"
-    assert output =~ "default,ko"
+    assert output =~ "Deployments (7; 7 pinned prompt(s) — one model each, no rules)"
+    assert output =~ "pinned prompt(s)"
+    refute output =~ "default,ko"
     assert output =~ "[confirm]"
     assert output =~ "plan-differentiated models are now the app's job"
     assert output =~ "temperatures differ per language"
@@ -87,7 +87,7 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
     assert output =~ "[new project]"
 
     assert output =~
-             "models 4 · use cases 7 · prompts 10 · prompt versions 10 · deployments 7 (10 pinned prompts)"
+             "models 4 · use cases 7 · prompts 7 · prompt versions 7 · deployments 7 (7 pinned prompt(s))"
 
     assert output =~ "Verify: OK"
     assert output =~ "mix prompton.export"
@@ -114,6 +114,8 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
     sql =
       capture_io(fn ->
         ExportHeydiaryTables.run([
+          "--dump",
+          @dump_path,
           "--user",
           email,
           "--project",
@@ -135,7 +137,16 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
 
     message =
       capture_io(fn ->
-        ExportHeydiaryTables.run(["--user", email, "--project", project_slug, "--out", out])
+        ExportHeydiaryTables.run([
+          "--dump",
+          @dump_path,
+          "--user",
+          email,
+          "--project",
+          project_slug,
+          "--out",
+          out
+        ])
       end)
 
     assert message =~ "wrote #{out}"
@@ -143,7 +154,9 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
     File.rm!(out)
 
     assert_raise Mix.Error, ~r/not found/, fn ->
-      capture_io(fn -> ExportHeydiaryTables.run(["--user", email, "--project", "nope"]) end)
+      capture_io(fn ->
+        ExportHeydiaryTables.run(["--dump", @dump_path, "--user", email, "--project", "nope"])
+      end)
     end
   end
 end

@@ -1096,61 +1096,37 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     end
   end
 
-  # ADR 0007: named prompt documents under a use case (the word "lineage" appears neither on
-  # screen nor in the URL).
-  describe "prompt switching (?prompt=)" do
-    test "the switcher row moves via ?prompt= and the default prompt leaves the URL empty", %{
+  # A use case has one prompt. Old named prompt rows may still exist in history, but this screen
+  # neither shows a prompt selector nor accepts query/event paths that recreate one.
+  describe "single prompt" do
+    test "the screen has no prompt switcher and forged ?prompt= keeps the default prompt", %{
       conn: conn,
       project: project,
       use_case: use_case
     } do
-      {:ok, _ko} =
-        Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, prompt: "ko"))
 
-      {:ok, view, _html} = live(conn, hub_path(project, use_case))
-
-      assert has_element?(view, "#prompt-switcher")
-      assert view |> element("#prompt-switcher") |> render() =~ "Prompts"
-      assert has_element?(view, "#prompt-default.on")
-
-      view |> element("#prompt-ko") |> render_click()
-
-      assert_patch(view, hub_path(project, use_case, prompt: "ko"))
-      assert has_element?(view, "#prompt-ko.on")
-      assert page_title(view) =~ "diary_generation (ko)"
-
-      view |> element("#prompt-default") |> render_click()
-      assert_patch(view, hub_path(project, use_case))
+      refute has_element?(view, "#prompt-switcher")
+      assert page_title(view) =~ "diary_generation · acme"
+      refute page_title(view) =~ "(ko)"
+      assert has_element?(view, "#prompt-editor-form")
     end
 
-    test "the new prompt modal is ?new_prompt=1 and creating moves to that prompt", %{
+    test "forged new prompt URL and events do not create named prompts", %{
       conn: conn,
       project: project,
       use_case: use_case
     } do
-      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+      {:ok, view, html} = live(conn, hub_path(project, use_case, new_prompt: 1))
 
       refute has_element?(view, "#new-prompt-modal")
-      assert view |> element("#new-prompt") |> render() =~ "New prompt"
+      refute html =~ "New prompt"
 
-      view |> element("#new-prompt") |> render_click()
-
-      assert_patch(view, hub_path(project, use_case, new_prompt: 1))
-      assert has_element?(view, "#new-prompt-modal")
-      assert has_element?(view, "#new-prompt-name")
-      assert has_element?(view, "#new-prompt-description")
-      assert view |> element("#create-prompt") |> render() =~ "Create prompt"
-
-      view
-      |> form("#new-prompt-form", prompt: %{"name" => "ko", "description" => "Korean prompt"})
-      |> render_submit()
-
-      assert_patch(view, hub_path(project, use_case, prompt: "ko"))
-      assert render(view) =~ "Prompt ko created — write its first version."
-      assert has_element?(view, "#prompt-ko.on")
+      render_hook(view, "prompt_change", %{"prompt" => %{"name" => "ko"}})
+      render_hook(view, "create_prompt", %{"prompt" => %{"name" => "ko"}})
 
       {:ok, prompts} = Prompts.list_prompts(use_case.id, scope(project))
-      assert Enum.any?(prompts, &(&1.name == "ko"))
+      refute Enum.any?(prompts, &(&1.name == "ko"))
     end
 
     test "the word lineage appears neither on screen nor in the URL", %{
@@ -1912,14 +1888,13 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert reload_draft(prompt) == nil
     end
 
-    test "drafts are per prompt: moving around does not mix them", %{
+    test "forged prompt query keeps editing the default draft", %{
       conn: conn,
       project: project,
-      use_case: use_case
+      use_case: use_case,
+      prompt: prompt
     } do
-      {:ok, ko} = Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
-
-      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, prompt: "ko"))
 
       view
       |> form("#prompt-editor-form",
@@ -1929,26 +1904,8 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       )
       |> render_change()
 
-      # Moving to ko shows ko's draft (= empty).
-      view |> element("#prompt-ko") |> render_click()
-      assert_patch(view, hub_path(project, use_case, prompt: "ko"))
-      refute render(view) =~ "default-draft text"
-      assert has_element?(view, "#message-0-stats-tokens", "~0 tokens")
-
-      view
-      |> form("#prompt-editor-form",
-        editor: %{"messages" => %{"0" => %{"role" => "system", "content" => "ko-draft text"}}}
-      )
-      |> render_change()
-
-      # Coming back, the default draft is as it was.
-      view |> element("#prompt-default") |> render_click()
-      assert_patch(view, hub_path(project, use_case))
-      assert render(view) =~ "default-draft text"
-      refute render(view) =~ "ko-draft text"
-      assert has_element?(view, "#message-0-stats-tokens", "~5 tokens")
-
-      assert %{"messages" => [%{"content" => "ko-draft text"} | _rest]} = reload_draft(ko)
+      assert %{"messages" => [%{"content" => "default-draft text"} | _rest]} =
+               reload_draft(prompt)
     end
 
     test "there is neither Save nor unsaved anywhere on the screen", %{
@@ -2097,7 +2054,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert deployment.prompt_pins == %{"default" => v1.id}
     end
 
-    test "pins **every** prompt of this use case (the modal shows that list as is)", %{
+    test "legacy named prompts are ignored; deploy pins only the default prompt", %{
       conn: conn,
       project: project,
       use_case: use_case,
@@ -2106,23 +2063,12 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       {model_a, _b} = two_models(project)
       env = Fixtures.environment(project)
 
-      {:ok, ko} = Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
-
-      ko_v1 =
-        Fixtures.prompt_version_fixture(ko, %{
-          messages: [%{role: :system, content: "Answer in Korean."}]
-        })
-
-      # A prompt with no version at all is not pinned; the modal says so.
-      {:ok, _ja} = Prompts.open_prompt(%{use_case_id: use_case.id, name: "ja"}, scope(project))
-
       {:ok, view, _html} = live(conn, hub_path(project, use_case, deploy: 1))
 
       assert has_element?(view, "#deploy-pins")
-      assert view |> element("#deploy-pin-default") |> render() =~ "v1"
-      assert view |> element("#deploy-pin-default") |> render() =~ "current"
-      assert view |> element("#deploy-pin-ko") |> render() =~ "v1"
-      assert view |> element("#deploy-pin-ja") |> render() =~ "no version yet"
+      assert view |> element("#deploy-pin-version") |> render() =~ "v1"
+      refute has_element?(view, "#deploy-pin-ko")
+      refute has_element?(view, "#deploy-pin-ja")
 
       view
       |> form("#deploy-form",
@@ -2131,7 +2077,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       |> render_submit()
 
       {:ok, deployment} = Deployments.current_deployment(use_case.id, env.id, scope(project))
-      assert deployment.prompt_pins == %{"default" => v1.id, "ko" => ko_v1.id}
+      assert deployment.prompt_pins == %{"default" => v1.id}
     end
 
     test "the list is every active model: arena first, the rest by name, and it deploys as is", %{
@@ -2201,7 +2147,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       # appear.
       assert render(view) =~ "Current draft (will become v2)"
       assert has_element?(view, "#deploy-message")
-      assert view |> element("#deploy-pin-default") |> render() =~ "v2 (new)"
+      assert view |> element("#deploy-pin-version") |> render() =~ "v2 (new)"
 
       view
       |> form("#deploy-form",
@@ -2399,13 +2345,6 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       other = Fixtures.model_fixture(project, %{model_id: "m/dep2", display_name: "Other model"})
       env = Fixtures.environment(project)
 
-      {:ok, ko} = Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
-
-      ko_v1 =
-        Fixtures.prompt_version_fixture(ko, %{
-          messages: [%{role: :system, content: "Answer in Korean."}]
-        })
-
       first =
         Fixtures.simple_deployment_fixture(use_case, env, %{prompt_version: v1, model: model})
 
@@ -2413,10 +2352,10 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
         Fixtures.deployment_fixture(use_case, env, %{
           model_id: other.id,
           params: %{"temperature" => 0.3},
-          prompt_pins: %{"default" => v1.id, "ko" => ko_v1.id}
+          prompt_pins: %{"default" => v1.id}
         })
 
-      %{model: model, other: other, env: env, first: first, second: second, ko_v1: ko_v1}
+      %{model: model, other: other, env: env, first: first, second: second}
     end
 
     test "renders the pin (model, prompt version, params) and history; no rule editor", %{
@@ -2431,7 +2370,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert has_element?(view, "#pin-live")
       assert view |> element("#pin-model") |> render() =~ "Other model"
       assert view |> element("#pin-default") |> render() =~ "v1"
-      assert view |> element("#pin-ko") |> render() =~ "v1"
+      refute has_element?(view, "#pin-ko")
       assert view |> element("#pin-params") |> render() =~ "temperature=0.3"
 
       assert has_element?(view, "#history")
@@ -2549,17 +2488,10 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       model = Fixtures.model_fixture(project, %{model_id: "m/int", display_name: "Int model"})
       env = Fixtures.environment(project)
 
-      {:ok, ko} = Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
-
-      ko_v1 =
-        Fixtures.prompt_version_fixture(ko, %{
-          messages: [%{role: :system, content: "Answer in Korean."}]
-        })
-
       deployment =
         Fixtures.deployment_fixture(use_case, env, %{
           model_id: model.id,
-          prompt_pins: %{"default" => v1.id, "ko" => ko_v1.id}
+          prompt_pins: %{"default" => v1.id}
         })
 
       %{env: env, model: model, deployment: deployment}
@@ -2640,7 +2572,8 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert prompt =~ use_case.key
       # every prompt name pinned by this deployment
       assert prompt =~ "default"
-      assert prompt =~ "ko"
+      refute prompt =~ "prompt_names"
+      refute prompt =~ "unknown_prompt"
       # the variable table (name, type, required)
       assert prompt =~ "input"
       assert prompt =~ "string"

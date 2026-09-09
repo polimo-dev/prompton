@@ -165,15 +165,15 @@ defmodule PromptOn.Prompts.UseCaseTest do
              Prompts.describe_use_case(use_case, %{name: "Renamed"}, scope(project, owner))
   end
 
-  test "prompt: open/rename/archive, identity per use case, aggregates, tenant check" do
+  test "prompt: only the active default prompt is authorable and listed" do
     project = project_fixture()
     use_case = use_case_fixture(project)
     [default] = use_case.prompts
 
-    {:ok, ko} = Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
-
-    assert {:error, %Ash.Error.Invalid{}} =
+    assert {:error, %Ash.Error.Invalid{} = error} =
              Prompts.open_prompt(%{use_case_id: use_case.id, name: "ko"}, scope(project))
+
+    assert Exception.message(error) =~ "only the default prompt is supported"
 
     other = project_fixture()
 
@@ -192,9 +192,19 @@ defmodule PromptOn.Prompts.UseCaseTest do
     assert loaded.version_count == 2
     assert loaded.latest_version_number == 2
 
-    {:ok, ko} = Prompts.rename_prompt(ko, %{name: "korean"}, scope(project))
-    assert ko.name == "korean"
-    {:ok, _} = Prompts.archive_prompt(ko, scope(project))
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.rename_prompt(default, %{name: "renamed"}, scope(project))
+
+    assert Exception.message(error) =~ "prompt name must remain default"
+
+    ko_id = legacy_prompt_row(project, use_case.id, "ko")
+    {:ok, ko} = Prompts.get_prompt(ko_id, scope(project))
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.rename_prompt(ko, %{name: "korean"}, scope(project))
+
+    assert Exception.message(error) =~ "only the default prompt is supported"
+
     assert {:ok, [%{id: id}]} = Prompts.list_prompts(use_case.id, scope(project))
     assert id == default.id
   end
@@ -248,6 +258,13 @@ defmodule PromptOn.Prompts.UseCaseTest do
     # clearing the draft returns to the "latest version is the effective draft" state.
     assert {:ok, cleared} = Prompts.save_prompt_draft(reloaded, %{draft: nil}, scope(project))
     assert cleared.draft == nil
+
+    {:ok, archived} = Prompts.archive_prompt(cleared, scope(project))
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.save_prompt_draft(archived, %{draft: draft}, scope(project))
+
+    assert Exception.message(error) =~ "archived prompts cannot be changed"
   end
 
   test "prompt draft: text_template drafts are rejected for active chat prompts" do

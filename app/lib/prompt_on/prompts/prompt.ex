@@ -1,9 +1,9 @@
 defmodule PromptOn.Prompts.Prompt do
   @moduledoc """
-  A **named prompt document** under a use case: one independently evolving version numbering
-  (plan.md §5.5, ADR 0007). There can be more than one, such as per-language prompts (`"default"`,
-  `"ko"`), so this layer exists; mixing them into one numbering would make diffs and history
-  meaningless. There is no "head pointer" (the `latest_version_number` aggregate is enough).
+  A prompt document under a use case: one independently evolving version numbering (plan.md §5.5,
+  ADR 0007). Active authoring is now limited to the canonical `"default"` prompt. Historical
+  non-default rows remain readable for old logs and migration/rollback consolidation. There is no
+  "head pointer" (the `latest_version_number` aggregate is enough).
 
   ## Mutable draft + immutable versions (ADR 0007 revised 2026-09-01)
 
@@ -26,15 +26,21 @@ defmodule PromptOn.Prompts.Prompt do
     defaults [:read]
 
     create :open do
-      description "Opens a new prompt under a use case. `(use_case, name)` is unique."
+      description """
+      Opens the canonical default prompt under a use case. Historical non-default prompt rows remain
+      readable, but active authoring cannot open new non-default prompts.
+      """
+
       accept [:use_case_id, :name, :description]
       validate PromptOn.Prompts.Prompt.Validations.ChatParent
+      validate PromptOn.Prompts.Prompt.Validations.DefaultOnly
     end
 
     update :rename do
       require_atomic? false
       accept [:name, :description]
       validate PromptOn.Prompts.Prompt.Validations.ChatParent
+      validate PromptOn.Prompts.Prompt.Validations.DefaultOnly
     end
 
     update :save_draft do
@@ -47,6 +53,7 @@ defmodule PromptOn.Prompts.Prompt do
       require_atomic? false
       accept [:draft]
       validate PromptOn.Prompts.Prompt.Validations.ChatParent
+      validate PromptOn.Prompts.Prompt.Validations.DefaultOnly
       validate PromptOn.Prompts.Prompt.Validations.ChatDraft
     end
 
@@ -56,12 +63,12 @@ defmodule PromptOn.Prompts.Prompt do
     end
 
     read :active do
-      filter expr(is_nil(archived_at))
+      filter expr(is_nil(archived_at) and name == "default")
     end
 
     read :for_use_case do
       argument :use_case_id, :uuid, allow_nil?: false
-      filter expr(use_case_id == ^arg(:use_case_id) and is_nil(archived_at))
+      filter expr(use_case_id == ^arg(:use_case_id) and is_nil(archived_at) and name == "default")
     end
   end
 

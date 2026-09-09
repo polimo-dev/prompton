@@ -12,7 +12,7 @@ defmodule PromptOn.HeyDiaryImport.Plan do
   | `environment` | target environment slug |
   | `models` | `%{provider, model_id, display_name, metadata, provider_options, source_id}` |
   | `use_cases` | `%{key, name, kind, input_schema, default_params, description}` |
-  | `prompts` | `%{use_case_key, name, description, language}` (`name` = `"default"` or the language) |
+  | `prompts` | `%{use_case_key, name, description, language}` (`name` = `"default"`) |
   | `prompt_versions` | `%{use_case_key, prompt_name, engine, messages, text_template, commit_message}` |
   | `deployments` | **one** per use case — `%{use_case_key, model, params, provider_options, prompt_names, description}` |
   | `warnings` | list of warning tuples (`t:warning/0`) |
@@ -20,8 +20,7 @@ defmodule PromptOn.HeyDiaryImport.Plan do
   ## A deployment = one pin (not rules)
 
   One revision is **one model** (`model` `{provider, model_id}` + `params` + `provider_options`)
-  and **one version pin per prompt name** (`prompt_names` — Apply turns it into
-  `%{name => version_id}`). There are no conditions, rules, targets, weights or user-selectable
+  and **one version pin** (`prompt_names` — Apply turns it into `%{name => version_id}`). There are no conditions, rules, targets, weights or user-selectable
   lists.
 
   So two things HeyDiary used to express **collapse**:
@@ -35,8 +34,9 @@ defmodule PromptOn.HeyDiaryImport.Plan do
      is also a single map per revision. The common row's temperature is used and
      `{:language_temperatures_flattened, …}` reports it.
 
-  Language itself does not collapse — every language has a Prompt (`default`/`ko` …) and the
-  revision pins **all** of them. At request time the app picks with `prompt: "ko"`.
+  Language itself moves into the prompt template — every imported use case has one `default` Prompt,
+  and the system message branches on the optional `language` variable to reproduce HeyDiary
+  language-row fallback.
 
   ## Warnings
 
@@ -46,8 +46,8 @@ defmodule PromptOn.HeyDiaryImport.Plan do
     differed per language. They collapse to the common row's single temperature. **Needs
     confirmation**.
   - `{:no_default_prompt, use_case_key, languages}` — only language rows exist and there is no
-    common (NULL) row, so there is no `default` prompt. A request arriving without a name (`prompt`
-    unset) is `unknown_prompt` → 404. **Needs confirmation**.
+    common (NULL) row, so the single `default` prompt has no fallback branch for unsupported or
+    missing `language`. **Needs confirmation**.
   - `{:no_free_default, use_case_key, plan}` — no `is_default` row at the free level, so the
     `plan`-level default row is used as the pin. Free users got "no rows" in HeyDiary but now
     resolve. **Needs confirmation**.
@@ -132,8 +132,8 @@ defmodule PromptOn.HeyDiaryImport.Plan do
 
   def describe_warning({:no_default_prompt, key, languages}),
     do:
-      "#{key}: language rows #{inspect(languages)} exist but no NULL (common) row — there is no \"default\" " <>
-        "prompt, so a request without an explicit prompt name resolves to unknown_prompt (404)"
+      "#{key}: language rows #{inspect(languages)} exist but no NULL (common) row — the default prompt " <>
+        "has no fallback branch for unsupported or missing language"
 
   def describe_warning({:no_free_default, key, plan}),
     do:

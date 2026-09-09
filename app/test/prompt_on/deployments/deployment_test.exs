@@ -1,6 +1,6 @@
 defmodule PromptOn.Deployments.DeploymentTest do
   @moduledoc """
-  A Deployment is a **pin** (ADR 0007 revised 2026-09-01): one model + one version per prompt name.
+  A Deployment is a **pin** (ADR 0007 revised 2026-09-01): one model + one default prompt version.
   There are no rules, conditions, targets, weights or A/B. What to verify: revision numbering, pin
   consistency, rollback and the snapshot shape.
   """
@@ -158,47 +158,25 @@ defmodule PromptOn.Deployments.DeploymentTest do
   end
 
   describe "commit validations — prompt pins" do
-    test "a chat use case must pin at least the default prompt", ctx do
-      assert errors(commit(ctx, %{prompt_pins: %{}})) =~ "at least one prompt must be pinned"
-    end
+    test "a chat use case must pin exactly the default prompt", ctx do
+      assert errors(commit(ctx, %{prompt_pins: %{}})) =~ "default prompt must be pinned"
 
-    test "the default prompt must be pinned when it exists", ctx do
-      {:ok, ko} =
-        PromptOn.Prompts.open_prompt(
-          %{use_case_id: ctx.use_case.id, name: "ko"},
-          ctx.opts
-        )
+      assert errors(commit(ctx, %{prompt_pins: %{"ko" => ctx.version.id}})) =~
+               ~s|prompt_pins must contain only the "default" prompt|
 
-      ko_version = prompt_version_fixture(ko)
-
-      assert errors(commit(ctx, %{prompt_pins: %{"ko" => ko_version.id}})) =~
-               ~s|the "default" prompt must be pinned|
-
-      assert commit!(ctx, %{
-               prompt_pins: %{"default" => ctx.version.id, "ko" => ko_version.id}
-             }).prompt_pins == %{"default" => ctx.version.id, "ko" => ko_version.id}
-    end
-
-    test "an unknown prompt name is rejected", ctx do
       assert errors(
                commit(ctx, %{
                  prompt_pins: %{"default" => ctx.version.id, "ja" => ctx.version.id}
                })
-             ) =~ ~s|no prompt named "ja"|
+             ) =~ ~s|prompt_pins must contain only the "default" prompt|
     end
 
-    test "the pinned version must belong to the named prompt", ctx do
-      {:ok, ko} =
-        PromptOn.Prompts.open_prompt(%{use_case_id: ctx.use_case.id, name: "ko"}, ctx.opts)
+    test "the pinned version must belong to the default prompt", ctx do
+      other = use_case_fixture(ctx.project, %{key: "chat_response"})
+      other_version = prompt_version_fixture(other)
 
-      _ko_version = prompt_version_fixture(ko)
-
-      # an attempt to pin "ko" to a version of the default prompt
-      assert errors(
-               commit(ctx, %{
-                 prompt_pins: %{"default" => ctx.version.id, "ko" => ctx.version.id}
-               })
-             ) =~ ~s|does not belong to prompt "ko"|
+      assert errors(commit(ctx, %{prompt_pins: %{"default" => other_version.id}})) =~
+               ~s|does not belong to prompt "default"|
     end
 
     test "a version from another project is rejected", ctx do
@@ -420,25 +398,13 @@ defmodule PromptOn.Deployments.DeploymentTest do
              }
     end
 
-    test "selects a named prompt and errors on an unpinned name", ctx do
-      {:ok, ko} =
-        PromptOn.Prompts.open_prompt(%{use_case_id: ctx.use_case.id, name: "ko"}, ctx.opts)
-
-      ko_version = prompt_version_fixture(ko)
-
-      d =
-        commit!(ctx, %{prompt_pins: %{"default" => ctx.version.id, "ko" => ko_version.id}})
-
-      assert {:ok, resolution} =
-               Deployments.resolve_deployment(d.id, %{prompt: "ko"}, ctx.opts)
-
-      assert resolution.prompt == "ko"
-      assert resolution.prompt_version_id == ko_version.id
+    test "rejects explicit non-default prompt selection", ctx do
+      d = commit!(ctx)
 
       assert {:error, %Ash.Error.Invalid{} = error} =
-               Deployments.resolve_deployment(d.id, %{prompt: "ja"}, ctx.opts)
+               Deployments.resolve_deployment(d.id, %{prompt: "ko"}, ctx.opts)
 
-      assert Exception.message(error) =~ "pins no prompt"
+      assert Exception.message(error) =~ "only the default prompt is supported"
     end
   end
 

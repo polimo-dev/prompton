@@ -39,9 +39,9 @@ defmodule PromptOn.HeyDiaryImport.Report do
         end)
       ),
       "",
-      "Deployments (#{counts.deployments}; #{counts.pins} pinned prompts — one model each, no rules)",
+      "Deployments (#{counts.deployments}; #{counts.pins} pinned prompt(s) — one model each, no rules)",
       table(
-        ["use case", "model", "params", "provider_options", "pinned prompts"],
+        ["use case", "model", "params", "provider_options", "pinned prompt(s)"],
         Enum.map(plan.deployments, fn d ->
           {_provider, model_id} = d.model
 
@@ -89,7 +89,7 @@ defmodule PromptOn.HeyDiaryImport.Report do
         if(summary.reused_project?, do: " [existing project]", else: " [new project]"),
       "environment #{summary.environment} (#{summary.environment_id})",
       "models #{c.models} · use cases #{c.use_cases} · prompts #{c.prompts} · prompt versions #{c.prompt_versions} · " <>
-        "deployments #{c.deployments} (#{c.pins} pinned prompts)"
+        "deployments #{c.deployments} (#{c.pins} pinned prompt(s))"
     ]
     |> Enum.join("\n")
   end

@@ -1,19 +1,20 @@
 defmodule PromptOnWeb.API.V1.Management.PromptController do
   @moduledoc """
-  `/api/v1/orgs/:org/projects/:project/use-cases/:key/prompts` - named prompt documents and their
-  **immutable versions**.
+  `/api/v1/orgs/:org/projects/:project/use-cases/:key/prompt/versions` - commits immutable
+  versions of the canonical default prompt.
 
   | Request | Domain action |
   |---|---|
-  | `POST /prompts` | `Prompt.:open` |
-  | `POST /prompts/:name/versions` | `PromptVersion.:commit` |
+  | `POST /prompt/versions` | `PromptVersion.:commit` for `default` |
+  | `POST /prompts/default/versions` | compatibility alias for `POST /prompt/versions` |
+  | `POST /prompts` / non-default names | rejected |
 
-  ## The name is the selection axis
+  ## One authorable prompt
 
-  One use case can have several prompts (`default`, `ko`), and the `prompt` value the app sends
-  with its request is exactly this **name** (ADR 0007 revision - this is all there is to language
-  branching). `:chat`/`:text` use cases are born with one `default` prompt when they are defined,
-  so what gets opened here is usually the second name onward.
+  Active management writes only the `default` prompt. The plural and name-based routes remain for
+  compatibility: they either accept the `default` alias or return an explicit error for
+  non-default prompt names. Historical non-default prompt rows remain readable for old logs and
+  consolidation, but new versions cannot be committed for them.
 
   ## A version is immutable from birth
 
@@ -47,15 +48,12 @@ defmodule PromptOnWeb.API.V1.Management.PromptController do
   def create(conn, params) do
     with {:ok, project} <- Scope.fetch_project(conn, params),
          scope = Scope.scope(conn, project),
-         {:ok, use_case} <- Scope.fetch_use_case(scope, params),
-         {:ok, name} <- Params.required_string(params, "name"),
-         {:ok, description} <- Params.optional_string(params, "description"),
-         :ok <- ensure_available(scope, use_case, name),
-         attrs = %{use_case_id: use_case.id, name: name, description: description},
-         {:ok, prompt} <- Prompts.open_prompt(attrs, scope) do
-      conn |> put_status(:created) |> json(JSON.prompt(prompt))
+         {:ok, _use_case} <- Scope.fetch_use_case(scope, params) do
+      {:error, {:invalid_request, "use cases support only the default prompt"}}
     end
   end
+
+  def commit_default(conn, params), do: commit(conn, Map.put(params, "name", "default"))
 
   def commit(conn, params) do
     with {:ok, project} <- Scope.fetch_project(conn, params),
@@ -72,11 +70,16 @@ defmodule PromptOnWeb.API.V1.Management.PromptController do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Finds a prompt by name within a use case. `Prompt` has no lookup-by-name action - a use case has
-  only a handful of prompts, so it is picked from the list.
+  Finds the canonical default prompt within a use case. Non-default names are rejected before the
+  lookup because active authoring no longer has prompt selection.
   """
   @spec fetch_prompt(keyword(), PromptOn.Prompts.UseCase.t(), map()) ::
           {:ok, PromptOn.Prompts.Prompt.t()} | {:error, term()}
+  def fetch_prompt(_scope, _use_case, %{"name" => name})
+      when is_binary(name) and name != "default" do
+    {:error, {:invalid_request, ~s|only the default prompt is supported|, %{"prompt" => name}}}
+  end
+
   def fetch_prompt(scope, use_case, %{"name" => name}) when is_binary(name) and name != "" do
     case find_prompt(scope, use_case, name) do
       nil ->
@@ -103,18 +106,6 @@ defmodule PromptOnWeb.API.V1.Management.PromptController do
     case Prompts.list_prompts(use_case.id, scope) do
       {:ok, prompts} -> prompts |> Enum.map(& &1.name) |> Enum.sort()
       {:error, _error} -> []
-    end
-  end
-
-  defp ensure_available(scope, use_case, name) do
-    case find_prompt(scope, use_case, name) do
-      nil ->
-        :ok
-
-      prompt ->
-        {:error,
-         {:conflict, "a prompt named #{name} already exists in this use case",
-          %{"prompt" => JSON.prompt(prompt)}}}
     end
   end
 end

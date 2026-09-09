@@ -13,9 +13,14 @@ defmodule PromptOn.ReleaseTasks do
   @doc "Runs all Repo migrations (once at container start; assumes a single node)."
   def migrate do
     load_app()
+    {:ok, _} = Application.ensure_all_started(:ash_postgres)
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(repo, fn repo ->
+          Ecto.Migrator.run(repo, :up, all: true)
+          PromptOn.PromptConsolidation.run!()
+        end)
     end
 
     :ok

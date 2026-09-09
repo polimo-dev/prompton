@@ -10,15 +10,16 @@ defmodule PromptOn.Deployments.Deployment do
     numbering, history and rollback properties of ADR 0002).
   - **A revision is a pin, not a router**: rules, conditions, targets, weights, A/B and
     context-dimension routing are all gone. One revision is **one** model (`model_id` + `params` +
-    `provider_options`) plus a map that pins this use case's prompts by name
-    (`prompt_pins`: `%{"default" => version_id, "ko" => version_id}`), and nothing else.
-  - **Selection at request time is by prompt name only**: when the app sends `prompt: "ko"` that pin
-    is used (default `"default"`). This is now all there is to language branching.
+    `provider_options`) plus the canonical default prompt pin
+    (`prompt_pins`: `%{"default" => version_id}`), and nothing else.
+  - **Selection at request time is gone**: apps either omit `prompt` or pass `"default"` for
+    compatibility. Non-default names are rejected instead of being silently ignored.
   - The `:commit` validations (`Validations.TargetInTenant` + `Validations.Committable`) replace the
     v1 activation gate: the target UseCase/Environment must be in the same tenant and not archived,
-    the model must be in the same project, `active` and not archived, each pin name must be a live
-    Prompt name of this use case and its version must belong to that Prompt, `kind :embedding` must
-    have empty pins, and every other kind must pin at least the `default` prompt.
+    the model must be in the same project, `active` and not archived, and `prompt_pins` must contain
+    only the live default prompt with a version that belongs to it. Historical multi-prompt or
+    non-default pins are preserved as rows, but they must be consolidated before they can be rolled
+    back into an active revision.
   - The internal `:resolve` generic action delegates to the same `PromptOnSDK.Resolver` the SDK
     uses (after assembling the deployed use-case document).
   - An ApiKey reads only the Deployments of its own project (tenant-pinned). The environment is
@@ -122,9 +123,8 @@ defmodule PromptOn.Deployments.Deployment do
       description """
       Assembles the environment use-case document with the `deployment_id` revision slotted into the
       live position and resolves it with `PromptOnSDK.Resolver.resolve/3` (the same code as the
-      SDK). Passing a past revision is a simulation. `prompt` is the prompt name to select (default
-      `"default"`; ignored for `kind :embedding`). The result is a `%PromptOnSDK.UseCase{}`
-      unpacked into a map.
+      SDK). Passing a past revision is a simulation. `prompt` is optional for compatibility and
+      must be omitted or `"default"`. The result is a `%PromptOnSDK.UseCase{}` unpacked into a map.
       """
 
       argument :deployment_id, :uuid, allow_nil?: false
@@ -202,8 +202,8 @@ defmodule PromptOn.Deployments.Deployment do
 
     attribute :prompt_pins, :map do
       description """
-      Prompt **name -> PromptVersion id**. The name is what the app selects with `prompt: "ko"`.
-      `kind :embedding` use cases have an empty map (there is no prompt).
+      Prompt **name -> PromptVersion id**. Active revisions contain only the canonical
+      `"default"` pin; the map shape is retained for schema-v4 compatibility and historical rows.
       """
 
       allow_nil? false
@@ -254,6 +254,28 @@ defmodule PromptOn.Deployments.Deployment do
   end
 
   def normalize_pins(_pins), do: %{}
+
+  @doc "True when a deployment pins the canonical single prompt and nothing else."
+  @spec default_prompt_pin?(t() | map()) :: boolean()
+  def default_prompt_pin?(%__MODULE__{prompt_pins: pins}), do: default_prompt_pin?(pins)
+
+  def default_prompt_pin?(pins) when is_map(pins) do
+    case normalize_pins(pins) do
+      %{"default" => version_id} = normalized when map_size(normalized) == 1 ->
+        is_binary(version_id) and version_id != ""
+
+      _other ->
+        false
+    end
+  end
+
+  def default_prompt_pin?(_pins), do: false
+
+  @doc "The single prompt version id accepted by the management API."
+  @spec prompt_version_id(t() | map()) :: String.t() | nil
+  def prompt_version_id(%__MODULE__{prompt_pins: pins}), do: prompt_version_id(pins)
+  def prompt_version_id(pins) when is_map(pins), do: Map.get(normalize_pins(pins), "default")
+  def prompt_version_id(_pins), do: nil
 
   @doc "The schema-v4 use-case document's `deployments[use_case_key]` entry."
   @spec to_snapshot_map(t()) :: map()

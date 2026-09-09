@@ -181,6 +181,7 @@ defmodule PromptOnWeb.Router do
         patch "/use-cases/:key", UseCaseController, :update
 
         post "/use-cases/:key/prompts", PromptController, :create
+        post "/use-cases/:key/prompt/versions", PromptController, :commit_default
         post "/use-cases/:key/prompts/:name/versions", PromptController, :commit
 
         # `/rollback` is an action, not a revision-number slot, so its path does not collide with

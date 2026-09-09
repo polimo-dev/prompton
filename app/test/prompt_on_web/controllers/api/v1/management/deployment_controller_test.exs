@@ -38,7 +38,7 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
   end
 
   describe "POST /deployments" do
-    test "pins the latest committed version of every prompt by default", %{
+    test "pins the latest committed default prompt version by default", %{
       raw: raw,
       model: model,
       version: version
@@ -50,6 +50,7 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
       assert body["model_id"] == model.id
       assert body["model"] == "anthropic/claude-sonnet-4"
       assert body["prompt_pins"] == %{"default" => version.id}
+      assert body["prompt_version_id"] == version.id
       assert body["params"] == %{}
     end
 
@@ -68,7 +69,7 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
       assert second["revision"] == 2
     end
 
-    test "takes explicit pins, params, provider options and an environment", %{
+    test "takes prompt_version_id, params, provider options and an environment", %{
       raw: raw,
       model: model,
       version: version
@@ -78,7 +79,7 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
           api_post(raw, @path, %{
             environment: "staging",
             model_id: model.id,
-            prompt_pins: %{"default" => version.id},
+            prompt_version_id: version.id,
             params: %{"temperature" => 0.4},
             provider_options: %{"allow_fallbacks" => false}
           }),
@@ -87,8 +88,65 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
 
       assert body["environment"] == "staging"
       assert body["revision"] == 1
+      assert body["prompt_pins"] == %{"default" => version.id}
+      assert body["prompt_version_id"] == version.id
       assert body["params"] == %{"temperature" => 0.4}
       assert body["provider_options"] == %{"allow_fallbacks" => false}
+    end
+
+    test "accepts default-only prompt_pins for v4 compatibility", %{
+      raw: raw,
+      model: model,
+      version: version
+    } do
+      body =
+        json_response(
+          api_post(raw, @path, %{model_id: model.id, prompt_pins: %{"default" => version.id}}),
+          201
+        )
+
+      assert body["prompt_pins"] == %{"default" => version.id}
+      assert body["prompt_version_id"] == version.id
+    end
+
+    test "400 when prompt_version_id is paired with incompatible prompt_pins", %{
+      raw: raw,
+      model: model,
+      version: version
+    } do
+      assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
+               json_response(
+                 api_post(raw, @path, %{
+                   model_id: model.id,
+                   prompt_version_id: version.id,
+                   prompt_pins: %{"default" => Ash.UUIDv7.generate()}
+                 }),
+                 400
+               )
+
+      assert message =~ "must match"
+
+      assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
+               json_response(
+                 api_post(raw, @path, %{
+                   model_id: model.id,
+                   prompt_version_id: version.id,
+                   prompt_pins: %{"default" => version.id, "ko" => version.id}
+                 }),
+                 400
+               )
+
+      assert message =~ "only"
+    end
+
+    test "400 when prompt_version_id has the wrong shape", %{raw: raw, model: model} do
+      assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
+               json_response(
+                 api_post(raw, @path, %{model_id: model.id, prompt_version_id: 1}),
+                 400
+               )
+
+      assert message =~ "prompt_version_id"
     end
 
     test "400 without a model", %{raw: raw} do
@@ -131,17 +189,20 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
       assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
                json_response(conn, 400)
 
-      assert message =~ "no committed prompt version"
+      assert message =~ "no committed default prompt version"
     end
 
-    test "400 when a pin names a prompt that does not exist", %{
+    test "400 when prompt_pins names any prompt other than default", %{
       raw: raw,
       model: model,
       version: version
     } do
       conn = api_post(raw, @path, %{model_id: model.id, prompt_pins: %{"ja" => version.id}})
 
-      assert %{"error" => %{"code" => "invalid_request"}} = json_response(conn, 400)
+      assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
+               json_response(conn, 400)
+
+      assert message =~ "only"
     end
 
     test "400 when prompt_pins is not an object of strings", %{raw: raw, model: model} do

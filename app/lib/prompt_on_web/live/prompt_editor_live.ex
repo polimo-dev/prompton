@@ -39,7 +39,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   | Parameter | Meaning |
   |---|---|
   | `?tab=editor\\|arena\\|deployments` | Tab (default editor; unknown values are editor too) |
-  | `?prompt=<name>` | Name of the prompt being edited (missing or unknown name = default prompt) |
   | `?v=<number>` | **Read-only preview** of that version (absent = draft editing, the default) |
   | `?versions=1` | The version list drawer is open |
   | `?diff=<number>` | Diff mode comparing this version with the selected version |
@@ -47,7 +46,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   | `?msort=relevance\\|cheapest\\|newest\\|context` | Picker sort (default relevance; unknown values too) |
   | `?deploy=1` | The Deploy modal is open |
   | `?ai=<message-index>` | The AI draft modal for that message is open |
-  | `?new_prompt=1` | The "new prompt" modal is open |
   | `?var=<name>` | That declared variable row is expanded |
   | `?full=1` | The arena is open as a **full-screen overlay** (Arena tab only) |
   | `?env=<slug>` `?rev=<n>` `?confirm=<id>` | Deployments tab state (environment, revision viewed, rollback confirm) |
@@ -77,7 +75,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     equals the latest commit**; if the draft has been edited it is `nil` (a draft is not a version,
     so there is no number to point at).
   - Editing the prompt does not clear the history (it is a log, not a session); a quiet one-liner
-    merely announces that "the next turns go out with the new prompt". The only things that delete
+    merely announces that "the next turns go out with the updated prompt". The only things that delete
     are the per-cell clear and the global Clear history.
 
   ## The draft auto-saves; Deploy mints versions (ADR 0007 revision 2026-09-01)
@@ -94,12 +92,9 @@ defmodule PromptOnWeb.PromptEditorLive do
   - **Deploy**: choosing "Current draft" in the modal mints v(N+1) via
     `Prompts.commit_prompt_version/2` **only if** the draft differs from the latest commit (with the
     optional commit message, or `"Deployed to <env>"` when blank); if they are the same, that
-    version is reused. Choosing a past version mints nothing. Then **one pin** is committed to that
-    environment (ADR 0007 revision 2026-09-01): a map pinning the chosen model plus **every prompt**
-    of this use case to its own latest committed version (only the prompt currently being edited
-    gets the version chosen in the modal). There are no rules, conditions, targets, or weights; the
-    only selection axis at request time is the prompt name. The modal lists exactly what it will
-    pin.
+    version is reused. Choosing a past version mints nothing. Then the default prompt version and
+    chosen model are committed to that environment. There are no rules, conditions, targets, or
+    weights.
   """
   use PromptOnWeb, :live_view
 
@@ -124,7 +119,7 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   @chat_roles ~w(system user assistant)
   @draft_option "draft"
-  @prompt_changed_notice "Prompt changed — the next turns use the new prompt (history is kept)."
+  @prompt_changed_notice "Prompt changed — the next turns use the updated prompt (history is kept)."
   @picker_limit 50
   @model_sorts ~w(relevance cheapest newest context)
 
@@ -212,9 +207,6 @@ defmodule PromptOnWeb.PromptEditorLive do
            deploy_model_id: nil,
            deploy_version_id: nil,
            deploy_message: "",
-           new_prompt?: false,
-           prompt_name: "",
-           prompt_description: "",
            var_types: @var_types,
            expanded_var: nil,
            new_variable: "",
@@ -246,14 +238,13 @@ defmodule PromptOnWeb.PromptEditorLive do
     {:noreply,
      socket
      |> assign(:tab, tab_param(params))
-     |> apply_prompt(params["prompt"])
+     |> apply_prompt()
      |> apply_selection(params["v"])
      |> ensure_deployments()
      |> apply_diff(params["diff"])
      |> apply_flag(:versions_open?, params["versions"])
      |> apply_flag(:arena_full?, params["full"])
      |> apply_ai(params["ai"])
-     |> apply_new_prompt(params["new_prompt"])
      |> apply_variable(params["var"])
      |> apply_picker(params["models"], params["msort"])
      |> apply_deploy(params["deploy"])
@@ -309,26 +300,24 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   defp default_prompt(_prompts), do: nil
 
-  # The list holds only unarchived prompts, with the default prompt first and the rest by name.
+  # The editor owns one active prompt per use case. Old named prompt rows may still exist in the
+  # database for history, but the UI ignores them and edits/deploys only `default`.
   defp load_prompts(socket) do
     opts = Keyword.put(scope(socket), :load, [:version_count])
 
     prompts =
       case Prompts.list_prompts(socket.assigns.use_case.id, opts) do
-        {:ok, list} -> Enum.sort_by(list, &{&1.name != "default", &1.name})
+        {:ok, list} -> list |> default_prompt() |> List.wrap()
         {:error, _error} -> []
       end
 
     assign(socket, prompts: prompts, prompt_versions: nil)
   end
 
-  # `?prompt=` selects the prompt being edited. When the target changes, the version list,
-  # selection, diff, AI modal, and edit buffer are all reset: numbering runs separately per prompt,
-  # so `?v=2` means a different version. Each prompt has its own draft, so the buffer restarts from
-  # that prompt's draft.
-  defp apply_prompt(socket, raw) do
-    prompts = socket.assigns.prompts
-    target = find_prompt(prompts, raw) || default_prompt(prompts)
+  # The use case has one active prompt. Forged `?prompt=` parameters are ignored so old named
+  # prompt URLs land on the default prompt instead of reviving prompt selection.
+  defp apply_prompt(socket) do
+    target = default_prompt(socket.assigns.prompts)
 
     if current_prompt_id(target) == current_prompt_id(socket.assigns.prompt) do
       socket
@@ -342,37 +331,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       |> assign_page_title()
     end
   end
-
-  defp find_prompt(prompts, name) when is_binary(name),
-    do: Enum.find(prompts, &(&1.name == name))
-
-  defp find_prompt(_prompts, _name), do: nil
-
-  # The name check runs **before** the action: an identity violation surfaces as
-  # `use_case_id: has already been taken`, which cannot say "ko already exists". The action is still
-  # the last gate (races).
-  defp open_prompt(_socket, "", _description),
-    do: {:error, ErrorText.message(invalid_name("is required"))}
-
-  defp open_prompt(socket, name, description) do
-    if Enum.any?(socket.assigns.prompts, &(&1.name == name)) do
-      {:error, ErrorText.message(invalid_name("has already been taken"))}
-    else
-      attrs = %{
-        use_case_id: socket.assigns.use_case.id,
-        name: name,
-        description: description
-      }
-
-      case Prompts.open_prompt(attrs, scope(socket)) do
-        {:ok, prompt} -> {:ok, prompt}
-        {:error, error} -> {:error, ErrorText.message(error)}
-      end
-    end
-  end
-
-  defp invalid_name(message),
-    do: Ash.Error.Changes.InvalidAttribute.exception(field: :name, message: message)
 
   defp current_prompt_id(%{id: id}), do: id
   defp current_prompt_id(_prompt), do: nil
@@ -427,7 +385,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   # The version a deployment points at may belong to another prompt (default deployed while
-  # `?prompt=ko` is open). Numbers already in the current list are used first and only unknown ids
+  # a historical named prompt). Numbers already in the current list are used first and only unknown ids
   # are fetched one by one; the cache survives switching prompts.
   defp assign_version_numbers(socket) do
     known =
@@ -510,16 +468,6 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   # The modal inputs (name, description) are not put in the URL: they are a form being typed, not
   # state to share.
-  defp apply_new_prompt(socket, raw) when is_binary(raw) and raw != "" do
-    if socket.assigns.new_prompt?,
-      do: socket,
-      else: assign(socket, new_prompt?: true, prompt_name: "", prompt_description: "")
-  end
-
-  defp apply_new_prompt(socket, _raw), do: assign(socket, :new_prompt?, false)
-
-  # Only the expanded variable row is held by the URL: form recovery can restore description/example
-  # only while that row is alive.
   defp apply_variable(socket, raw) when is_binary(raw) and raw != "",
     do: assign(socket, :expanded_var, raw)
 
@@ -550,7 +498,7 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   # For the Deploy modal too, the URL holds only the fact that it is open. The defaults are
   # production + **the current draft** + the arena's first model. The modal lists exactly "what will
-  # be pinned", so the latest version per prompt is read here.
+  # be pinned", so the current prompt version is read here.
   defp apply_deploy(socket, raw) when is_binary(raw) and raw != "" do
     if socket.assigns.deploy? do
       socket
@@ -1269,38 +1217,11 @@ defmodule PromptOnWeb.PromptEditorLive do
     end
   end
 
-  def handle_event("prompt_change", %{"prompt" => params}, socket) do
-    {:noreply,
-     assign(socket,
-       prompt_name: Map.get(params, "name", socket.assigns.prompt_name),
-       prompt_description: Map.get(params, "description", socket.assigns.prompt_description)
-     )}
-  end
+  def handle_event("prompt_change", _params, socket), do: {:noreply, socket}
 
-  # On rejection, only a flash is shown and the modal stays (`?new_prompt=1` remains in the URL).
-  def handle_event("create_prompt", %{"prompt" => params}, socket) do
-    name = String.trim(Map.get(params, "name") || "")
-    description = blank_to_nil(Map.get(params, "description") || "")
-
-    case open_prompt(socket, name, description) do
-      {:ok, prompt} ->
-        socket = socket |> load_prompts() |> assign(prompt_name: "", prompt_description: "")
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "Prompt #{prompt.name} created — write its first version.")
-         |> push_patch(to: editor_path(socket.assigns, prompt: prompt.name))}
-
-      {:error, message} ->
-        {:noreply,
-         socket
-         |> assign(
-           prompt_name: Map.get(params, "name") || "",
-           prompt_description: Map.get(params, "description") || ""
-         )
-         |> put_flash(:error, message)}
-    end
-  end
+  # Prompt creation is no longer a UI action. A forged LiveView event is ignored so old clients or
+  # hand-written events cannot create named prompts from this screen.
+  def handle_event("create_prompt", _params, socket), do: {:noreply, socket}
 
   # One click = one declaration. It starts as type `string`, optional.
   def handle_event("declare_variable", %{"name" => name}, socket) do
@@ -1803,11 +1724,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   defp deploy_flash(version, deployment, env),
     do: "v#{version.number} created — deployed revision ##{deployment.revision} to #{env.slug}."
 
-  # A revision is **one pin** (ADR 0007 revision 2026-09-01): one chosen model plus a map pinning
-  # this use case's prompts by name. Deploy pins **every committed prompt**: only the prompt being
-  # edited gets the version chosen in the modal (or just minted); the rest get their own latest
-  # version. A prompt with no version at all has nothing to pin and is left out (a request for
-  # that name is a 404, which is how a missed deployment surfaces).
+  # A revision pins the one active prompt (`default`) plus the chosen model.
   defp commit_deployment(socket, env, model, version_id) do
     Deployments.commit_deployment(
       %{
@@ -1821,31 +1738,9 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   @doc false
-  # Name → version id. `current_version_id` is the version to pin for the prompt being edited
-  # (including a minting result).
   @spec deploy_pins(map(), Ash.UUID.t() | nil) :: %{String.t() => Ash.UUID.t()}
-  def deploy_pins(assigns, current_version_id) do
-    current_id = current_prompt_id(assigns.prompt)
-
-    assigns.prompts
-    |> Enum.map(fn prompt ->
-      version_id =
-        if prompt.id == current_id,
-          do: current_version_id,
-          else: latest_version_id(assigns, prompt)
-
-      {prompt.name, version_id}
-    end)
-    |> Enum.reject(fn {_name, version_id} -> is_nil(version_id) end)
-    |> Map.new()
-  end
-
-  defp latest_version_id(assigns, prompt) do
-    case assigns.prompt_versions |> Kernel.||(%{}) |> Map.get(prompt.id) do
-      [%{id: id} | _rest] -> id
-      _none -> nil
-    end
-  end
+  def deploy_pins(_assigns, nil), do: %{}
+  def deploy_pins(_assigns, current_version_id), do: %{"default" => current_version_id}
 
   # ---------------------------------------------------------------------------
   # Arena runs
@@ -2171,7 +2066,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   # The committed version list (newest first) for each prompt of this use case. Two places use it:
-  # pin labels (`version_index`) and **what Deploy will pin** (every prompt's latest version). Not
+  # pin labels (`version_index`) and **what Deploy will pin** (the default prompt version). Not
   # a hot path, so it is read once when needed.
   defp ensure_prompt_versions(%{assigns: %{prompt_versions: nil}} = socket),
     do: load_prompt_versions(socket)
@@ -2332,7 +2227,6 @@ defmodule PromptOnWeb.PromptEditorLive do
     query =
       params
       |> Keyword.put_new(:tab, tab_param_value(assigns))
-      |> Keyword.put_new(:prompt, prompt_param(assigns))
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
     ~p"/#{assigns.org_slug}/#{assigns.project.slug}/use-cases/#{assigns.use_case.key}/prompt?#{query}"
@@ -2340,9 +2234,6 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   defp tab_param_value(%{tab: tab}) when tab in @sticky_tabs, do: tab
   defp tab_param_value(_assigns), do: nil
-
-  defp prompt_param(%{prompt: %{name: name}}) when name != "default", do: name
-  defp prompt_param(_assigns), do: nil
 
   # Deployments tab links. The query is built as a list in **fixed order** (so one screen state
   # never becomes two strings).
@@ -2372,11 +2263,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       assigns
       |> assign(:roles, roles(assigns.use_case))
       |> assign(:draft_patch, editor_path(assigns, []))
-      |> assign(:prompt_rows, prompt_rows(assigns))
-      |> assign(
-        :new_prompt_patch,
-        editor_path(assigns, v: assigns.selected_number, new_prompt: 1)
-      )
       |> assign(:live_versions, live_env_map(assigns))
       |> then(&assign(&1, :version_rows, version_rows(&1)))
       |> assign(:message_rows, message_rows(assigns))
@@ -2467,8 +2353,6 @@ defmodule PromptOnWeb.PromptEditorLive do
           :if={@active_use_case? and @tab == "editor"}
           style="display:flex;flex-direction:column;gap:16px;min-width:0;"
         >
-          <.prompt_switcher :if={@prompts != []} rows={@prompt_rows} new_patch={@new_prompt_patch} />
-
           <DS.empty
             :if={@prompt == nil}
             id="prompt-editor-empty"
@@ -2623,13 +2507,6 @@ defmodule PromptOnWeb.PromptEditorLive do
         error={@ai_error}
         close_patch={@close_patch}
         providers_path={~p"/#{@org_slug}/settings?#{[tab: "providers"]}"}
-      />
-
-      <.new_prompt_modal
-        :if={@active_use_case? and @new_prompt?}
-        name={@prompt_name}
-        description={@prompt_description}
-        close_patch={@close_patch}
       />
 
       <.rollback_modal :if={@active_use_case? and @tab == "deployments" and @dep_confirm} {assigns} />
@@ -2910,23 +2787,12 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   defp version_note(_version), do: ""
 
-  # "What this deployment will pin", as listed by the Deploy modal: every prompt of this use case.
-  # The prompt being edited gets the version chosen in the modal (or the next number to be
-  # minted); the rest get their own latest commit. A prompt with no version at all is plainly
-  # shown as not pinned.
+  # "What this deployment will pin", as listed by the Deploy modal: the one default prompt.
   defp deploy_pin_rows(assigns) do
-    current_id = current_prompt_id(assigns.prompt)
-
-    Enum.map(assigns.prompts, fn prompt ->
-      %{
-        name: prompt.name,
-        version: pin_version_label(assigns, prompt, prompt.id == current_id),
-        current?: prompt.id == current_id
-      }
-    end)
+    [%{version: pin_version_label(assigns)}]
   end
 
-  defp pin_version_label(assigns, _prompt, true) do
+  defp pin_version_label(assigns) do
     cond do
       assigns.deploy_version_id != @draft_option ->
         case Enum.find(assigns.versions, &(&1.id == assigns.deploy_version_id)) do
@@ -2945,22 +2811,16 @@ defmodule PromptOnWeb.PromptEditorLive do
     end
   end
 
-  defp pin_version_label(assigns, prompt, false) do
-    case assigns.prompt_versions |> Kernel.||(%{}) |> Map.get(prompt.id) do
-      [%{number: number} | _rest] -> "v#{number}"
-      _none -> nil
-    end
-  end
-
-  # Ingredients for the Integration section: host, this use case, the selected environment, the
-  # prompt names the deployment pins, and the variable schema.
+  # Ingredients for the Integration section: host, this use case, the selected environment, whether
+  # the default prompt is pinned, and the variable schema.
   defp integration_spec(assigns) do
     %{
       host: integration_host(),
       use_case_key: assigns.use_case.key,
       kind: :chat,
       environment: (assigns.dep_env && assigns.dep_env.slug) || "production",
-      prompts: assigns.dep_revision |> pin_rows(assigns.version_index) |> Enum.map(& &1.name),
+      prompt_pinned?:
+        Map.has_key?((assigns.dep_revision && assigns.dep_revision.prompt_pins) || %{}, "default"),
       variables: List.wrap(assigns.use_case.input_schema)
     }
   end
@@ -2990,39 +2850,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       }
     end)
   end
-
-  # A switch link carries only `?prompt=`: `?v`/`?diff`/`?ai` mean something different per prompt
-  # and must not move along.
-  defp prompt_rows(assigns) do
-    current = current_prompt_id(assigns.prompt)
-
-    assigns.prompts
-    |> Enum.with_index()
-    |> Enum.map(fn {prompt, index} ->
-      %{
-        id: prompt_dom_id(prompt.name, index),
-        name: prompt.name,
-        count: version_count(prompt),
-        active?: prompt.id == current,
-        patch: editor_path(assigns, prompt: switch_param(prompt))
-      }
-    end)
-  end
-
-  defp switch_param(%{name: "default"}), do: nil
-  defp switch_param(%{name: name}), do: name
-
-  # A prompt name is a free-form string and cannot go straight into a DOM id; if only unusable
-  # characters remain, it falls back to the index.
-  defp prompt_dom_id(name, index) do
-    case String.replace(name, ~r/[^A-Za-z0-9_-]+/, "-") do
-      safe when safe in ["", "-"] -> "prompt-#{index}"
-      safe -> "prompt-#{safe}"
-    end
-  end
-
-  defp version_count(%{version_count: count}) when is_integer(count), do: count
-  defp version_count(_prompt), do: nil
 
   # No badges: number, message, time, and a `live` marker only on versions a live deployment
   # points at.

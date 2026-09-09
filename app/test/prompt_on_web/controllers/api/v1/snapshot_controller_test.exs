@@ -50,16 +50,13 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     assert body["schema_version"] == 4
     assert body["environment"] == "production"
 
-    # A revision is a **pin**: one model + one version per prompt name (no rules, no targets).
+    # A revision is a **pin**: one model + one default prompt version (no rules, no targets).
     diary = body["deployments"]["diary_generation"]
     assert diary["id"] == hd.deployments.diary.id
     assert diary["revision"] == 1
     assert diary["model_id"] == hd.models.sonnet.id
 
-    assert diary["prompt_pins"] == %{
-             "default" => hd.prompt_versions.diary.id,
-             "ko" => hd.prompt_versions.diary_ko.id
-           }
+    assert diary["prompt_pins"] == %{"default" => hd.prompt_versions.diary.id}
 
     refute Map.has_key?(diary, "rules")
     refute Map.has_key?(body, "dimensions")

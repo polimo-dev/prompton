@@ -2,11 +2,13 @@ defmodule Mix.Tasks.Prompton.ExportHeydiaryTables do
   @shortdoc "Live use-case document → HeyDiary table UPSERT SQL (rollback, lossy)"
 
   @moduledoc """
-      mix prompton.export_heydiary_tables --org <org slug> --project heydiary --env production --out heydiary_tables.sql
-      mix prompton.export_heydiary_tables --user <email> --project heydiary --env production
+      mix prompton.export_heydiary_tables --dump heydiary_dump.json --org <org slug> --project heydiary --env production --out heydiary_tables.sql
+      mix prompton.export_heydiary_tables --dump heydiary_dump.json --user <email> --project heydiary --env production
 
   Builds HeyDiary table UPSERT SQL (`PromptOn.HeyDiaryImport.Export`) from the project/environment's
-  **schema-v4 use-case document** (`PromptOn.Projects.config_snapshot` — every live Deployment).
+  **schema-v4 use-case document** (`PromptOn.Projects.config_snapshot` — every live Deployment)
+  plus the original HeyDiary dump, which supplies the language rows to regenerate from the single
+  PromptOn prompt.
   When, during the
   parallel-run period, edits happened only in PromptOn and you roll back to the HeyDiary DB path,
   bring the tables up to date with `psql -f heydiary_tables.sql`.
@@ -16,22 +18,31 @@ defmodule Mix.Tasks.Prompton.ExportHeydiaryTables do
   stamped as a comment at the top of the generated SQL. See the `PromptOn.HeyDiaryImport.Export`
   moduledoc for details.
 
-  Options: exactly one of `--org SLUG` (team organization) or `--user EMAIL` (personal
-  organization) is required; `--project` (default `heydiary`), `--env` (default `production`),
-  `--out` (stdout when omitted).
+  Options: `--dump PATH` is required to preserve language-specific `ai_tasks` rows; exactly one of
+  `--org SLUG` (team organization) or `--user EMAIL` (personal organization) is required;
+  `--project` (default `heydiary`), `--env` (default `production`), `--out` (stdout when omitted).
   """
 
   use Mix.Task
 
-  alias PromptOn.HeyDiaryImport.{Export, TargetOrg}
+  alias PromptOn.HeyDiaryImport.{Dump, Export, TargetOrg}
 
-  @switches [org: :string, user: :string, project: :string, env: :string, out: :string]
+  @switches [
+    dump: :string,
+    org: :string,
+    user: :string,
+    project: :string,
+    env: :string,
+    out: :string
+  ]
 
   @impl true
   def run(args) do
     {opts, _, invalid} = OptionParser.parse(args, strict: @switches)
     if invalid != [], do: Mix.raise("unknown options: #{inspect(invalid)}")
+    if is_nil(opts[:dump]), do: Mix.raise("--dump is required")
 
+    dump = load_dump!(opts[:dump])
     project_slug = opts[:project] || "heydiary"
     env_slug = opts[:env] || "production"
 
@@ -44,7 +55,7 @@ defmodule Mix.Tasks.Prompton.ExportHeydiaryTables do
          scope = [actor: actor, tenant: project.id],
          {:ok, %{} = env} <- PromptOn.Projects.get_environment_by_slug(env_slug, scope),
          {:ok, %{map: map}} <- PromptOn.Projects.config_snapshot(env.id, scope) do
-      sql = Export.sql(map)
+      sql = Export.sql(map, dump)
 
       case opts[:out] do
         nil ->
@@ -60,6 +71,13 @@ defmodule Mix.Tasks.Prompton.ExportHeydiaryTables do
 
       {:error, reason} ->
         Mix.raise("export failed: #{inspect(reason)}")
+    end
+  end
+
+  defp load_dump!(path) do
+    case Dump.load_file(path) do
+      {:ok, dump} -> dump
+      {:error, reason} -> Mix.raise("cannot load dump #{path}: #{inspect(reason)}")
     end
   end
 end

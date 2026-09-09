@@ -5,7 +5,7 @@ defmodule PromptOnWeb.API.V1.Management.UseCaseController do
   | Request | Domain action |
   |---|---|
   | `GET    /use-cases` | `UseCase.:active` |
-  | `POST   /use-cases` | `UseCase.:define` (chat/text also open the `default` prompt, same transaction) |
+  | `POST   /use-cases` | `UseCase.:define` (chat-only, opens the `default` prompt in the same transaction) |
   | `GET    /use-cases/:key` | `:by_key` + prompt/version summaries + live deployment per environment |
   | `PATCH  /use-cases/:key` | `:describe` / `:set_input_schema` / `:set_default_params` per fields sent |
 
@@ -16,9 +16,9 @@ defmodule PromptOnWeb.API.V1.Management.UseCaseController do
   that sit underneath a deployment pin's `params`.
 
   What the detail (`GET /use-cases/:key`) gives in one go: the use case itself, a summary of recent
-  versions per prompt (up to 20, newest first), and **the live deployment per environment**. The
-  point is that a coding AI should not have to fire several requests to learn "what is running
-  right now".
+  versions for the canonical default prompt (up to 20, newest first), and **the live deployment per
+  environment**. The point is that a coding AI should not have to fire several requests to learn
+  "what is running right now".
   """
 
   use PromptOnWeb, :controller

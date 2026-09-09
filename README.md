@@ -1,7 +1,7 @@
 # PromptOn
 
 PromptOn is a **control plane for an app's LLM prompts**. For every use case (one per LLM call site)
-and every environment it holds one **pin** — prompt version(s) + one model + params — and the app
+and every environment it holds one **pin** — one prompt version + one model + params — and the app
 fetches that pin and calls the provider itself.
 
 - **Config-fetch, not a proxy.** The app reads its pin (`GET /api/v1/use-cases`, cached and polled
@@ -159,6 +159,24 @@ docker run -d -p 4000:4000 --env-file prompton.env ghcr.io/polimo-dev/prompton:m
 
 `GET /health` is liveness, `GET /health/ready` is readiness (DB + migration gate). Accounts are created
 on first sign-in; to pre-create one: `bin/prompton eval 'PromptOn.ReleaseTasks.seed_admin("you@example.com")'`.
+
+### Prompt consolidation and HeyDiary rollback
+
+The release migration runs the idempotent named-prompt consolidation upgrade automatically, preserving
+historical prompt versions, deployment revisions, drafts, models and provider options while moving each use
+case to one prompt. To inspect an older database before writing, run `mix prompton.consolidate_prompts --dry-run`
+from `app/`; running it without `--dry-run` applies the same upgrade manually.
+
+During the HeyDiary parallel-run window, rollback SQL is generated from the live schema-v4 use-case document
+plus the original HeyDiary dump. The dump is required so language-specific legacy `ai_tasks` rows can be
+regenerated from the single PromptOn prompt:
+
+```sh
+mix prompton.export_heydiary_tables --dump heydiary_dump.json --user ada@example.com --project heydiary --env production --out heydiary_tables.sql
+mix prompton.export_heydiary_tables --dump heydiary_dump.json --org acme --project heydiary --env production --out heydiary_tables.sql
+```
+
+This is an internal rollback/export path, not a public prompt-selection workflow.
 
 ## Local development
 

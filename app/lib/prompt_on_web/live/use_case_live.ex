@@ -11,8 +11,6 @@ defmodule PromptOnWeb.UseCaseLive do
 
   - `?tab=deployments` → the same tab of the hub. The old `?tab=prompts` is the hub's default tab
     (editor), so it is dropped.
-  - `?prompt=<name>` → as is.
-
   Opening a missing use case sends the user to the list with a flash (same wording as the hub).
   """
   use PromptOnWeb, :live_view
@@ -41,7 +39,7 @@ defmodule PromptOnWeb.UseCaseLive do
 
   defp hub_path(org_slug, slug, key, params) do
     query =
-      [tab: tab_param(params), prompt: prompt_param(params)]
+      [tab: tab_param(params)]
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
     ~p"/#{org_slug}/#{slug}/use-cases/#{key}/prompt?#{query}"
@@ -49,9 +47,6 @@ defmodule PromptOnWeb.UseCaseLive do
 
   defp tab_param(%{"tab" => "deployments"}), do: "deployments"
   defp tab_param(_params), do: nil
-
-  defp prompt_param(%{"prompt" => name}) when is_binary(name) and name != "", do: name
-  defp prompt_param(_params), do: nil
 
   # Mount redirects immediately, so render is never reached: an empty screen that satisfies the
   # LiveView contract.

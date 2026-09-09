@@ -9,8 +9,10 @@ defmodule PromptOn.Deployments.Deployment.Changes.CopyFromSource do
   - The source is looked up **in the same tenant only** (a tenant-pinned read: an id from another
     project is simply not visible).
   - If the caller also passes `use_case_id`/`environment_id`, they **must match** the source's.
-  - Four things are copied: `model_id`, `params`, `provider_options` and `prompt_pins`. A rollback
-    returns to **exactly the versions** that revision pointed at, so the pins are left untouched.
+  - Four things are copied: `model_id`, `params`, `provider_options` and the default prompt pin.
+    Default-only source pins are reused as-is. Historical multi-prompt or non-default pins are
+    normalized through `PromptOn.PromptConsolidation.pins_for/2` to the equivalent canonical
+    default version prepared by the data upgrade.
   """
 
   use Ash.Resource.Change
@@ -36,17 +38,33 @@ defmodule PromptOn.Deployments.Deployment.Changes.CopyFromSource do
 
   defp copy(changeset, %Deployment{} = source) do
     with :ok <- same(changeset, :use_case_id, source.use_case_id, "use case"),
-         :ok <- same(changeset, :environment_id, source.environment_id, "environment") do
+         :ok <- same(changeset, :environment_id, source.environment_id, "environment"),
+         {:ok, pins} <- pins_for(source, changeset) do
       Ash.Changeset.force_change_attributes(changeset, %{
         use_case_id: source.use_case_id,
         environment_id: source.environment_id,
         model_id: source.model_id,
         params: source.params || %{},
         provider_options: source.provider_options || %{},
-        prompt_pins: Deployment.normalize_pins(source.prompt_pins)
+        prompt_pins: pins
       })
     else
       {:error, message} -> invalid(changeset, message)
+    end
+  end
+
+  defp pins_for(%Deployment{} = source, changeset) do
+    pins = Deployment.normalize_pins(source.prompt_pins)
+
+    if Deployment.default_prompt_pin?(pins) do
+      {:ok, pins}
+    else
+      opts = [tenant: changeset.to_tenant || changeset.tenant, actor: PromptOn.SystemActor.new()]
+
+      case PromptOn.PromptConsolidation.pins_for(source, opts) do
+        {:ok, normalized} -> {:ok, Deployment.normalize_pins(normalized)}
+        {:error, error} -> {:error, error}
+      end
     end
   end
 

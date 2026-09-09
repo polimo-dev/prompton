@@ -17,11 +17,11 @@ defmodule PromptOn.HeyDiaryImport.Spec do
 
   | UseCase | Variables |
   |---|---|
-  | `diary_generation` | `mode` (`fresh`/`incremental`/`with_user_content`), `transcriptions[]`, `existing_diary`, `user_content` |
-  | `diary_content_removal` | `current_diary`, `deleted_transcript` |
+  | `diary_generation` | `language`, `mode` (`fresh`/`incremental`/`with_user_content`), `transcriptions[]`, `existing_diary`, `user_content` |
+  | `diary_content_removal` | `language`, `current_diary`, `deleted_transcript` |
   | `mood_inference` | `diary_content` |
   | `diary_search_content` | `language`, `date`, `content` |
-  | `transcript_revision` | `entities[]` (`%{name, content}`), `transcript` |
+  | `transcript_revision` | `language`, `entities[]` (`%{name, content}`), `transcript` |
   | `memory_extraction` | `language`, `today`, `existing_memories[]` (`%{group_type, name, content}`), `conversation[]` (`%{role, content}`; the app applies the window and the user filter) |
   | `chat_response` | none — two stages (§12.3): only the system body lives in PromptOn, the app combines header/memories/tone |
   """
@@ -49,6 +49,7 @@ defmodule PromptOn.HeyDiaryImport.Spec do
         kind: :chat,
         source_task: "transcript_revision",
         input_schema: [
+          %{name: "language", type: :string, required?: false},
           %{name: "entities", type: :list, required?: true},
           %{name: "transcript", type: :string, required?: true}
         ],
@@ -61,6 +62,7 @@ defmodule PromptOn.HeyDiaryImport.Spec do
         kind: :chat,
         source_task: "diary_generation",
         input_schema: [
+          %{name: "language", type: :string, required?: false},
           %{name: "transcriptions", type: :list, required?: true},
           %{name: "mode", type: :string, required?: true},
           %{name: "existing_diary", type: :string, required?: false},
@@ -75,6 +77,7 @@ defmodule PromptOn.HeyDiaryImport.Spec do
         kind: :chat,
         source_task: "diary_generation",
         input_schema: [
+          %{name: "language", type: :string, required?: false},
           %{name: "current_diary", type: :string, required?: true},
           %{name: "deleted_transcript", type: :string, required?: true}
         ],

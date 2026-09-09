@@ -6,7 +6,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
   token that a human approved in the browser**:
 
       device/code → (human approves) → device/token → /me
-      → create project → define use case → prompts (default, ko) + commit versions
+      → create project → define use case → commit the default prompt version
       → register model → commit deployment pins → issue runtime API key
       → **with that key, `POST /api/v1/use-cases/:key/prompt` actually answers**
 
@@ -28,7 +28,6 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
 
   @diary_system "You write diaries from voice transcriptions."
   @diary_user "Write a diary from:\n\n{% for t in transcriptions %}{{ forloop.index }}. {{ t }}\n{% endfor %}"
-  @ko_system "You write diaries in Korean from voice transcriptions."
 
   setup do
     user = user_fixture()
@@ -110,12 +109,12 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
 
     assert use_case["key"] == "diary_generation"
 
-    # 4. Prompts + versions (two names, one per language) -----------------------
+    # 4. Prompt + version ------------------------------------------------------
     default_v1 =
       json_response(
         api_post(
           raw,
-          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts/default/versions",
+          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompt/versions",
           %{
             messages: [
               %{role: "system", content: @diary_system},
@@ -129,33 +128,6 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
 
     assert default_v1["number"] == 1
     assert default_v1["detected_variables"] == ["transcriptions"]
-
-    assert json_response(
-             api_post(
-               raw,
-               ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts",
-               %{
-                 name: "ko",
-                 description: "Korean"
-               }
-             ),
-             201
-           )["name"] == "ko"
-
-    ko_v1 =
-      json_response(
-        api_post(
-          raw,
-          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/prompts/ko/versions",
-          %{
-            messages: [
-              %{role: "system", content: @ko_system},
-              %{role: "user", content: @diary_user}
-            ]
-          }
-        ),
-        201
-      )
 
     # 5. Model ---------------------------------------------------------------
     model =
@@ -173,7 +145,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
            ]
            |> Enum.map(& &1["model_id"]) == ["anthropic/claude-sonnet-4"]
 
-    # 6. Deployment pins (omitting the pins means every latest committed version) ----
+    # 6. Deployment pins (omitting pins means the latest default committed version) --
     deployment =
       json_response(
         api_post(
@@ -190,10 +162,8 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
     assert deployment["revision"] == 1
     assert deployment["environment"] == "production"
 
-    assert deployment["prompt_pins"] == %{
-             "default" => default_v1["id"],
-             "ko" => ko_v1["id"]
-           }
+    assert deployment["prompt_pins"] == %{"default" => default_v1["id"]}
+    assert deployment["prompt_version_id"] == default_v1["id"]
 
     # 7. Runtime key ---------------------------------------------------------
     issued =
@@ -214,7 +184,6 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
       |> post(
         ~p"/api/v1/use-cases/diary_generation/prompt",
         Jason.encode!(%{
-          prompt: "ko",
           variables: %{"transcriptions" => ["a", "b"]}
         })
       )
@@ -222,10 +191,10 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
 
     assert resolved["deployment"] == %{"id" => deployment["id"], "revision" => 1}
     assert resolved["model"] == "anthropic/claude-sonnet-4"
-    assert resolved["prompt_names"] == ["default", "ko"]
+    assert resolved["prompt_names"] == ["default"]
     assert resolved["params"] == %{"temperature" => 0.4}
     assert resolved["provider_options"] == %{"only" => ["Anthropic"]}
-    assert [%{"content" => @ko_system}, %{"content" => rendered}] = resolved["messages"]
+    assert [%{"content" => @diary_system}, %{"content" => rendered}] = resolved["messages"]
     assert rendered == "Write a diary from:\n\n1. a\n2. b\n"
 
     snapshot =
@@ -265,7 +234,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
           %{
             environment: "staging",
             model: "anthropic/claude-sonnet-4",
-            prompt_pins: %{"default" => default_v2["id"]}
+            prompt_version_id: default_v2["id"]
           }
         ),
         201
@@ -281,7 +250,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
           ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_generation/deployments",
           %{
             model_id: model["id"],
-            prompt_pins: %{"default" => default_v2["id"], "ko" => ko_v1["id"]},
+            prompt_version_id: default_v2["id"],
             params: %{"temperature" => 0.4}
           }
         ),
@@ -310,7 +279,7 @@ defmodule PromptOnWeb.API.V1.Management.ProvisioningJourneyTest do
         200
       )
 
-    assert Enum.map(detail["prompts"], & &1["name"]) == ["default", "ko"]
+    assert Enum.map(detail["prompts"], & &1["name"]) == ["default"]
     assert Enum.find(detail["prompts"], &(&1["name"] == "default"))["version_count"] == 2
 
     assert Enum.map(detail["deployments"], &{&1["environment"], &1["revision"]}) == [

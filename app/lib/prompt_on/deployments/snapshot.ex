@@ -66,6 +66,7 @@ defmodule PromptOn.Deployments.Snapshot do
          {:ok, deployments} <- read_current_deployments(env.id, read),
          deployments = apply_overrides(deployments, overrides),
          deployments = deployments_for_use_cases(deployments, use_cases),
+         deployments = Enum.filter(deployments, &Deployment.default_prompt_pin?/1),
          {:ok, prompt_versions} <-
            read_by_ids(PromptVersion, ids(deployments, &Deployment.prompt_version_ids/1), read),
          {:ok, models} <-

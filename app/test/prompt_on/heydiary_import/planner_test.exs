@@ -149,24 +149,27 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert by_key["diary_search_content"].default_params == %{}
 
       assert Enum.map(by_key["diary_generation"].input_schema, & &1.name) ==
-               ~w(transcriptions mode existing_diary user_content)
+               ~w(language transcriptions mode existing_diary user_content)
     end
 
-    test "prompts: default for NULL language, <language> otherwise", %{plan: plan} do
+    test "prompts: one default prompt per use case", %{plan: plan} do
       names = fn key ->
         plan.prompts |> Enum.filter(&(&1.use_case_key == key)) |> Enum.map(& &1.name)
       end
 
-      assert names.("diary_generation") == ["ko", "default"]
-      assert names.("diary_content_removal") == ["ko", "default"]
+      assert names.("diary_generation") == ["default"]
+      assert names.("diary_content_removal") == ["default"]
       assert names.("mood_inference") == ["default"]
       assert names.("voice_transcription") == []
       assert names.("diary_embedding") == []
 
       removal =
-        Enum.find(plan.prompts, &(&1.use_case_key == "diary_content_removal" and &1.name == "ko"))
+        Enum.find(
+          plan.prompts,
+          &(&1.use_case_key == "diary_content_removal" and &1.name == "default")
+        )
 
-      assert removal.description =~ "Kept identical to diary_generation"
+      assert removal.description =~ "copies diary_generation"
     end
 
     test "prompt versions: [system, user] liquid, chat_response system only, escaping",
@@ -178,15 +181,19 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
         Enum.find(plan.prompt_versions, &(&1.use_case_key == key and &1.prompt_name == name))
       end
 
-      diary_ko = pv.("diary_generation", "ko")
-      assert diary_ko.engine == :liquid
+      diary = pv.("diary_generation", "default")
+      assert diary.engine == :liquid
 
-      assert [%{role: :system, content: system}, %{role: :user, content: user}] =
-               diary_ko.messages
+      assert [%{role: :system, content: system}, %{role: :user, content: user}] = diary.messages
 
-      assert system == Dump.task(dump, "diary_generation", "ko").system_prompt
+      assert {:ok, Dump.task(dump, "diary_generation", "ko").system_prompt} ==
+               PromptOnSDK.Template.render(system, %{"language" => "ko"})
+
+      assert {:ok, Dump.task(dump, "diary_generation", nil).system_prompt} ==
+               PromptOnSDK.Template.render(system, %{"language" => "ja"})
+
       assert user == Spec.user_template("diary_generation")
-      assert diary_ko.commit_message =~ "diary_generation/ko"
+      assert diary.commit_message =~ "diary_generation/ko"
 
       # diary_content_removal copies diary_generation's system prompt per language, with the removal template
       removal_default = pv.("diary_content_removal", "default")
@@ -194,7 +201,9 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert [%{role: :system, content: copied}, %{role: :user, content: removal_user}] =
                removal_default.messages
 
-      assert copied == Dump.task(dump, "diary_generation", nil).system_prompt
+      assert {:ok, Dump.task(dump, "diary_generation", nil).system_prompt} ==
+               PromptOnSDK.Template.render(copied, %{})
+
       assert removal_user == Spec.user_template("diary_content_removal")
 
       assert [%{role: :system}] = pv.("chat_response", "default").messages
@@ -232,10 +241,10 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
         assert is_binary(model_id)
       end
 
-      # Two languages = two prompts, both pinned (the model is the single free default row)
+      # Language rows are folded into the single default prompt (the model is the single free default row)
       assert pin_shape(deployment(plan, "diary_generation")) ==
                {"google/gemini-3.6-flash", %{"temperature" => 0.4}, %{"allow_fallbacks" => true},
-                ["default", "ko"]}
+                ["default"]}
 
       # A task with only the NULL row: a single default
       assert pin_shape(deployment(plan, "mood_inference")) ==
@@ -277,10 +286,10 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert Plan.counts(plan) == %{
                models: 4,
                use_cases: 7,
-               prompts: 10,
-               prompt_versions: 10,
+               prompts: 7,
+               prompt_versions: 7,
                deployments: 7,
-               pins: 10,
+               pins: 7,
                warnings: 5
              }
     end
@@ -326,9 +335,8 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert {:no_default_prompt, "diary_content_removal", ["ko"]} in plan.warnings
       assert {:no_default_prompt, "diary_generation", ["ko"]} in Plan.confirmations(plan)
 
-      # There is no `default` prompt, so the pin is ko alone — a request arriving without a name
-      # is a 404
-      assert {"google/gemini-3.6-flash", %{"temperature" => 0.5}, _, ["ko"]} =
+      # There is still one default prompt, but it has no fallback branch for unsupported language.
+      assert {"google/gemini-3.6-flash", %{"temperature" => 0.5}, _, ["default"]} =
                pin_shape(deployment(plan, "diary_generation"))
 
       # default_params falls back to empty (no NULL row)

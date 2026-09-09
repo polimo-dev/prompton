@@ -25,11 +25,8 @@ defmodule Mix.Tasks.Prompton.ImportHeydiary do
   (SystemActor, one transaction) → summary (+ verification). Afterwards, run `mix prompton.export`
   in the HeyDiary repo to refresh `priv/prompton/use-cases.production.json`.
 
-  **Deployments are pins** (ADR 0007 revision 2026-09-01) — one model per chat use case plus one version
-  per prompt name. HeyDiary's per-plan model hierarchy cannot be represented, so it collapses to the
-  free (common) default row and asks for confirmation via `{:plan_models_flattened, …}`. Language
-  branching is the prompt name (`default`/`ko` …), which the app picks by sending `prompt` with the
-  request.
+  **Deployments are pins** (ADR 0007 revision 2026-09-01) — one model per chat use case plus one default prompt/version. Language is a template variable, not a prompt selector. HeyDiary's per-plan model hierarchy cannot be represented, so it collapses to the
+  free (common) default row and asks for confirmation via `{:plan_models_flattened, …}`. Language branching lives inside the default prompt's system template; the app passes `language` as a variable.
   """
 
   use Mix.Task

@@ -8,8 +8,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   | Component | Place |
   |---|---|
-  | `prompt_switcher/1` | Prompt (per-language document) switcher row under the header |
-  | `new_prompt_modal/1` | "New prompt" modal (`?new_prompt=1`) |
   | `model_picker_modal/1` | **Search-style model picker** (`?models=1`): multi-select from the project catalog and OpenRouter in one list |
   | `arena_bar/1` | Head of the Arena tab: the selected-model chip row plus "Add models" |
   | `message_card/1` | Message card (role select, character/token estimate, Draft with AI, HighlightedEditor) |
@@ -48,115 +46,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
   @doc "Default suggestion chips of the AI draft modal (mockup copy)."
   @spec ai_suggestions() :: [String.t()]
   def ai_suggestions, do: @ai_suggestions
-
-  # ---------------------------------------------------------------------------
-  # Prompt switching
-
-  @doc """
-  The prompt switcher row: lays out the named prompt documents under the use case (`default`,
-  `ko`, ...) as segments.
-
-  This piece exists so per-language prompts can be handled on screen without the console.
-  Switching is a **patch**, so `?prompt=` carries the state (the CLAUDE.md zero-downtime deployment
-  discipline). There is no confirmation dialog: every prompt autosaves its own draft, so nothing
-  is lost by moving around (ADR 0007 revision 2026-09-01).
-  """
-  attr :rows, :list,
-    required: true,
-    doc: "`%{id:, name:, count:, active?:, patch:}` list (the default prompt comes first)"
-
-  attr :new_patch, :string, required: true
-
-  def prompt_switcher(assigns) do
-    ~H"""
-    <div
-      id="prompt-switcher"
-      style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:12px;"
-    >
-      <span class="mono-label">Prompts</span>
-      <div class="seg" style="width:fit-content;">
-        <.link
-          :for={row <- @rows}
-          id={row.id}
-          patch={row.patch}
-          class={row.active? && "on"}
-          style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;"
-        >
-          <span class="font-mono">{row.name}</span>
-          <span :if={row.count} style="font-size:11px;color:var(--tx-3);">{row.count}</span>
-        </.link>
-      </div>
-      <DS.btn_link id="new-prompt" size="sm" variant="ghost" icon="plus" patch={@new_patch}>
-        New prompt
-      </DS.btn_link>
-      <span style="font-size:12px;color:var(--tx-3);">
-        one version numbering per prompt — use it for per-language prompts
-      </span>
-    </div>
-    """
-  end
-
-  @doc """
-  The "New prompt" modal (`?new_prompt=1`). It takes only a name and a description: the name is
-  unique per `(use_case, name)`, so a duplicate is rejected and the modal stays open. Creating one
-  moves to the new prompt right away, but the current prompt's draft is already saved, so no
-  confirmation is asked.
-  """
-  attr :name, :string, default: ""
-  attr :description, :string, default: ""
-  attr :close_patch, :string, required: true
-
-  def new_prompt_modal(assigns) do
-    ~H"""
-    <DS.modal
-      id="new-prompt-modal"
-      on_close={@close_patch}
-      width={420}
-      icon="layers"
-      title="New prompt"
-    >
-      <form id="new-prompt-form" phx-change="prompt_change" phx-submit="create_prompt">
-        <div class="mono-label" style="margin-bottom:6px;">name</div>
-        <DS.ds_input
-          id="new-prompt-name"
-          name="prompt[name]"
-          value={@name}
-          placeholder="ko"
-          mono
-          autocomplete="off"
-          phx-debounce="200"
-        />
-        <div style="font-size:12px;color:var(--tx-3);margin-top:6px;">
-          Versions are numbered per prompt — "ko" starts again at v1.
-        </div>
-
-        <div class="mono-label" style="margin:14px 0 6px;">description (optional)</div>
-        <DS.ds_input
-          id="new-prompt-description"
-          name="prompt[description]"
-          value={@description}
-          placeholder="Korean prompt"
-          phx-debounce="200"
-        />
-      </form>
-
-      <:footer>
-        <DS.btn_link id="cancel-prompt" variant="ghost" patch={@close_patch} class="ml-auto">
-          Cancel
-        </DS.btn_link>
-        <DS.btn
-          id="create-prompt"
-          variant="primary"
-          icon="plus"
-          type="submit"
-          form="new-prompt-form"
-        >
-          Create prompt
-        </DS.btn>
-      </:footer>
-    </DS.modal>
-    """
-  end
 
   # ---------------------------------------------------------------------------
   # Models (picked first)
@@ -1144,7 +1033,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
   A pane's content is not session state but the **persistent history** of `(use case × model)`
   (`PromptOn.Prompts.ArenaMessage`). Leaving the screen and coming back shows the past inputs and
   responses as they were, and editing the prompt does not erase them (a quiet one-liner merely
-  says "from the next turn on, the new prompt is used").
+  says "from the next turn on, the updated prompt is used").
 
   The panes share the one input box below. Sending appends the same user turn to every pane, and
   the answers accumulate separately.
@@ -1615,10 +1504,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
     were tried in the arena come first and carry an `arena` marker (the rest are ordered by
     display name). The arena is where models are chosen, not a gate for deployment.
   - If `default_params` is present, one line says where the parameters come from.
-  - **`pins` lists everything this deploy will pin** (ADR 0007 revision 2026-09-01: a revision is
-    a pin): for each prompt name of this use case, which version gets pinned, and for a prompt
-    with no version at all, the fact that it is not pinned. The prompt currently being edited
-    carries a `current` marker.
+  - **`pins` lists the default prompt version** this deploy will pin.
   """
   attr :envs, :list, required: true, doc: "`%{id:, slug:, name:, checked?:, revision:}` list"
   attr :models, :list, required: true, doc: "`%{id:, label:, arena?:, checked?:}` list"
@@ -1629,8 +1515,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   attr :pins, :list,
     default: [],
-    doc:
-      "what this deploy will pin: `%{name:, version:, current?:}` list (a nil `version` is not pinned)"
+    doc: "what this deploy will pin: `%{version:}` list (a nil `version` is not pinned)"
 
   attr :deployments_patch, :string, required: true
   attr :message, :string, default: ""
@@ -1735,27 +1620,29 @@ defmodule PromptOnWeb.PromptEditorComponents do
         </div>
 
         <div :if={@pins != []} id="deploy-pins" style="margin-top:12px;">
-          <div class="mono-label" style="margin-bottom:6px;">prompts pinned by this deploy</div>
-          <div style="display:flex;flex-direction:column;gap:3px;">
-            <div
-              :for={pin <- @pins}
-              id={"deploy-pin-#{pin.name}"}
-              style="display:flex;align-items:center;gap:7px;font-size:12.5px;"
+          <div class="mono-label" style="margin-bottom:6px;">
+            prompt version pinned by this deploy
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;">
+            <span style="color:var(--tx-2);">This use case prompt</span>
+            <span style="flex:1;"></span>
+            <span
+              :if={hd(@pins).version}
+              id="deploy-pin-version"
+              class="font-mono"
+              style="color:var(--tx-0);"
             >
-              <span class="font-mono" style="color:var(--tx-1);">{pin.name}</span>
-              <span :if={pin.current?} class="mono-label" style="padding:0;">current</span>
-              <span style="flex:1;"></span>
-              <span :if={pin.version} class="font-mono" style="color:var(--tx-0);">
-                {pin.version}
-              </span>
-              <span :if={is_nil(pin.version)} style="color:var(--warn);font-size:12px;">
-                no version yet — not pinned
-              </span>
-            </div>
+              {hd(@pins).version}
+            </span>
+            <span
+              :if={is_nil(hd(@pins).version)}
+              id="deploy-pin-missing"
+              style="color:var(--warn);font-size:12px;"
+            >
+              no version yet — not pinned
+            </span>
           </div>
           <div style={hint_style(8)}>
-            Requests pick a prompt by name (<span class="font-mono">"prompt"</span>, default <span class="font-mono">"default"</span>). A name that is not pinned is a 404, never a
-            silent fallback.
             <.link
               id="deploy-open-deployments"
               patch={@deployments_patch}
