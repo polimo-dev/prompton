@@ -10,6 +10,7 @@ defmodule PromptOn.Evals.CalibrationTest do
 
   alias PromptOn.{Accounts, Evals}
   alias PromptOn.Evals.Calibration
+  alias PromptOn.Observability.AIUsage
 
   setup do
     on_exit(&PromptOn.LLM.Fake.reset/0)
@@ -183,6 +184,39 @@ defmodule PromptOn.Evals.CalibrationTest do
   end
 
   describe "score_set/2" do
+    test "keeps the cost of each scoring attempt when agreement scores are overwritten", %{
+      project: project,
+      set: set,
+      use_case: use_case
+    } do
+      rubric = rubric_fixture(use_case, %{calibration_set_id: set.id})
+
+      PromptOn.LLM.Fake.set_response(%{
+        content: Jason.encode!(%{"score" => 4, "rationale" => "level match"}),
+        cost_usd: 0.01
+      })
+
+      assert {:ok, %{scored: 5}} = Calibration.score_set(rubric, scope(project))
+
+      PromptOn.LLM.Fake.set_response(%{
+        content: Jason.encode!(%{"score" => 2, "rationale" => "level match"}),
+        cost_usd: 0.02
+      })
+
+      assert {:ok, %{scored: 5}} = Calibration.score_set(rubric, scope(project))
+
+      {:ok, scores} = Evals.list_calibration_scores(rubric.id, scope(project))
+      usages = Ash.read!(AIUsage, scope(project))
+
+      assert length(scores) == 5
+      assert Enum.all?(scores, &(&1.score == 2))
+      assert length(usages) == 10
+      assert Enum.all?(usages, &(&1.operation == :evaluation and &1.use_case_key == use_case.key))
+
+      cost = Enum.reduce(usages, Decimal.new(0), &Decimal.add(&1.cost_usd, &2))
+      assert Decimal.equal?(cost, Decimal.new("0.15"))
+    end
+
     test "re-scoring upserts rather than duplicating", %{project: project, set: set} do
       plant_judge(4)
       {:ok, rubric} = Calibration.draft(set, scope(project))

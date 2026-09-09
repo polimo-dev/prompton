@@ -5,6 +5,7 @@ defmodule PromptOn.Evals.EvaluationRunTest do
   import PromptOn.Fixtures
 
   alias PromptOn.Evals
+  alias PromptOn.Observability.{AIUsage, Generation}
 
   setup do
     on_exit(&PromptOn.LLM.Fake.reset/0)
@@ -275,6 +276,33 @@ defmodule PromptOn.Evals.EvaluationRunTest do
       %{run: evaluation_run_fixture(target.use_case, target.deployment, %{rubric: target.rubric})}
     end
 
+    test "records batch evaluation costs once without duplicating monitoring logs", %{
+      project: project,
+      use_case: use_case,
+      run: run
+    } do
+      generations = Ash.read!(Generation, scope(project))
+
+      PromptOn.LLM.Fake.set_response(%{
+        content: Jason.encode!(%{"score" => 4, "rationale" => "level match"}),
+        cost_usd: 0.01
+      })
+
+      drain_results(run, project)
+      assert {:ok, %{status: :completed}} = Evals.tally_evaluation(run.id, scope(project))
+
+      drain_results(run, project)
+      assert {:ok, %{status: :completed}} = Evals.tally_evaluation(run.id, scope(project))
+
+      usages = Ash.read!(AIUsage, scope(project))
+      assert length(usages) == 6
+      assert Enum.all?(usages, &(&1.operation == :evaluation and &1.use_case_key == use_case.key))
+      assert length(Ash.read!(Generation, scope(project))) == length(generations)
+
+      cost = Enum.reduce(usages, Decimal.new(0), &Decimal.add(&1.cost_usd, &2))
+      assert Decimal.equal?(cost, Decimal.new("0.06"))
+    end
+
     test "freezes the counters and completes when nothing is pending", %{
       project: project,
       run: run
@@ -311,7 +339,7 @@ defmodule PromptOn.Evals.EvaluationRunTest do
     end
 
     test "a run with zero scored results ends failed", %{project: project, run: run} do
-      PromptOn.LLM.Fake.set_response(%{content: "not json at all"})
+      PromptOn.LLM.Fake.set_response(%{content: "not json at all", cost_usd: 0.01})
       drain_results(run, project)
 
       {:ok, failed} = Evals.get_evaluation_run(run.id, scope(project))
@@ -320,6 +348,10 @@ defmodule PromptOn.Evals.EvaluationRunTest do
       assert failed.unparsable_count == 6
       assert failed.error_message =~ "every item failed"
       assert is_nil(failed.average_score)
+
+      usages = Ash.read!(AIUsage, scope(project))
+      assert length(usages) == 6
+      assert Enum.all?(usages, &Decimal.equal?(&1.cost_usd, Decimal.new("0.01")))
     end
   end
 

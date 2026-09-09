@@ -2,28 +2,16 @@ defmodule PromptOnWeb.OrgUsageLive do
   @moduledoc """
   Organization usage (`/:org_slug/usage?period=24h|7d|30d`).
 
-  Every number is what `PromptOn.Observability.Stats.time_series/2` actually scanned out of the
-  internal `generations` table, called once per project with the buckets summed. So **the columns are
-  only what Stats really produces**: logs · errors · tokens · cost. The screen is named "Usage";
-  it is not an invoice (there is no billing yet).
+  Logs, errors and tokens count monitoring and Arena generations. Costs also include Draft and
+  Evaluation calls. One `PromptOn.Observability.Usage.for_project/2` snapshot per authorized project
+  supplies both its totals and per-use-case breakdown, including use cases with only AI usage.
 
-  - The period travels in the URL as `?period=`, and the **expanded project** as
-    `?open=<project_slug>` (CLAUDE.md zero-downtime deployment discipline). Expanding opens that
-    project's **per-use-case breakdown** for the same period and the same columns.
-  - The per-use-case breakdown is **one** `Stats.time_series(..., group_by: :use_case_key)` call;
-    it does not query per use case. The project total and the use case rows use **the same window
-    (from/to)**, so total = sum of use cases always holds (`use_case_key` is `allow_nil? false`,
-    so no row drops out).
-  - `source: nil` counts **everything**: not only the monitoring logs the app sent (`:live`) but
-    the arena calls too. This screen asks what the organization spent, and leaving out the calls
-    the server made on its behalf would make the numbers lie.
-  - The rows are the projects `PromptOnWeb.LiveProjectScope` already filtered by policy. `Stats`
-    leaves authorization to the caller (module docs), so **a project_id outside that list is never
-    passed in.**
+  The period and expanded project stay in the URL. Project access is refreshed before each query,
+  because the aggregation leaves authorization to the caller.
   """
   use PromptOnWeb, :live_view
 
-  alias PromptOn.Observability.Stats
+  alias PromptOn.Observability.Usage
   alias PromptOnWeb.SettingsComponents, as: SC
 
   @periods [
@@ -33,11 +21,14 @@ defmodule PromptOnWeb.OrgUsageLive do
   ]
 
   @cols [
-    %{label: "project", w: "minmax(0,2fr)"},
-    %{label: "logs", w: "120px", align: "right"},
-    %{label: "errors", w: "100px", align: "right"},
-    %{label: "tokens", w: "120px", align: "right"},
-    %{label: "cost", w: "110px", align: "right"}
+    %{label: "project", w: "minmax(180px,2fr)"},
+    %{label: "logs", w: "56px", align: "right"},
+    %{label: "errors", w: "56px", align: "right"},
+    %{label: "tokens", w: "70px", align: "right"},
+    %{label: "calls cost", w: "100px", align: "right"},
+    %{label: "draft", w: "100px", align: "right"},
+    %{label: "evaluation", w: "100px", align: "right"},
+    %{label: "total cost", w: "110px", align: "right"}
   ]
 
   @impl Phoenix.LiveView
@@ -50,13 +41,13 @@ defmodule PromptOnWeb.OrgUsageLive do
        totals: empty_totals(),
        period: default_period(),
        open: nil,
-       use_case_rows: []
+       usage_error?: false
      )}
   end
 
   @impl Phoenix.LiveView
   def handle_params(params, _uri, socket) do
-    # Grants may change while this LiveView is connected. Stats bypasses resource policies,
+    # Grants may change while this LiveView is connected. Usage bypasses resource policies,
     # so refresh the authorized project list before every aggregation.
     projects =
       PromptOnWeb.LiveProjectScope.list_projects(
@@ -71,7 +62,7 @@ defmodule PromptOnWeb.OrgUsageLive do
     # totals out of step.
     window = window(period)
     open = open_param(params, projects)
-    rows = Enum.map(projects, &usage_row(&1, window))
+    {rows, usage_error?} = usage_rows(projects, window)
 
     {:noreply,
      assign(socket,
@@ -80,7 +71,7 @@ defmodule PromptOnWeb.OrgUsageLive do
        open: open,
        rows: rows,
        totals: totals(rows),
-       use_case_rows: use_case_rows(open, projects, window)
+       usage_error?: usage_error?
      )}
   end
 
@@ -125,52 +116,20 @@ defmodule PromptOnWeb.OrgUsageLive do
   # ---------------------------------------------------------------------------
   # Aggregation
 
+  defp usage_rows(projects, window) do
+    {Enum.map(projects, &usage_row(&1, window)), false}
+  rescue
+    _ -> {[], true}
+  end
+
   defp usage_row(project, {from, to}) do
-    rows = Stats.time_series(project.id, from: from, to: to, bucket: :day, source: nil)
+    rows = Usage.for_project(project.id, from: from, to: to)
 
-    Map.merge(sum(rows), %{project: project, color: DS.project_color(project.slug)})
-  rescue
-    # An aggregation failure must not kill the screen; only that project is drawn as 0.
-    _ -> Map.merge(empty_totals(), %{project: project, color: DS.project_color(project.slug)})
-  end
-
-  # Per-use-case breakdown of the expanded project. Fetched with **one query**
-  # (`group_by: :use_case_key`) and only the buckets are summed: once per project however many use
-  # cases there are. Sorted by generations descending, then key ascending on ties.
-  defp use_case_rows(nil, _projects, _window), do: []
-
-  defp use_case_rows(slug, projects, window) do
-    case Enum.find(projects, &(&1.slug == slug)) do
-      nil -> []
-      project -> use_case_rows_for(project, window)
-    end
-  end
-
-  defp use_case_rows_for(project, {from, to}) do
-    project.id
-    |> Stats.time_series(
-      from: from,
-      to: to,
-      bucket: :day,
-      group_by: :use_case_key,
-      source: nil
-    )
-    |> Enum.group_by(& &1.group)
-    |> Enum.map(fn {use_case_key, rows} -> Map.put(sum(rows), :use_case_key, use_case_key) end)
-    |> Enum.sort_by(&{-&1.count, &1.use_case_key})
-  rescue
-    _ -> []
-  end
-
-  defp sum(rows) do
-    Enum.reduce(rows, empty_totals(), fn row, acc ->
-      %{
-        count: acc.count + row.count,
-        error_count: acc.error_count + row.error_count,
-        tokens: acc.tokens + row.input_tokens + row.output_tokens,
-        cost_usd: Decimal.add(acc.cost_usd, row.cost_usd)
-      }
-    end)
+    Map.merge(totals(rows), %{
+      project: project,
+      color: DS.project_color(project.slug),
+      use_case_rows: rows
+    })
   end
 
   defp totals(rows) do
@@ -179,12 +138,27 @@ defmodule PromptOnWeb.OrgUsageLive do
         count: acc.count + row.count,
         error_count: acc.error_count + row.error_count,
         tokens: acc.tokens + row.tokens,
-        cost_usd: Decimal.add(acc.cost_usd, row.cost_usd)
+        calls_cost_usd: Decimal.add(acc.calls_cost_usd, row.calls_cost_usd),
+        draft_cost_usd: Decimal.add(acc.draft_cost_usd, row.draft_cost_usd),
+        evaluation_cost_usd: Decimal.add(acc.evaluation_cost_usd, row.evaluation_cost_usd),
+        cost_usd: Decimal.add(acc.cost_usd, row.cost_usd),
+        unknown_cost_count: acc.unknown_cost_count + row.unknown_cost_count
       }
     end)
   end
 
-  defp empty_totals, do: %{count: 0, error_count: 0, tokens: 0, cost_usd: Decimal.new(0)}
+  defp empty_totals do
+    %{
+      count: 0,
+      error_count: 0,
+      tokens: 0,
+      calls_cost_usd: Decimal.new(0),
+      draft_cost_usd: Decimal.new(0),
+      evaluation_cost_usd: Decimal.new(0),
+      cost_usd: Decimal.new(0),
+      unknown_cost_count: 0
+    }
+  end
 
   @doc "Whether this project row is expanded (`?open=<project_slug>`)."
   @spec open?(String.t() | nil, map()) :: boolean()
@@ -258,10 +232,10 @@ defmodule PromptOnWeb.OrgUsageLive do
       <DS.screen
         id="org-usage-screen"
         title="Usage"
-        max_w={980}
+        max_w={1180}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
           <DS.seg
             id="usage-period"
             value={@period}
@@ -272,14 +246,15 @@ defmodule PromptOnWeb.OrgUsageLive do
             }
           />
           <span style="font-size:12.5px;color:var(--tx-2);">
-            Every log recorded in this window — monitoring logs your apps reported, plus
-            arena runs. Open a project to see it split by use case.
+            Logs, errors and tokens cover monitoring and Arena calls. Costs also include Draft and
+            Evaluation. Expand a project to see its use cases.
           </span>
         </div>
 
         <div
+          :if={!@usage_error?}
           id="usage-totals"
-          style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;"
+          style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;"
         >
           <DS.stat_tile label="logs" value={compact(@totals.count)} icon="activity" />
           <DS.stat_tile
@@ -289,111 +264,163 @@ defmodule PromptOnWeb.OrgUsageLive do
             tone={@totals.error_count > 0 && :err}
           />
           <DS.stat_tile label="tokens" value={compact(@totals.tokens)} icon="cpu" />
-          <DS.stat_tile label="cost" value={cost_label(@totals.cost_usd)} icon="dollar" />
+          <DS.stat_tile label="total cost" value={cost_label(@totals.cost_usd)} icon="dollar" />
         </div>
 
+        <div
+          :if={!@usage_error?}
+          id="usage-cost-breakdown"
+          style="display:flex;flex-wrap:wrap;gap:8px 24px;margin-bottom:16px;font-size:12.5px;color:var(--tx-2);"
+        >
+          <span id="usage-cost-calls">
+            Monitoring + Arena <strong class="font-mono">{cost_label(@totals.calls_cost_usd)}</strong>
+          </span>
+          <span id="usage-cost-draft">
+            Draft <strong class="font-mono">{cost_label(@totals.draft_cost_usd)}</strong>
+          </span>
+          <span id="usage-cost-evaluation">
+            Evaluation <strong class="font-mono">{cost_label(@totals.evaluation_cost_usd)}</strong>
+          </span>
+        </div>
+
+        <SC.info_box :if={@usage_error?} id="usage-load-error" icon="alert">
+          Usage could not be loaded.
+          <.link patch={usage_path(@org_slug, @period, @open)} class="underline">Try again</.link>
+        </SC.info_box>
+
         <DS.empty
-          :if={@rows == []}
+          :if={@rows == [] && !@usage_error?}
           id="usage-empty"
           icon="layers"
           title="No projects yet"
           sub="Usage is counted per project — create one to see numbers here."
         />
 
-        <DS.table :if={@rows != []} id="usage-table" cols={@cols}>
-          <div :for={{row, index} <- Enum.with_index(@rows)}>
-            <DS.row id={"usage-row-#{row.project.slug}"} cols={@cols} index={index}>
-              <span style="display:flex;align-items:center;gap:7px;min-width:0;">
-                <.link
-                  id={"usage-toggle-#{row.project.slug}"}
-                  patch={toggle_path(@org_slug, @period, @open, row.project.slug)}
-                  title={if open?(@open, row.project), do: "Collapse", else: "Expand"}
-                  aria-expanded={to_string(open?(@open, row.project))}
-                  class="dsiconbtn tr"
-                  style="width:22px;height:22px;flex-shrink:0;color:var(--tx-2);"
-                >
-                  <DSIcons.icon
-                    name={if open?(@open, row.project), do: "chevDown", else: "chevRight"}
-                    size={13}
-                  />
-                </.link>
-                <span style={"width:8px;height:8px;border-radius:var(--r-pill);flex-shrink:0;background:#{row.color};"} />
-                <.link
-                  id={"usage-open-#{row.project.slug}"}
-                  navigate={~p"/#{@org_slug}/#{row.project.slug}"}
-                  class="font-mono"
-                  style="font-size:13px;color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                >
-                  {row.project.slug}
-                </.link>
-              </span>
-              <span class="font-mono" style="font-size:13px;text-align:right;">{row.count}</span>
-              <span
-                class="font-mono"
-                style={"font-size:13px;text-align:right;color:#{if row.error_count > 0, do: "var(--err)", else: "var(--tx-2)"};"}
-              >
-                {row.error_count}
-              </span>
-              <span class="font-mono" style="font-size:13px;text-align:right;color:var(--tx-2);">
-                {compact(row.tokens)}
-              </span>
-              <span class="font-mono" style="font-size:13px;text-align:right;">
-                {cost_label(row.cost_usd)}
-              </span>
-            </DS.row>
-
-            <div :if={open?(@open, row.project)} id={"usage-breakdown-#{row.project.slug}"}>
-              <DS.row
-                :for={uc <- @use_case_rows}
-                id={"usage-uc-#{row.project.slug}-#{uc.use_case_key}"}
-                cols={@cols}
-                index={1}
-                tone={:neutral}
-              >
-                <span style="display:flex;align-items:center;gap:7px;min-width:0;padding-left:29px;">
-                  <DSIcons.icon name="target" size={12} class="tx3" />
-                  <span
-                    class="font-mono"
-                    style="font-size:12.5px;color:var(--tx-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        <div :if={@rows != []} id="usage-table-scroll" style="overflow-x:auto;">
+          <DS.table id="usage-table" cols={@cols} style="min-width:900px;">
+            <div :for={{row, index} <- Enum.with_index(@rows)}>
+              <DS.row id={"usage-row-#{row.project.slug}"} cols={@cols} index={index}>
+                <span style="display:flex;align-items:center;gap:7px;min-width:0;">
+                  <.link
+                    id={"usage-toggle-#{row.project.slug}"}
+                    patch={toggle_path(@org_slug, @period, @open, row.project.slug)}
+                    title={if open?(@open, row.project), do: "Collapse", else: "Expand"}
+                    aria-expanded={to_string(open?(@open, row.project))}
+                    class="dsiconbtn tr"
+                    style="width:22px;height:22px;flex-shrink:0;color:var(--tx-2);"
                   >
-                    {uc.use_case_key}
-                  </span>
+                    <DSIcons.icon
+                      name={if open?(@open, row.project), do: "chevDown", else: "chevRight"}
+                      size={13}
+                    />
+                  </.link>
+                  <span style={"width:8px;height:8px;border-radius:var(--r-pill);flex-shrink:0;background:#{row.color};"} />
+                  <.link
+                    id={"usage-open-#{row.project.slug}"}
+                    patch={toggle_path(@org_slug, @period, @open, row.project.slug)}
+                    aria-expanded={to_string(open?(@open, row.project))}
+                    class="font-mono"
+                    style="font-size:13px;color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                  >
+                    {row.project.slug}
+                  </.link>
                 </span>
-                <span class="font-mono" style="font-size:12.5px;text-align:right;">
-                  {uc.count}
-                </span>
+                <span class="font-mono" style="font-size:13px;text-align:right;">{row.count}</span>
                 <span
                   class="font-mono"
-                  style={"font-size:12.5px;text-align:right;color:#{if uc.error_count > 0, do: "var(--err)", else: "var(--tx-2)"};"}
+                  style={"font-size:13px;text-align:right;color:#{if row.error_count > 0, do: "var(--err)", else: "var(--tx-2)"};"}
                 >
-                  {uc.error_count}
+                  {row.error_count}
                 </span>
-                <span class="font-mono" style="font-size:12.5px;text-align:right;color:var(--tx-2);">
-                  {compact(uc.tokens)}
+                <span class="font-mono" style="font-size:13px;text-align:right;color:var(--tx-2);">
+                  {compact(row.tokens)}
                 </span>
-                <span class="font-mono" style="font-size:12.5px;text-align:right;">
-                  {cost_label(uc.cost_usd)}
+                <span class="font-mono" style="font-size:13px;text-align:right;">
+                  {cost_label(row.calls_cost_usd)}
+                </span>
+                <span class="font-mono" style="font-size:13px;text-align:right;">
+                  {cost_label(row.draft_cost_usd)}
+                </span>
+                <span class="font-mono" style="font-size:13px;text-align:right;">
+                  {cost_label(row.evaluation_cost_usd)}
+                </span>
+                <span class="font-mono" style="font-size:13px;text-align:right;font-weight:600;">
+                  {cost_label(row.cost_usd)}
                 </span>
               </DS.row>
 
-              <DS.row
-                :if={@use_case_rows == []}
-                id={"usage-breakdown-empty-#{row.project.slug}"}
-                cols={@cols}
-                index={1}
-                tone={:neutral}
-              >
-                <span style="font-size:12.5px;color:var(--tx-2);padding-left:29px;">
-                  No logs in this window.
-                </span>
-              </DS.row>
+              <div :if={open?(@open, row.project)} id={"usage-breakdown-#{row.project.slug}"}>
+                <DS.row
+                  :for={uc <- row.use_case_rows}
+                  id={"usage-uc-#{row.project.slug}-#{uc.use_case_key}"}
+                  cols={@cols}
+                  index={1}
+                  tone={:neutral}
+                >
+                  <span style="display:flex;align-items:center;gap:7px;min-width:0;padding-left:29px;">
+                    <DSIcons.icon name="target" size={12} class="tx3" />
+                    <span
+                      class="font-mono"
+                      style="font-size:12.5px;color:var(--tx-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    >
+                      {uc.use_case_key}
+                    </span>
+                  </span>
+                  <span class="font-mono" style="font-size:12.5px;text-align:right;">
+                    {uc.count}
+                  </span>
+                  <span
+                    class="font-mono"
+                    style={"font-size:12.5px;text-align:right;color:#{if uc.error_count > 0, do: "var(--err)", else: "var(--tx-2)"};"}
+                  >
+                    {uc.error_count}
+                  </span>
+                  <span class="font-mono" style="font-size:12.5px;text-align:right;color:var(--tx-2);">
+                    {compact(uc.tokens)}
+                  </span>
+                  <span class="font-mono" style="font-size:12.5px;text-align:right;">
+                    {cost_label(uc.calls_cost_usd)}
+                  </span>
+                  <span class="font-mono" style="font-size:12.5px;text-align:right;">
+                    {cost_label(uc.draft_cost_usd)}
+                  </span>
+                  <span class="font-mono" style="font-size:12.5px;text-align:right;">
+                    {cost_label(uc.evaluation_cost_usd)}
+                  </span>
+                  <span class="font-mono" style="font-size:12.5px;text-align:right;font-weight:600;">
+                    {cost_label(uc.cost_usd)}
+                  </span>
+                </DS.row>
+
+                <DS.row
+                  :if={row.use_case_rows == []}
+                  id={"usage-breakdown-empty-#{row.project.slug}"}
+                  cols={@cols}
+                  index={1}
+                  tone={:neutral}
+                >
+                  <span style="grid-column:1 / -1;font-size:12.5px;color:var(--tx-2);padding-left:29px;">
+                    No usage in this window.
+                  </span>
+                </DS.row>
+              </div>
             </div>
-          </div>
-        </DS.table>
+          </DS.table>
+        </div>
+
+        <SC.info_box
+          :if={!@usage_error? && @totals.unknown_cost_count > 0}
+          id="usage-incomplete-costs"
+          icon="info"
+          style="margin-top:12px;"
+        >
+          Calls with unavailable cost: {@totals.unknown_cost_count}. Totals include known costs only.
+        </SC.info_box>
 
         <SC.info_box id="usage-note" icon="info" style="margin-top:12px;">
-          Cost comes from what the provider reported, or from the catalog price when it didn't.
-          Billing does not exist yet — this page only counts what already happened.
+          Calls cost covers monitoring and Arena. Costs use provider reports or available catalog
+          prices. Historical Evaluation costs include retained scores only; earlier Draft,
+          rubric-generation and overwritten score costs are unavailable.
         </SC.info_box>
       </DS.screen>
     </Layouts.app>

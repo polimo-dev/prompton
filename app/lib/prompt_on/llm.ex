@@ -25,6 +25,8 @@ defmodule PromptOn.LLM do
   (`latency_ms`) in a thin map -- Generation storage (§5.7) can take it as is.
   """
 
+  require Logger
+
   @type request :: %{
           required(:model) => String.t(),
           optional(:messages) => [%{role: term(), content: term()}],
@@ -48,9 +50,68 @@ defmodule PromptOn.LLM do
 
   @callback complete(request(), keyword()) :: {:ok, outcome()} | {:error, term()}
 
-  @doc "One non-streaming call through the configured adapter."
+  @doc """
+  One non-streaming call through the configured adapter.
+
+  Draft and Evaluation callers attach `usage: %{use_case: use_case, operation: kind}`. A
+  successful provider outcome is recorded before the caller parses or applies it, so retries,
+  discarded drafts and invalid model answers still contribute their actual cost. Arena already
+  records Generations and must not attach this option. A missing provider cost remains unknown.
+  """
   @spec complete(request(), keyword()) :: {:ok, outcome()} | {:error, term()}
-  def complete(request, opts \\ []), do: adapter().complete(request, opts)
+  def complete(request, opts \\ []) do
+    {usage, adapter_opts} = Keyword.pop(opts, :usage)
+    started_at = DateTime.utc_now()
+
+    with {:ok, outcome} <- adapter().complete(request, adapter_opts),
+         :ok <- record_usage(usage, request, outcome, started_at) do
+      {:ok, outcome}
+    end
+  end
+
+  defp record_usage(nil, _request, _outcome, _started_at), do: :ok
+
+  defp record_usage(
+         %{use_case: %PromptOn.Prompts.UseCase{} = use_case, operation: operation},
+         request,
+         outcome,
+         started_at
+       ) do
+    usage = Map.get(outcome, :usage) || %{}
+
+    attrs = %{
+      use_case_key: use_case.key,
+      operation: operation,
+      model: outcome[:model_used] || request.model,
+      input_tokens: usage[:input_tokens],
+      output_tokens: usage[:output_tokens],
+      cost_usd: outcome[:cost_usd],
+      started_at: started_at
+    }
+
+    case PromptOn.Observability.record_ai_usage(attrs,
+           tenant: use_case.project_id,
+           actor: PromptOn.SystemActor.new()
+         ) do
+      {:ok, _usage} -> :ok
+      {:error, _error} -> usage_failure(use_case, operation, outcome)
+    end
+  rescue
+    _error -> usage_failure(use_case, operation, outcome)
+  end
+
+  # The provider has already charged. Never repeat the model call because bookkeeping failed,
+  # and never log the returned body or the database exception (both may contain raw content).
+  defp usage_failure(use_case, operation, outcome) do
+    Logger.error("AI usage recording failed",
+      project_id: use_case.project_id,
+      use_case_key: use_case.key,
+      operation: operation,
+      cost_usd: outcome[:cost_usd]
+    )
+
+    :ok
+  end
 
   @doc "The current adapter module (`config :prompton, :llm_adapter`)."
   @spec adapter() :: module()

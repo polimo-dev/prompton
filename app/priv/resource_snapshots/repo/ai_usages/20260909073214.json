@@ -1,0 +1,206 @@
+{
+  "attributes": [
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"uuid_generate_v7()\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": true,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "use_case_key",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "operation",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "model",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "input_tokens",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "output_tokens",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "cost_usd",
+      "type": "decimal"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "started_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "inserted_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "index_where": null,
+        "match_tenant?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ai_usages_project_id_fkey",
+        "on_delete": "delete",
+        "on_update": null,
+        "primary_key?": true,
+        "schema": "public",
+        "table": "projects"
+      },
+      "scale": null,
+      "size": null,
+      "source": "project_id",
+      "type": "uuid"
+    }
+  ],
+  "base_filter": null,
+  "check_constraints": [],
+  "create_table_options": null,
+  "custom_indexes": [
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "project_id",
+        "started_at"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "project_id"
+        },
+        {
+          "type": "atom",
+          "value": "started_at"
+        }
+      ],
+      "include": null,
+      "include_base_filter?": true,
+      "message": null,
+      "name": "ai_usages_project_started_index",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    }
+  ],
+  "custom_statements": [
+    {
+      "after_tables": [
+        "ai_usages",
+        "evaluation_results",
+        "evaluation_runs",
+        "calibration_scores",
+        "rubrics",
+        "use_cases"
+      ],
+      "code?": false,
+      "down": "SELECT 1",
+      "global?": false,
+      "name": "recover_evaluation_usage",
+      "up": "INSERT INTO ai_usages\n  (id, project_id, use_case_key, operation, model, input_tokens, output_tokens,\n   cost_usd, started_at, inserted_at)\nSELECT result.id, result.project_id, use_case.key, 'evaluation',\n       COALESCE(result.judge_model, run.judge_model), result.input_tokens,\n       result.output_tokens, result.cost_usd,\n       COALESCE(result.scored_at, result.updated_at), now()\nFROM evaluation_results AS result\nJOIN evaluation_runs AS run\n  ON run.id = result.evaluation_run_id AND run.project_id = result.project_id\nJOIN use_cases AS use_case\n  ON use_case.id = run.use_case_id AND use_case.project_id = result.project_id\nWHERE result.cost_usd IS NOT NULL OR result.input_tokens IS NOT NULL\n   OR result.output_tokens IS NOT NULL\nUNION ALL\nSELECT score.id, score.project_id, use_case.key, 'evaluation', score.judge_model,\n       score.input_tokens, score.output_tokens, score.cost_usd, score.updated_at, now()\nFROM calibration_scores AS score\nJOIN rubrics AS rubric\n  ON rubric.id = score.rubric_id AND rubric.project_id = score.project_id\nJOIN use_cases AS use_case\n  ON use_case.id = rubric.use_case_id AND use_case.project_id = score.project_id\nWHERE score.status = 'ok' AND\n  (score.cost_usd IS NOT NULL OR score.input_tokens IS NOT NULL\n   OR score.output_tokens IS NOT NULL)\nON CONFLICT (id) DO NOTHING\n"
+    }
+  ],
+  "has_create_action": true,
+  "hash": "61AD5EF621014071D68E40EC48E41BCDF615A08A3D28E370FE18E4972F415301",
+  "identities": [],
+  "multitenancy": {
+    "attribute": "project_id",
+    "global": false,
+    "strategy": "attribute"
+  },
+  "repo": "Elixir.PromptOn.Repo",
+  "schema": null,
+  "table": "ai_usages"
+}

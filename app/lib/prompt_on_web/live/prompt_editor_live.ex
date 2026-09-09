@@ -1597,12 +1597,16 @@ defmodule PromptOnWeb.PromptEditorLive do
         message ->
           request = ai_request(socket.assigns, message, model)
           organization_id = organization.id
+          use_case = socket.assigns.use_case
 
           {:noreply,
            socket
            |> assign(draft_model: model, ai_stage: :running, ai_result: nil, ai_error: nil)
            |> start_async({:ai_draft, socket.assigns.ai_index}, fn ->
-             PromptOn.LLM.complete(request, organization_id: organization_id)
+             PromptOn.LLM.complete(request,
+               organization_id: organization_id,
+               usage: %{use_case: use_case, operation: :draft}
+             )
            end)}
       end
     else
