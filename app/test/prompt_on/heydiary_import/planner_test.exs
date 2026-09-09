@@ -104,11 +104,11 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert other.environment == "development"
     end
 
-    test "models: ai_models rows + groq whisper + embedding, providers null/[] preserved", %{
+    test "models: ai_models rows only, providers null/[] preserved", %{
       plan: plan
     } do
       by_id = Map.new(plan.models, &{&1.model_id, &1})
-      assert map_size(by_id) == 6
+      assert map_size(by_id) == 4
 
       assert %{
                provider: :openrouter,
@@ -122,18 +122,19 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert %{provider_options: %{"only" => []}, metadata: %{"description_key" => nil}} =
                by_id["anthropic/claude-sonnet-4.5"]
 
-      assert %{provider: :groq, provider_options: %{}} = by_id["whisper-large-v3"]
-      assert %{provider: :openrouter} = by_id["openai/text-embedding-3-small"]
+      refute Map.has_key?(by_id, "whisper-large-v3")
+      refute Map.has_key?(by_id, "openai/text-embedding-3-small")
     end
 
-    test "use cases: 9 in spec order, kinds, default_params from the NULL row", %{plan: plan} do
+    test "use cases: 7 chat cases in spec order, default_params from the NULL row", %{plan: plan} do
       assert Enum.map(plan.use_cases, & &1.key) == Enum.map(Spec.use_cases(), & &1.key)
 
       by_key = Map.new(plan.use_cases, &{&1.key, &1})
 
-      assert %{kind: :text, default_params: %{}} = by_key["voice_transcription"]
       assert %{kind: :chat, default_params: %{"temperature" => 0.7}} = by_key["chat_response"]
-      assert %{kind: :embedding} = by_key["diary_embedding"]
+      assert Enum.all?(plan.use_cases, &(&1.kind == :chat))
+      refute Map.has_key?(by_key, "voice_transcription")
+      refute Map.has_key?(by_key, "diary_embedding")
       # diary_generation NULL row temperature 0.4 (ko row is 0.5 — flattened, see the warning)
       assert by_key["diary_generation"].default_params == %{"temperature" => 0.4}
       assert by_key["diary_content_removal"].default_params == %{"temperature" => 0.4}
@@ -150,9 +151,9 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       end
 
       assert names.("diary_generation") == ["ko", "default"]
-      assert names.("voice_transcription") == ["ko", "default"]
       assert names.("diary_content_removal") == ["ko", "default"]
       assert names.("mood_inference") == ["default"]
+      assert names.("voice_transcription") == []
       assert names.("diary_embedding") == []
 
       removal =
@@ -161,7 +162,7 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       assert removal.description =~ "Kept identical to diary_generation"
     end
 
-    test "prompt versions: [system, user] liquid, chat_response system only, voice text_template, escaping",
+    test "prompt versions: [system, user] liquid, chat_response system only, escaping",
          %{
            plan: plan,
            dump: dump
@@ -191,9 +192,7 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
 
       assert [%{role: :system}] = pv.("chat_response", "default").messages
 
-      voice = pv.("voice_transcription", "ko")
-      assert voice.messages == []
-      assert voice.text_template == Dump.task(dump, "voice_transcription", "ko").system_prompt
+      refute pv.("voice_transcription", "ko")
 
       # transcript_revision NULL row contains literal {{date}} / {% now %} → escaped, renders back byte-identical
       escaped = pv.("transcript_revision", "default")
@@ -209,15 +208,13 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
       plan: plan
     } do
       assert Enum.map(plan.deployments, & &1.use_case_key) == [
-               "voice_transcription",
                "transcript_revision",
                "diary_generation",
                "diary_content_removal",
                "mood_inference",
                "chat_response",
                "memory_extraction",
-               "diary_search_content",
-               "diary_embedding"
+               "diary_search_content"
              ]
 
       # No rules, conditions, targets or weights
@@ -238,13 +235,8 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
                {"openai/gpt-oss-120b", %{"temperature" => 0.1}, %{"allow_fallbacks" => false},
                 ["default"]}
 
-      # voice: Groq whisper, no params, two languages
-      assert pin_shape(deployment(plan, "voice_transcription")) ==
-               {"whisper-large-v3", %{}, %{}, ["default", "ko"]}
-
-      # embedding: no prompt, so the pins are empty too
-      assert pin_shape(deployment(plan, "diary_embedding")) ==
-               {"openai/text-embedding-3-small", %{}, %{}, []}
+      refute deployment(plan, "voice_transcription")
+      refute deployment(plan, "diary_embedding")
 
       # diary_content_removal: HeyDiary reused the diary_generation settings → same model and
       # temperature
@@ -272,17 +264,16 @@ defmodule PromptOn.HeyDiaryImport.PlannerTest do
                Planner.pinned_plan_model(dump, "diary_generation")
 
       assert {"google/gemini-3.6-flash", _, _, _} = pin_shape(deployment(plan, "chat_response"))
-      assert nil == Planner.pinned_plan_model(dump, "voice_transcription")
     end
 
     test "counts cover the whole plan", %{plan: plan} do
       assert Plan.counts(plan) == %{
-               models: 6,
-               use_cases: 9,
-               prompts: 12,
-               prompt_versions: 12,
-               deployments: 9,
-               pins: 12,
+               models: 4,
+               use_cases: 7,
+               prompts: 10,
+               prompt_versions: 10,
+               deployments: 7,
+               pins: 10,
                warnings: 5
              }
     end

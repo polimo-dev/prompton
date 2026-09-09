@@ -4,10 +4,10 @@ defmodule PromptOn.Prompts.UseCase do
   `key` (`support_reply`) is the SDK contract, so it is stored without normalization via
   `@raw_string`.
 
-  - `kind` is `:chat` (a message array template) | `:text` (a single string, the Groq STT `prompt`)
-    | `:embedding` (no prompt, logs only).
-  - `:define` creates `Prompt(name: "default")` in the same transaction for `:chat`/`:text` only.
-    One Prompt per use case is the norm, so the UI hides that layer.
+  - Active authoring supports only `:chat` use cases. The enum still accepts historical `:text`
+    and `:embedding` rows so archived data and old logs can be loaded.
+  - `:define` creates `Prompt(name: "default")` in the same transaction. One Prompt per use case is
+    the norm, so the UI hides that layer.
   - `default_params` is the base under the `params` of a Deployment target (HeyDiary
     `ai_tasks.temperature`); a `nil` `payload_policy` inherits the Project value.
   - `selection_mode` was deleted (ADR 0007): user selection is expressed as multiple targets of a
@@ -25,13 +25,29 @@ defmodule PromptOn.Prompts.UseCase do
 
   postgres do
     table "use_cases"
+
+    custom_statements do
+      # Non-chat API calls cannot be converted by changing their prompt shape. Preserve their
+      # immutable versions, deployment revisions and logs, but retire them from active use.
+      statement :archive_non_chat_use_cases do
+        up """
+        UPDATE use_cases
+        SET archived_at = (now() AT TIME ZONE 'utc'),
+            updated_at = (now() AT TIME ZONE 'utc')
+        WHERE kind <> 'chat' AND archived_at IS NULL
+        """
+
+        # An application rollback can read archived records; it must not silently reactivate them.
+        down "SELECT 1"
+      end
+    end
   end
 
   actions do
     defaults [:read]
 
     create :define do
-      description "Defines a use case. chat/text also get the default Prompt `default`."
+      description "Defines a chat use case and opens the default Prompt `default`."
 
       accept [
         :key,
@@ -45,27 +61,32 @@ defmodule PromptOn.Prompts.UseCase do
       ]
 
       validate PromptOn.Prompts.UseCase.Validations.WithinPlanLimit
+      validate PromptOn.Prompts.UseCase.Validations.ChatOnly
       change PromptOn.Prompts.UseCase.Changes.CreateDefaultPrompt
     end
 
     update :describe do
       accept [:name, :description, :tags]
+      validate attribute_equals(:kind, :chat), message: "only chat use cases are supported"
     end
 
     update :set_input_schema do
       require_atomic? false
       accept [:input_schema]
+      validate attribute_equals(:kind, :chat), message: "only chat use cases are supported"
     end
 
     update :set_default_params do
       description "Replaces the base parameters under a Deployment target's params (not a merge)."
       accept [:default_params]
+      validate attribute_equals(:kind, :chat), message: "only chat use cases are supported"
     end
 
     update :set_payload_policy do
       description "Overrides the raw payload storage policy. `nil` inherits the Project default."
       require_atomic? false
       accept [:payload_policy]
+      validate attribute_equals(:kind, :chat), message: "only chat use cases are supported"
     end
 
     update :set_arena_models do
@@ -76,6 +97,7 @@ defmodule PromptOn.Prompts.UseCase do
       """
 
       accept [:arena_model_ids]
+      validate attribute_equals(:kind, :chat), message: "only chat use cases are supported"
     end
 
     update :archive do
@@ -90,7 +112,7 @@ defmodule PromptOn.Prompts.UseCase do
     end
 
     read :active do
-      filter expr(is_nil(archived_at))
+      filter expr(kind == :chat and is_nil(archived_at))
     end
   end
 

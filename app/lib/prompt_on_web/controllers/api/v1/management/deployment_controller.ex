@@ -30,8 +30,7 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
   Without `prompt_pins`, the **most recently committed version** of each prompt in this use case is
   pinned (the same default as Deploy in the use case hub). If no version has been committed at all
   it is a 400 - it means there is nothing to deploy, and a revision committed without pins would
-  leave the app receiving `unresolved`. For a `kind: "embedding"` use case, having no pins is
-  normal.
+  leave the app receiving `unresolved`.
 
   A deployment revision has **no commit message field** (ADR 0007 - a revision is a pure pin). What
   changed and why is told by the prompt version's `message` and the revision number.
@@ -173,8 +172,6 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentController do
 
   defp fetch_pins(_scope, _use_case, %{"prompt_pins" => _other}),
     do: {:error, {:invalid_request, "prompt_pins must be an object"}}
-
-  defp fetch_pins(_scope, %{kind: :embedding}, _params), do: {:ok, %{}}
 
   defp fetch_pins(scope, use_case, _params) do
     case latest_pins(scope, use_case) do

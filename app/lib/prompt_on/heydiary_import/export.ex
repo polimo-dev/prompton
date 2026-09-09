@@ -32,14 +32,13 @@ defmodule PromptOn.HeyDiaryImport.Export do
     `(SELECT id FROM ai_models WHERE model = …)` subquery.)
   - `ai_tasks` — the pin's prompt names → `(task, language)` rows (`default` → `language NULL`,
     any other name as is). The system prompt is the first message of the pinned PromptVersion
-    (`text_template` for `voice_transcription`) rendered with empty variables (escapes restored).
+    rendered with empty variables (escapes restored).
     `temperature` is the revision's effective temperature (else `UseCase.default_params`). Because
     UNIQUE(task_name, language) does not distinguish NULLs, the upsert is
     `UPDATE … WHERE language IS NOT DISTINCT FROM` + `INSERT … WHERE NOT EXISTS`.
   - `plan_ai_models` — one `is_default = true` row per plan (`Dump.plans/0`). As noted above, all
-    of them carry the same model. `voice_transcription` (Groq) has no rows in HeyDiary either and
-    is not exported.
-  - `diary_content_removal` (no rows in HeyDiary) and `diary_embedding` are not exported.
+    of them carry the same model.
+  - `diary_content_removal` (no rows in HeyDiary) is not exported.
 
   Nothing is deleted (existing rows remain). The result is a psql script wrapped in
   `BEGIN; … COMMIT;`.
@@ -75,7 +74,7 @@ defmodule PromptOn.HeyDiaryImport.Export do
 
   defp exportable_specs do
     Spec.use_cases()
-    |> Enum.reject(&(&1.kind == :embedding or &1.key == "diary_content_removal"))
+    |> Enum.reject(&(&1.key == "diary_content_removal"))
   end
 
   defp section(name, []), do: ["-- #{name}: nothing to export", ""]
@@ -129,7 +128,7 @@ defmodule PromptOn.HeyDiaryImport.Export do
     temperature = effective_temperature(snapshot, spec)
 
     for {name, version_id} <- Enum.sort_by(pins, fn {name, _} -> {name != "default", name} end),
-        prompt = system_prompt(snapshot, spec, version_id),
+        prompt = system_prompt(snapshot, version_id),
         not is_nil(prompt) do
       ai_task_upsert(spec.source_task, language_of(name), prompt, temperature)
     end
@@ -137,8 +136,6 @@ defmodule PromptOn.HeyDiaryImport.Export do
 
   defp language_of("default"), do: nil
   defp language_of(name), do: name
-
-  defp effective_temperature(_snapshot, %{kind: :text}), do: nil
 
   defp effective_temperature(snapshot, spec) do
     case effective(snapshot, spec.key) do
@@ -157,16 +154,15 @@ defmodule PromptOn.HeyDiaryImport.Export do
       "WHERE NOT EXISTS (SELECT 1 FROM ai_tasks WHERE #{where});"
   end
 
-  defp system_prompt(snapshot, spec, version_id) do
+  defp system_prompt(snapshot, version_id) do
     case Map.get(snapshot.prompt_versions, version_id) do
       nil -> nil
-      version -> render(template_source(spec.kind, version), version.engine)
+      version -> render(template_source(version), version.engine)
     end
   end
 
-  defp template_source(:text, %{text_template: text}), do: text
-  defp template_source(_kind, %{messages: [%{content: content} | _]}), do: content
-  defp template_source(_kind, _version), do: nil
+  defp template_source(%{messages: [%{content: content} | _]}), do: content
+  defp template_source(_version), do: nil
 
   # Turns escapes (`{{ "{{" }}`) back into the original text — when rendering fails, the raw
   # template is used as is.
@@ -184,11 +180,9 @@ defmodule PromptOn.HeyDiaryImport.Export do
 
   defp plan_ai_models_sql(snapshot, specs) do
     Enum.flat_map(specs, fn spec ->
-      case {spec.kind, effective(snapshot, spec.key)} do
-        # voice_transcription (Groq) has no plan_ai_models rows in HeyDiary either
-        {:text, _} -> []
-        {_, nil} -> []
-        {_, eff} -> Enum.map(Dump.plans(), &plan_model_upsert(spec.source_task, &1, eff))
+      case effective(snapshot, spec.key) do
+        nil -> []
+        eff -> Enum.map(Dump.plans(), &plan_model_upsert(spec.source_task, &1, eff))
       end
     end)
   end

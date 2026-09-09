@@ -28,11 +28,13 @@ defmodule PromptOn.Prompts.Prompt do
     create :open do
       description "Opens a new prompt under a use case. `(use_case, name)` is unique."
       accept [:use_case_id, :name, :description]
-      validate PromptOn.Prompts.Prompt.Validations.UseCaseInTenant
+      validate PromptOn.Prompts.Prompt.Validations.ChatParent
     end
 
     update :rename do
+      require_atomic? false
       accept [:name, :description]
+      validate PromptOn.Prompts.Prompt.Validations.ChatParent
     end
 
     update :save_draft do
@@ -42,7 +44,10 @@ defmodule PromptOn.Prompts.Prompt do
       the latest version.
       """
 
+      require_atomic? false
       accept [:draft]
+      validate PromptOn.Prompts.Prompt.Validations.ChatParent
+      validate PromptOn.Prompts.Prompt.Validations.ChatDraft
     end
 
     update :archive do
@@ -101,8 +106,8 @@ defmodule PromptOn.Prompts.Prompt do
             "text_template" => "..." | nil
           }
 
-      `kind :chat` uses `messages`, `kind :text` uses `text_template` (the same rule as versions).
-      `nil` = no draft -> the effective draft is **the content of the latest version** (an empty
+      Chat drafts use `messages`; `text_template` is retained only so historical draft maps can be
+      read. `nil` = no draft -> the effective draft is **the content of the latest version** (an empty
       document when there is no version either). Lint, `detected_variables` and `content_sha256`
       are not computed here; that is the job of the commit (= Deploy).
       """

@@ -126,23 +126,12 @@ defmodule PromptOnWeb.API.V1.UseCasePromptControllerTest do
     assert details["prompt_names"] == ["default", "ko"]
   end
 
-  test "text kind renders `text`; embedding has neither", %{hd: hd, raw: raw} do
+  test "non-chat use cases are not exposed by the runtime prompt endpoint", %{raw: raw} do
     conn = post_prompt(raw, "voice_transcription", %{variables: %{}})
-    body = json_response(conn, 200)
-    assert body["kind"] == "text"
-    assert body["text"] == "diary, day, today's mood"
-    assert body["provider"] == "groq"
-    refute Map.has_key?(body, "messages")
+    assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
 
     conn = post_prompt(raw, "diary_embedding", %{})
-    body = json_response(conn, 200)
-    assert body["kind"] == "embedding"
-    assert body["model_id"] == hd.models.embed.id
-    assert body["prompt"] == nil
-    assert body["prompt_names"] == []
-    assert body["prompt_version"] == nil
-    refute Map.has_key?(body, "messages")
-    refute Map.has_key?(body, "text")
+    assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
   end
 
   test "errors: unknown 404, unresolved 404, missing variable 400",

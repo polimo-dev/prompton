@@ -309,12 +309,39 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     render_async(view)
   end
 
-  defp run_text(view) do
-    view |> form("#arena-send-form") |> render_submit()
-    render_async(view)
+  defp column(view, %{id: id}), do: view |> element("#arena-column-#{id}") |> render()
+
+  defp legacy_use_case_row(project, key, kind) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO use_cases (project_id, key, name, kind, archived_at)
+        VALUES ($1, $2, $3, $4, now() AT TIME ZONE 'utc')
+        RETURNING id
+        """,
+        [Ecto.UUID.dump!(project.id), key, key, Atom.to_string(kind)]
+      )
+
+    id
   end
 
-  defp column(view, %{id: id}), do: view |> element("#arena-column-#{id}") |> render()
+  defp convert_use_case_kind!(use_case, kind, opts \\ []) do
+    archived? = Keyword.get(opts, :archived?, false)
+
+    Ecto.Adapters.SQL.query!(
+      PromptOn.Repo,
+      """
+      UPDATE use_cases
+      SET kind = $2,
+          archived_at = CASE WHEN $3 THEN now() AT TIME ZONE 'utc' ELSE archived_at END
+      WHERE id = $1
+      """,
+      [Ecto.UUID.dump!(use_case.id), Atom.to_string(kind), archived?]
+    )
+
+    %{use_case | kind: kind, archived_at: if(archived?, do: DateTime.utc_now(), else: nil)}
+  end
 
   # How many times a fragment occurs in the render: counts the things whose contract is "exactly
   # one" (the scroll box, the hook).
@@ -334,7 +361,7 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert has_element?(view, "#prompt-editor-form")
       assert has_element?(view, "#message-0-content")
       assert has_element?(view, "#detected-variables")
-      assert has_element?(view, "#kind-badge")
+      refute has_element?(view, "#kind-badge")
       assert has_element?(view, "#draft-badge")
 
       # The arena is not on this tab.
@@ -1765,71 +1792,6 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     end
   end
 
-  describe "arena: kind :text" do
-    setup %{project: project} do
-      echo_requests()
-      with_key(project)
-
-      use_case =
-        Fixtures.use_case_fixture(project, %{key: "voice_transcription", kind: :text})
-
-      Fixtures.prompt_version_fixture(use_case, %{text_template: "diary, {{ hint }}"})
-
-      {:ok, use_case} =
-        Prompts.set_use_case_input_schema(
-          use_case,
-          %{input_schema: [%{name: "hint", type: :string, required?: true}]},
-          scope(project)
-        )
-
-      model = Fixtures.model_fixture(project, %{model_id: "m/t", display_name: "Text model"})
-
-      %{use_case: pin(use_case, [model]), model: model}
-    end
-
-    test "Run leaves only an assistant row and the variables go into params", %{
-      conn: conn,
-      project: project,
-      use_case: use_case,
-      model: model
-    } do
-      {:ok, view, _html} = live(conn, arena_path(project, use_case))
-      render_async(view)
-
-      assert has_element?(view, "#arena-send", "Run")
-      refute has_element?(view, "#arena-input")
-
-      fill_vars(view, %{"hint" => "today"})
-      run_text(view)
-
-      assert column(view, model) =~ "m/t|n=1|last=diary, today"
-
-      rows = arena_rows(use_case)
-      assert [%{role: :assistant, status: :ok} = row] = rows
-      assert row.params == %{"variables" => %{"hint" => "today"}}
-      assert row.prompt_version_number == 1
-    end
-
-    test "running again shows only the last output but the history accumulates", %{
-      conn: conn,
-      project: project,
-      use_case: use_case,
-      model: model
-    } do
-      {:ok, view, _html} = live(conn, arena_path(project, use_case))
-      render_async(view)
-
-      fill_vars(view, %{"hint" => "one"})
-      run_text(view)
-      fill_vars(view, %{"hint" => "two"})
-      run_text(view)
-
-      assert column(view, model) =~ "last=diary, two"
-      refute column(view, model) =~ "last=diary, one"
-      assert length(arena_rows(use_case)) == 2
-    end
-  end
-
   describe "message size estimates" do
     test "counts follow editing, autosave, clearing and message removal", %{
       conn: conn,
@@ -1874,18 +1836,6 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       assert has_element?(view, "#message-0-stats-tokens", "~3 tokens")
       assert has_element?(view, "#message-1-stats-tokens", "~0 tokens")
       refute has_element?(view, "#message-2-stats")
-    end
-
-    test "text prompts use the same estimate without requiring a model", %{
-      conn: conn,
-      project: project
-    } do
-      use_case = Fixtures.use_case_fixture(project, %{key: "token_estimate", kind: :text})
-      Fixtures.prompt_version_fixture(use_case, %{text_template: "Hello, world!"})
-
-      {:ok, view, _html} = live(conn, hub_path(project, use_case))
-      assert has_element?(view, "#message-0-stats-characters", "13 ch")
-      assert has_element?(view, "#message-0-stats-tokens", "~4 tokens")
     end
   end
 
@@ -2761,27 +2711,94 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
     end
   end
 
-  describe "kind :embedding" do
-    test "the Editor tab is a one-line note and the Arena tab is only the model row", %{
+  describe "legacy non-chat use cases" do
+    test "a direct archived URL shows only the retired notice", %{
       conn: conn,
       project: project
     } do
-      use_case = Fixtures.use_case_fixture(project, %{key: "diary_embedding", kind: :embedding})
+      legacy_use_case_row(project, "diary_embedding", :embedding)
 
-      {:ok, view, _html} = live(conn, hub_path(project, use_case))
+      {:ok, view, html} =
+        live(conn, ~p"/personal/#{project.slug}/use-cases/diary_embedding/prompt")
 
-      assert has_element?(view, "#embedding-note")
-      assert has_element?(view, "#open-deploy")
+      assert has_element?(view, "#retired-use-case")
+      assert html =~ "Use case retired"
       refute has_element?(view, "#prompt-editor-form")
-      refute has_element?(view, "#save-version")
-
-      # Models stay on the Arena tab because Deploy will pick one; there is just nothing to run.
-      view |> element("#tab-arena") |> render_click()
-
-      assert has_element?(view, "#arena-models")
-      assert has_element?(view, "#arena-embedding-note")
       refute has_element?(view, "#arena")
       refute has_element?(view, "#arena-send-form")
+      refute has_element?(view, "#open-deploy")
+      refute has_element?(view, "#tab-arena")
+      refute has_element?(view, "#tab-evals")
+    end
+
+    test "direct events on non-chat URLs cannot run LLMs or mutate arena history", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      parent = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(parent, {:llm_called, request})
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      on_exit(&PromptOn.LLM.Fake.reset/0)
+
+      with_key(project)
+      {model, _other} = two_models(project)
+      use_case = pin(use_case, [model])
+      Fixtures.arena_message_fixture(use_case, model, %{content: "legacy history"})
+      legacy = convert_use_case_kind!(use_case, :embedding)
+
+      {:ok, view, _html} = live(conn, arena_path(project, legacy, ai: 0))
+
+      assert has_element?(view, "#retired-use-case")
+      assert length(arena_rows(legacy)) == 1
+
+      render_hook(view, "ai_generate", %{})
+      render_hook(view, "arena_send", %{"send" => %{"input" => "must not run"}})
+      render_hook(view, "clear_arena", %{})
+      render_hook(view, "clear_column", %{"model" => model.id})
+      render_async(view)
+
+      refute_received {:llm_called, _request}
+      assert [%{content: "legacy history"}] = arena_rows(legacy)
+    end
+
+    test "direct events on archived chat URLs cannot run LLMs or mutate arena history", %{
+      conn: conn,
+      project: project,
+      use_case: use_case
+    } do
+      parent = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(parent, {:llm_called, request})
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      on_exit(&PromptOn.LLM.Fake.reset/0)
+
+      with_key(project)
+      {model, _other} = two_models(project)
+      use_case = pin(use_case, [model])
+      Fixtures.arena_message_fixture(use_case, model, %{content: "archived history"})
+      retired = convert_use_case_kind!(use_case, :chat, archived?: true)
+
+      {:ok, view, _html} = live(conn, arena_path(project, retired, ai: 0))
+
+      assert has_element?(view, "#retired-use-case")
+      assert length(arena_rows(retired)) == 1
+
+      render_hook(view, "ai_generate", %{})
+      render_hook(view, "arena_send", %{"send" => %{"input" => "must not run"}})
+      render_hook(view, "clear_arena", %{})
+      render_hook(view, "clear_column", %{"model" => model.id})
+      render_async(view)
+
+      refute_received {:llm_called, _request}
+      assert [%{content: "archived history"}] = arena_rows(retired)
     end
   end
 

@@ -148,6 +148,30 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     assert body["prompt_versions"] == %{}
   end
 
+  test "legacy non-chat deployments do not leak into snapshot maps", %{
+    conn: conn,
+    hd: hd,
+    raw: raw
+  } do
+    embed_model =
+      model_fixture(hd.project, %{
+        provider: :openai,
+        model_id: "text-embedding-3-small",
+        display_name: "Embedding 3 small",
+        capabilities: []
+      })
+
+    embedding_id = legacy_use_case_row(hd.project, "diary_embedding", :embedding)
+
+    legacy_deployment_row(hd.project, hd.production, embedding_id, embed_model.id)
+
+    body = json_response(conn |> authed(raw) |> get(~p"/api/v1/use-cases"), 200)
+
+    refute Map.has_key?(body["use_cases"], "diary_embedding")
+    refute Map.has_key?(body["deployments"], "diary_embedding")
+    refute Map.has_key?(body["models"], embed_model.id)
+  end
+
   # Polling is the normal use of this endpoint, so the second request does not rebuild the snapshot
   # (`PromptOn.Deployments.SnapshotCache`). Verified through telemetry, looking only at the events
   # for this environment id.
@@ -178,5 +202,45 @@ defmodule PromptOnWeb.API.V1.SnapshotControllerTest do
     assert second.status == 200
     assert_receive {:cache, :hit}
     refute_receive {:cache, :miss}, 20
+  end
+
+  defp legacy_use_case_row(project, key, kind) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO use_cases (project_id, key, name, kind)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), key, key, Atom.to_string(kind)]
+      )
+
+    id
+  end
+
+  defp legacy_deployment_row(project, environment, use_case_id, model_id) do
+    Ecto.Adapters.SQL.query!(
+      PromptOn.Repo,
+      """
+      INSERT INTO deployments (
+        project_id,
+        use_case_id,
+        environment_id,
+        revision,
+        model_id,
+        prompt_pins,
+        params,
+        provider_options
+      )
+      VALUES ($1, $2, $3, 1, $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
+      """,
+      [
+        Ecto.UUID.dump!(project.id),
+        Ecto.UUID.dump!(use_case_id),
+        Ecto.UUID.dump!(environment.id),
+        Ecto.UUID.dump!(model_id)
+      ]
+    )
   end
 end

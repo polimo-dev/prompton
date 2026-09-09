@@ -3,7 +3,7 @@ defmodule PromptOn.HeyDiaryImport.Spec do
   The **knowledge baked into code** for the HeyDiary → PromptOn migration (plan.md §12.2 steps 4
   and 6, §12.3, §12.4):
 
-  - The definitions of the 9 UseCases (kind / input_schema / source task).
+  - The definitions of the 7 chat UseCases (input_schema / source task).
   - The Liquid versions of the in-code user prompt templates (all of §12.3) — they render
     **byte-identical** to the HeyDiary originals (`open_router.ex`, `search_content.ex`,
     `transcript_revision.ex`, `chat_response.ex extraction_prompt`) (golden test).
@@ -24,7 +24,6 @@ defmodule PromptOn.HeyDiaryImport.Spec do
   | `transcript_revision` | `entities[]` (`%{name, content}`), `transcript` |
   | `memory_extraction` | `language`, `today`, `existing_memories[]` (`%{group_type, name, content}`), `conversation[]` (`%{role, content}`; the app applies the window and the user filter) |
   | `chat_response` | none — two stages (§12.3): only the system body lives in PromptOn, the app combines header/memories/tone |
-  | `voice_transcription` | none — `text_template` = system_prompt |
   """
 
   @plan_source_task %{
@@ -34,7 +33,7 @@ defmodule PromptOn.HeyDiaryImport.Spec do
   @doc """
   The list of UseCase definitions (import order is fixed). `source_task` is the HeyDiary task name
   from which `ai_tasks`/`plan_ai_models` are read (only `diary_content_removal` maps to
-  `diary_generation`; `diary_embedding` has none).
+  `diary_generation`).
 
   HeyDiary's "the user picks the model" trait (the chat model picker) is not in this table — with
   deployments becoming pins, the selectable target list is gone (ADR 0007 revision 2026-09-01).
@@ -44,15 +43,6 @@ defmodule PromptOn.HeyDiaryImport.Spec do
   @spec use_cases() :: [map()]
   def use_cases do
     [
-      %{
-        key: "voice_transcription",
-        name: "Voice transcription",
-        kind: :text,
-        source_task: "voice_transcription",
-        input_schema: [],
-        description:
-          "Groq whisper `prompt` (HeyDiary ai_tasks.voice_transcription system_prompt)."
-      },
       %{
         key: "transcript_revision",
         name: "Transcript revision",
@@ -133,15 +123,6 @@ defmodule PromptOn.HeyDiaryImport.Spec do
           %{name: "content", type: :string, required?: true}
         ],
         description: "Search summary (HeyDiary AI.SearchContent.generate)."
-      },
-      %{
-        key: "diary_embedding",
-        name: "Diary embedding",
-        kind: :embedding,
-        source_task: nil,
-        input_schema: [],
-        description:
-          "Embedding logs only (not a resolve target — changing the model mixes pgvector dimensions, plan.md §12.1)."
       }
     ]
   end
@@ -174,34 +155,10 @@ defmodule PromptOn.HeyDiaryImport.Spec do
   }
 
   @doc """
-  The UseCase's code default temperature (`open_router.ex`). `voice_transcription`/`diary_embedding`
-  have no temperature (`nil`).
+  The UseCase's code default temperature (`open_router.ex`).
   """
   @spec code_default_temperature(String.t()) :: float() | nil
   def code_default_temperature(key), do: Map.get(@code_default_temperature, key)
-
-  # ---------------------------------------------------------------------------
-  # Groq / embedding models (hard-coded in HeyDiary)
-
-  @doc "The Groq whisper model (HeyDiary.External.Groq `@model`)."
-  def whisper_model,
-    do: %{
-      provider: :groq,
-      model_id: "whisper-large-v3",
-      display_name: "Whisper large v3",
-      metadata: %{},
-      provider_options: %{}
-    }
-
-  @doc "The embedding model (HeyDiary.External.Embeddings `@model`, via OpenRouter)."
-  def embedding_model,
-    do: %{
-      provider: :openrouter,
-      model_id: "openai/text-embedding-3-small",
-      display_name: "OpenAI text-embedding-3-small",
-      metadata: %{},
-      provider_options: %{}
-    }
 
   # ---------------------------------------------------------------------------
   # §12.3 user prompt templates (Liquid) — byte-identical to the HeyDiary originals
@@ -283,8 +240,7 @@ Date: {{ date }}
   }
 
   @doc """
-  The UseCase's user-message Liquid template (§12.3). `nil` for `chat_response` (system only),
-  `voice_transcription` (text) and `diary_embedding`.
+  The UseCase's user-message Liquid template (§12.3). `nil` for `chat_response` (system only).
   """
   @spec user_template(String.t()) :: String.t() | nil
   def user_template(key), do: Map.get(@user_templates, key)

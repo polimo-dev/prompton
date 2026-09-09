@@ -54,13 +54,13 @@ defmodule PromptOnWeb.API.V1.Management.Scope do
   def scope(conn, %Project{} = project), do: [tenant: project.id, actor: user(conn)]
 
   @doc """
-  Path segment `:key` (use case key) -> a live use case of this project. An archived use case is
-  404 - provisioning touches only live contracts.
+  Path segment `:key` (use case key) -> a live chat use case of this project. Archived and legacy
+  non-chat use cases are 404 - provisioning touches only active contracts.
   """
   @spec fetch_use_case(keyword(), map()) :: {:ok, UseCase.t()} | {:error, term()}
   def fetch_use_case(scope, %{"key" => key}) when is_binary(key) and key != "" do
     case Prompts.get_use_case_by_key(key, scope) do
-      {:ok, %UseCase{archived_at: nil} = use_case} ->
+      {:ok, %UseCase{kind: :chat, archived_at: nil} = use_case} ->
         {:ok, use_case}
 
       _other ->

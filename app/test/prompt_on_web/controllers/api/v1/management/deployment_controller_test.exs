@@ -154,22 +154,27 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
       assert message =~ "prompt_pins"
     end
 
-    test "embedding use cases pin nothing", %{raw: raw, project: project, model: model} do
-      _embedding = use_case_fixture(project, %{key: "diary_embedding", kind: :embedding})
+    test "legacy non-chat use cases are not deployable through the management API", %{
+      raw: raw,
+      project: project,
+      model: model
+    } do
+      legacy_use_case_row(project, "diary_embedding", :embedding)
 
-      body =
-        json_response(
-          api_post(
-            raw,
-            ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_embedding/deployments",
-            %{
-              model_id: model.id
-            }
-          ),
-          201
-        )
-
-      assert body["prompt_pins"] == %{}
+      assert %{
+               "error" => %{
+                 "code" => "not_found",
+                 "details" => %{"use_case" => "diary_embedding"}
+               }
+             } =
+               json_response(
+                 api_post(
+                   raw,
+                   ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/diary_embedding/deployments",
+                   %{model_id: model.id}
+                 ),
+                 404
+               )
     end
   end
 
@@ -278,5 +283,20 @@ defmodule PromptOnWeb.API.V1.Management.DeploymentControllerTest do
 
     assert %{"error" => %{"code" => "not_found"}} =
              json_response(api_post(other_raw, @path, %{model_id: model.id}), 404)
+  end
+
+  defp legacy_use_case_row(project, key, kind) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO use_cases (project_id, key, name, kind)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), key, key, Atom.to_string(kind)]
+      )
+
+    id
   end
 end

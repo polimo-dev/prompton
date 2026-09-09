@@ -62,6 +62,9 @@ defmodule PromptOn.Evals.EvaluationRun.Validations.TargetInTenant do
       {:ok, %{archived_at: archived_at}} when not is_nil(archived_at) ->
         invalid(field, "#{label} is archived")
 
+      {:ok, %UseCase{kind: kind}} when kind != :chat ->
+        invalid(field, "only chat use cases are supported")
+
       {:ok, record} ->
         {:ok, record}
 

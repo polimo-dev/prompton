@@ -116,22 +116,6 @@ defmodule PromptOnWeb.API.V1.Management.PromptControllerTest do
       assert second["id"] != body["id"]
     end
 
-    test "text use cases commit a text_template", %{raw: raw, project: project} do
-      _stt = use_case_fixture(project, %{key: "voice_transcription", kind: :text})
-
-      conn =
-        api_post(
-          raw,
-          ~p"/api/v1/orgs/personal/projects/heydiary/use-cases/voice_transcription/prompts/default/versions",
-          %{text_template: "diary, day, today's mood"}
-        )
-
-      body = json_response(conn, 201)
-
-      assert body["text_template"] == "diary, day, today's mood"
-      assert body["messages"] == []
-    end
-
     test "400 when the content does not match the use case kind", %{raw: raw} do
       conn =
         api_post(

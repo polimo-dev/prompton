@@ -5,8 +5,8 @@ defmodule PromptOnWeb.EvalsPanelTest do
 
   Covers the whole loop the product decision describes — sample ten logs → score them → draft the
   rubric → look at the agreement → revise → evaluate a revision → watch the run — plus the states
-  that are *not* the happy path: no logs with stored log content, no provider key, an `embedding` use
-  case, and hand-edited `?set=` / `?rubric=` / `?run=` values.
+  that are *not* the happy path: no logs with stored log content, no provider key, and hand-edited
+  `?set=` / `?rubric=` / `?run=` values.
 
   The judge is `PromptOn.LLM.Fake` (the test adapter), planted through
   `PromptOn.EvalsFixtures.plant_judge/1`. Because that adapter is configured through the
@@ -68,23 +68,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
   end
 
   # ---------------------------------------------------------------------------
-  # (a) Not applicable
-
-  describe "an embedding use case" do
-    test "says evals do not apply and offers nothing to click", %{conn: conn, project: project} do
-      use_case = Fixtures.use_case_fixture(project, %{key: "search_index", kind: :embedding})
-
-      {:ok, view, html} = live(conn, evals_path(project, use_case))
-
-      assert html =~ "Evals score a prompt&#39;s output. This use case is log-only (embedding)."
-      assert has_element?(view, "#evals-not-applicable")
-      refute has_element?(view, "#sample-logs")
-      refute has_element?(view, "#continuous-eval")
-    end
-  end
-
-  # ---------------------------------------------------------------------------
-  # (b) Empty
+  # (a) Empty
 
   describe "the empty state" do
     test "explains the loop and offers Sample 10 logs", %{

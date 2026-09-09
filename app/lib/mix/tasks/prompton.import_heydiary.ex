@@ -18,14 +18,14 @@ defmodule Mix.Tasks.Prompton.ImportHeydiary do
   - `--yes` — proceed without asking on warnings that need confirmation (per-plan models
     flattened, per-language temperatures flattened, no `default` prompt, no free default row,
     ambiguous default row)
-  - `--verify` — after applying, assemble the snapshot (v3) and compare it exhaustively against the
+  - `--verify` — after applying, assemble the snapshot (v4) and compare it exhaustively against the
     HeyDiary semantics for every (task, language) (§12.2 step 9)
 
   Order: load dump → print plan (`PromptOn.HeyDiaryImport.plan/2`) → confirm warnings → apply
   (SystemActor, one transaction) → summary (+ verification). Afterwards, run `mix prompton.export`
   in the HeyDiary repo to refresh `priv/prompton/use-cases.production.json`.
 
-  **Deployments are pins** (ADR 0007 revision 2026-09-01) — one model per use case plus one version
+  **Deployments are pins** (ADR 0007 revision 2026-09-01) — one model per chat use case plus one version
   per prompt name. HeyDiary's per-plan model hierarchy cannot be represented, so it collapses to the
   free (common) default row and asks for confirmation via `{:plan_models_flattened, …}`. Language
   branching is the prompt name (`default`/`ko` …), which the app picks by sending `prompt` with the

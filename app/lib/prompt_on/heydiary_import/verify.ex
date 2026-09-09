@@ -30,12 +30,11 @@ defmodule PromptOn.HeyDiaryImport.Verify do
 
   Compared fields: `model`, `temperature`, `providers` (`provider_options["only"]`),
   `allow_fallbacks`, `system_prompt` (the first message content rendered with empty variables —
-  this also checks that the escapes come back as the original) / `text_template` for
-  `voice_transcription`. When both sides have "no config" (HeyDiary no rows ↔ PromptOn resolution
-  failure), that is a match.
+  this also checks that the escapes come back as the original). When both sides have "no config"
+  (HeyDiary no rows ↔ PromptOn resolution failure), that is a match.
 
   `diary_content_removal` computes the HeyDiary side as the `diary_generation` config + the code
-  default 0.3. `diary_embedding` is not a resolve target and is skipped.
+  default 0.3.
   """
 
   alias PromptOn.HeyDiaryImport.{Dump, Planner, Spec}
@@ -63,7 +62,6 @@ defmodule PromptOn.HeyDiaryImport.Verify do
     snapshot = decode!(snapshot)
 
     Spec.use_cases()
-    |> Enum.reject(&(&1.kind == :embedding))
     |> Enum.flat_map(fn spec ->
       Enum.flat_map(languages(dump, spec.source_task), &compare_case(dump, snapshot, spec, &1))
     end)
@@ -73,7 +71,6 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   @spec cases(Dump.t()) :: [map()]
   def cases(dump) do
     Spec.use_cases()
-    |> Enum.reject(&(&1.kind == :embedding))
     |> Enum.flat_map(fn spec ->
       for language <- languages(dump, spec.source_task) do
         %{
@@ -133,22 +130,6 @@ defmodule PromptOn.HeyDiaryImport.Verify do
   # ---------------------------------------------------------------------------
   # HeyDiary side (Tasks.get_task + the pinned plan_ai_models row + build_llm_config)
 
-  defp heydiary(dump, %{key: "voice_transcription"} = spec, language) do
-    case Dump.task(dump, spec.source_task, language) do
-      nil ->
-        nil
-
-      task ->
-        %{
-          model: Spec.whisper_model().model_id,
-          temperature: nil,
-          providers: nil,
-          allow_fallbacks: nil,
-          system_prompt: task.system_prompt
-        }
-    end
-  end
-
   defp heydiary(dump, spec, language) do
     task = Dump.task(dump, spec.source_task, language)
     plan_model = Planner.pinned_plan_model(dump, spec.source_task)
@@ -191,10 +172,7 @@ defmodule PromptOn.HeyDiaryImport.Verify do
     end
   end
 
-  defp param(%{kind: :text}, _resolution), do: nil
   defp param(_spec, resolution), do: Map.get(resolution_params(resolution), "temperature")
-
-  defp provider_option(%{kind: :text}, _resolution, _key), do: nil
 
   defp provider_option(_spec, resolution, key),
     do: Map.get(resolution_provider_options(resolution), key)
@@ -206,9 +184,6 @@ defmodule PromptOn.HeyDiaryImport.Verify do
     do:
       Map.get(resolution, :provider_options) ||
         %{}
-
-  defp system_prompt(%{kind: :text}, %{text_template: text, engine: engine}),
-    do: render(text, engine)
 
   defp system_prompt(_spec, %{messages: [%{content: content} | _], engine: engine}),
     do: render(content, engine)

@@ -222,12 +222,12 @@ defmodule PromptOn.Evals.Calibration do
   defp context(use_case_id, project_id) do
     system = PromptOn.SystemActor.new()
 
-    with {:ok, %{} = use_case} <-
+    with {:ok, %{kind: :chat, archived_at: nil} = use_case} <-
            PromptOn.Prompts.get_use_case(use_case_id, tenant: project_id, actor: system),
          {:ok, %{} = project} <- PromptOn.Projects.get_project(project_id, actor: system) do
       {:ok, %{use_case: use_case, organization_id: project.organization_id}}
     else
-      {:ok, nil} -> {:error, :not_found}
+      {:ok, _inactive} -> {:error, :not_found}
       {:error, error} -> {:error, error}
     end
   end

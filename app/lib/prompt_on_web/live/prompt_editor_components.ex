@@ -543,7 +543,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   attr :roles, :list,
     required: true,
-    doc: "role select candidates (`[\"text\"]` for `kind :text`)"
+    doc: "role select candidates"
 
   attr :removable?, :boolean, default: false
   attr :ai_patch, :string, required: true
@@ -1146,10 +1146,8 @@ defmodule PromptOnWeb.PromptEditorComponents do
   responses as they were, and editing the prompt does not erase them (a quiet one-liner merely
   says "from the next turn on, the new prompt is used").
 
-  - `kind :chat`: the panes share the one input box below. Sending appends the same user turn to
-    every pane, and the answers accumulate separately.
-  - `kind :text`: single-shot. Pressing Run yields **one last output** per pane (the history keeps
-    accumulating).
+  The panes share the one input box below. Sending appends the same user turn to every pane, and
+  the answers accumulate separately.
 
   Each pane has its own clear (that model's column only), and "Clear history" above empties this
   use case's history wholesale.
@@ -1196,8 +1194,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
   hook `.ArenaEscape`, which clicks the close link; the overlay itself is `position:fixed`, so the
   screen behind it does not move.
   """
-  attr :kind, :atom, required: true, values: [:chat, :text]
-
   attr :columns, :list,
     default: [],
     doc: """
@@ -1230,7 +1226,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
     ~H"""
     <div :if={not @overlay?} id="arena">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
-        <div class="mono-label">{if @kind == :text, do: "Runs", else: "Arena"}</div>
+        <div class="mono-label">Arena</div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
           <button
             :if={@any_history?}
@@ -1268,11 +1264,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
         class="card2"
         icon="cpu"
         title="No models selected"
-        sub={
-          if @kind == :text,
-            do: "Pick one or more models — every run goes to all of them side by side.",
-            else: "Pick one or more models — every message goes to all of them side by side."
-        }
+        sub="Pick one or more models — every message goes to all of them side by side."
       >
         <:action>
           <DS.btn_link id="arena-empty-add" variant="solid" icon="plus" patch={@add_patch}>
@@ -1283,7 +1275,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
       <.arena_composer
         :if={@columns != []}
-        kind={@kind}
         input={@input}
         running?={@running?}
         blocked={@blocked}
@@ -1305,7 +1296,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
         <span class="font-mono" style="font-size:13px;color:var(--tx-0);white-space:nowrap;">
           {@title}
         </span>
-        <span class="mono-label">{if @kind == :text, do: "Runs", else: "Arena"}</span>
+        <span class="mono-label">Arena</span>
         <div style="display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;">
           <span
             :for={column <- @columns}
@@ -1333,7 +1324,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
         <div :if={@notice} id="arena-notice" style={hint_style()}>{@notice}</div>
         <.arena_variables :if={@variables != []} rows={@variables} open?={@variables_open?} />
         <.arena_strip columns={@columns} size="flex:1;min-height:0;" />
-        <.arena_composer kind={@kind} input={@input} running?={@running?} blocked={@blocked} />
+        <.arena_composer input={@input} running?={@running?} blocked={@blocked} />
       </div>
     </div>
 
@@ -1514,7 +1505,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
     """
   end
 
-  attr :kind, :atom, required: true
   attr :input, :string, default: ""
   attr :running?, :boolean, default: false
   attr :blocked, :string, default: nil
@@ -1530,7 +1520,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
       style={@style}
     >
       <textarea
-        :if={@kind == :chat}
         id="arena-input"
         name="send[input]"
         spellcheck="false"
@@ -1542,11 +1531,10 @@ defmodule PromptOnWeb.PromptEditorComponents do
         id="arena-send"
         type="submit"
         variant="primary"
-        icon={if @kind == :text, do: "play", else: "send"}
-        full={@kind == :text}
+        icon="send"
         disabled={@blocked != nil or @running?}
       >
-        {if @kind == :text, do: "Run", else: "Send"}
+        Send
       </DS.btn>
     </form>
     <div :if={@blocked} id="arena-blocked" style={hint_style(6)}>{@blocked}</div>
@@ -1637,10 +1625,6 @@ defmodule PromptOnWeb.PromptEditorComponents do
   attr :version_options, :list, default: [], doc: "`{label, id}` list (newest first)"
   attr :version_value, :string, default: nil
 
-  attr :version_required?, :boolean,
-    default: true,
-    doc: "`kind :embedding` has no prompt version; false only then"
-
   attr :default_params, :map, default: %{}
 
   attr :pins, :list,
@@ -1682,11 +1666,9 @@ defmodule PromptOnWeb.PromptEditorComponents do
           </label>
         </div>
 
-        <div :if={@version_required?} class="mono-label" style="margin:12px 0 6px;">
-          prompt version
-        </div>
+        <div class="mono-label" style="margin:12px 0 6px;">prompt version</div>
         <DS.ds_select
-          :if={@version_required? and @version_options != []}
+          :if={@version_options != []}
           id="deploy-version"
           name="deploy[version]"
           value={@version_value}
@@ -1695,7 +1677,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
           mono
         />
         <div
-          :if={@version_required? and @version_options == []}
+          :if={@version_options == []}
           id="deploy-no-versions"
           style={hint_style()}
         >
@@ -1789,7 +1771,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
           icon="flag"
           full
           style="margin-top:12px;"
-          disabled={@models == [] or @envs == [] or (@version_required? and @version_options == [])}
+          disabled={@models == [] or @envs == [] or @version_options == []}
         >
           Deploy
         </DS.btn>

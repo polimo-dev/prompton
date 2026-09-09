@@ -22,9 +22,10 @@ defmodule PromptOnWeb.API.V1.Management.PromptController do
   version id (`POST .../deployments`). The request's `message` is the commit message and comes back
   as `message` in the response.
 
-  `messages` belongs to `kind: "chat"` use cases and `text_template` to `kind: "text"`. On save the
-  template is linted against the P0 whitelist (`PromptOnSDK.Template.lint/1`) and its variables are
-  extracted into `detected_variables` - a lint failure is 400.
+  `messages` is the active prompt content. `text_template` stays in the response shape for
+  historical versions, but new commits reject it. On save the template is linted against the P0
+  whitelist (`PromptOnSDK.Template.lint/1`) and its variables are extracted into
+  `detected_variables` - a lint failure is 400.
   """
 
   use PromptOnWeb, :controller

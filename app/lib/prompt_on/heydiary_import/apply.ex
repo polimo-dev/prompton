@@ -246,20 +246,12 @@ defmodule PromptOn.HeyDiaryImport.Apply do
     end)
   end
 
-  defp version_input(%{text_template: nil} = v, prompt),
-    do: %{
-      prompt_id: prompt.id,
-      engine: v.engine,
-      commit_message: v.commit_message,
-      messages: v.messages
-    }
-
   defp version_input(v, prompt),
     do: %{
       prompt_id: prompt.id,
       engine: v.engine,
       commit_message: v.commit_message,
-      text_template: v.text_template
+      messages: v.messages
     }
 
   # ---------------------------------------------------------------------------

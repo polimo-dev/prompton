@@ -7,8 +7,8 @@ defmodule PromptOn.Deployments.Deployment.Validations.Committable do
 
   1. **Exactly one model, and it is required**: a `status :active`, non-archived Model of the same
      project.
-  2. **`kind :embedding` must have empty pins** (a use case without prompts).
-  3. **Every other kind needs at least one pin**, and if this use case has a live `default` prompt
+  2. **The use case must be chat**. Historical text/embedding rows can be loaded but not deployed.
+  3. **A chat use case needs at least one pin**, and if this use case has a live `default` prompt
      it **must** pin `default`, because that is the prompt an app receives when it sends no name.
   4. **Each pin name must be a live Prompt name of this use case** (unknown names are rejected), and
      its value must be a PromptVersion of the same tenant that **belongs to the Prompt of that
@@ -115,10 +115,8 @@ defmodule PromptOn.Deployments.Deployment.Validations.Committable do
   # ---------------------------------------------------------------------------
   # prompt pins
 
-  defp pin_errors(%UseCase{kind: :embedding}, pins, _prompts, _versions) when pins == %{}, do: []
-
-  defp pin_errors(%UseCase{kind: :embedding}, _pins, _prompts, _versions),
-    do: [invalid(:prompt_pins, "embedding use cases pin no prompt")]
+  defp pin_errors(%UseCase{kind: kind}, _pins, _prompts, _versions) when kind != :chat,
+    do: [invalid(:use_case_id, "#{kind} use cases are no longer deployable")]
 
   defp pin_errors(%UseCase{} = use_case, pins, prompts, _versions) when pins == %{} do
     if map_size(prompts) == 0 do

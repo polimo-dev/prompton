@@ -25,11 +25,13 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
 
     # Context dimensions were deleted — not in the report either
     refute output =~ "dimensions:"
-    assert output =~ "Models (6)"
+    assert output =~ "Models (4)"
     assert output =~ "google/gemini-3.6-flash"
-    assert output =~ "Use cases (9)"
+    assert output =~ "Use cases (7)"
     assert output =~ "chat_response"
-    assert output =~ "Deployments (9; 12 pinned prompts — one model each, no rules)"
+    refute output =~ "voice_transcription"
+    refute output =~ "diary_embedding"
+    assert output =~ "Deployments (7; 10 pinned prompts — one model each, no rules)"
     assert output =~ "pinned prompts"
     assert output =~ "default,ko"
     assert output =~ "[confirm]"
@@ -85,7 +87,7 @@ defmodule PromptOn.HeyDiaryImport.MixTaskTest do
     assert output =~ "[new project]"
 
     assert output =~
-             "models 6 · use cases 9 · prompts 12 · prompt versions 12 · deployments 9 (12 pinned prompts)"
+             "models 4 · use cases 7 · prompts 10 · prompt versions 10 · deployments 7 (10 pinned prompts)"
 
     assert output =~ "Verify: OK"
     assert output =~ "mix prompton.export"

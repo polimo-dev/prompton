@@ -96,7 +96,7 @@ Search the codebase for provider SDKs and for raw HTTP to provider hosts: `opena
 | collect | becomes |
 |---|---|
 | a stable snake_case name for the call site (`support_reply`) | use case `key` (cannot change later) |
-| chat messages vs a single string vs an embedding call | `kind`: `chat` \| `text` \| `embedding` |
+| the chat messages sent to the provider | `kind`: `chat` |
 | every value interpolated into the prompt (f-strings, template placeholders, string concatenation) | `input_schema` variables and `{{ name }}` placeholders |
 | language/tone/tenant variants of the same prompt | prompt names (`default`, `ko`, …) |
 | the model id string and the params (`temperature`, `max_tokens`, …) | `model` and `params` of the deployment pin |
@@ -188,7 +188,7 @@ Write the plan as a document the human can read and correct. It is derived from 
 1. **Current state.** Where prompts live today (hard-coded strings, config files, a database table, a prompt-management SaaS, env vars), who edits them, and what shipping a prompt change costs today (a redeploy? a migration? a dashboard click?).
 2. **The inventory**, as the table from step 3: one row per call site with its file and line, proposed use case key, `kind`, variables, current model and params, current prompt location.
 3. **What gets created in PromptOn.** Organization and project slug, environments used (`production`, `staging`), one use case per call site with its key/kind/`input_schema`/`default_params`, prompt names per use case (`default` plus any real variant), and the model + params each environment pins. Same models and params the app uses today — a migration changes *where* config lives, not what the app sends.
-4. **The code change per call site.** For each row: which function changes, what `use_case`, `messages`/`text`, and `track` replace, what stays (provider key, HTTP client, retry logic, parsing, function signature), and what gets deleted (the hard-coded prompt text, model id and params).
+4. **The code change per call site.** For each row: which function changes, what `use_case`, `messages`, and `track` replace, what stays (provider key, HTTP client, retry logic, parsing, function signature), and what gets deleted (the hard-coded prompt text, model id and params).
 5. **SDK or hand-written client.** Which the project's language gets, with the registry check that decided it (§1.8).
 6. **Resilience.** The use-case document cache (memory + disk), the bundled use-case document committed into the repo for cold starts, and the rule that a provider call never fails because PromptOn did (§1.9).
 7. **Logs.** Where the batch buffer lives, what gets logged, what is redacted, and the log content policy that applies.
@@ -230,7 +230,7 @@ cat > schema.json <<'EOF'
  {"name": "plan", "type": "string", "required": false,
   "description": "free or pro"}]
 EOF
-prompton use-cases create support_reply --kind chat --name 'Support reply' \
+prompton use-cases create support_reply --name 'Support reply' \
   --input-schema-file schema.json --default-params '{"temperature":0.5}' --idempotent
 
 # version 1 = the app's prompt, verbatim, with placeholders as {{ variable }} (Liquid)
@@ -264,7 +264,7 @@ PTN_KEY=$(prompton api-keys issue --name 'Helpdesk server' --quiet)
 
 **The model string is the app's, byte for byte.** `model_id` is the exact string the app already passes to its provider client — `gpt-4o-mini` for the OpenAI SDK, `claude-sonnet-4-5-20250929` for the Anthropic SDK, `openai/gpt-4o-mini` only when the app really calls OpenRouter. Do not reformat it to match the examples on this page: the app reads it back out of the use-case document and sends it to the provider unchanged, so a "normalised" id is a 404 on every call, at runtime, after the migration looks finished. The provider is a property of the **catalog entry**, not of the deployment: `prompton models register <model-id> --provider openrouter|openai|anthropic|google|groq` sets it, and registering first is the only way to keep an app that calls a provider directly from being pointed at OpenRouter.
 
-Template rules: engine `liquid` (default) or `raw`; allowed tags `for` `if` `unless` `assign` `break` `continue`, allowed filters `size` `join` `default`, no whitespace-control markers (`{%-`, `-%}`); anything else (e.g. `{% include %}`) is rejected at commit with 400. `detected_variables` in the commit response is the list to mirror in `input_schema`. `kind: text` commits `--file` as a text template; `kind: embedding` has no prompts. A `chat`/`text` use case is born with a prompt named `default`; if `default` exists it must be pinned.
+Template rules: engine `liquid` (default) or `raw`; allowed tags `for` `if` `unless` `assign` `break` `continue`, allowed filters `size` `join` `default`, no whitespace-control markers (`{%-`, `-%}`); anything else (e.g. `{% include %}`) is rejected at commit with 400. `detected_variables` in the commit response is the list to mirror in `input_schema`. A chat use case is born with a prompt named `default`; if `default` exists it must be pinned.
 
 Prove the pin renders before touching code:
 
@@ -284,7 +284,7 @@ Put `PTN_API_KEY` in the app's server-side environment (and in the deployment's 
 4. Generate a UUIDv7 before the provider call; after it, enqueue a log (§4.3) and flush in batches.
 5. On any PromptOn failure keep serving the last cached use-case document. A provider call must never fail because PromptOn did.
 
-**With the SDK** (§1.8 — Python, Node.js/TypeScript, Go, Ruby, Java, Kotlin, Rust and Elixir). Add the dependency, configure the API key, the environment, the host, the disk-cache path and the bundled use-case document, build one client per process (in Elixir, `{PromptOnSDK, []}` in the supervision tree), and close it on shutdown so the last logs are flushed. Then replace each call site's prompt/model constants with the SDK's `use_case` → `messages`/`text` → your provider call inside `track`, which times the call and queues the log. `messages(vars)` is for `kind: chat` and `text(vars)` is for `kind: text`; each method fails on the wrong kind instead of guessing. The provider response should be wrapped as a `Result` (`Result.from_openai(...)` or `Result.from_anthropic(...)` where the SDK supports it) before `track` returns. The 10-second use-case document cache with ETag polling, the memory → disk → bundle fallback, the `429`/5xx handling, the local rendering, the log content policy and the log batching come with it; do not reimplement them.
+**With the SDK** (§1.8 — Python, Node.js/TypeScript, Go, Ruby, Java, Kotlin, Rust and Elixir). Add the dependency, configure the API key, the environment, the host, the disk-cache path and the bundled use-case document, build one client per process (in Elixir, `{PromptOnSDK, []}` in the supervision tree), and close it on shutdown so the last logs are flushed. Then replace each call site's prompt/model constants with the SDK's `use_case` → `messages(vars)` → your provider call inside `track`, which times the call and queues the log. The provider response should be wrapped as a `Result` (`Result.from_openai(...)` or `Result.from_anthropic(...)` where the SDK supports it) before `track` returns. The 10-second use-case document cache with ETag polling, the memory → disk → bundle fallback, the `429`/5xx handling, the local rendering, the log content policy and the log batching come with it; do not reimplement them.
 
 For the bundled use-case document use the export the SDK ships rather than a hand-rolled fetch. Run it in CI on every build and commit the result, **one file per environment**, together with the `.meta.json` sidecar the SDK writes beside it — the sidecar carries the `etag`, `last_modified` and `environment` the store reads back, and without it the SDK reports a fabricated document age and cannot seed the first poll's `If-None-Match`. Then point the SDK's bundle option at the file that matches the process's environment.
 
@@ -345,7 +345,7 @@ Use the official SDK when one exists for the project's language. Eight do — Py
 | **Rust** | **Written, in the repository — not published yet** — crate `prompton-sdk`, `use prompton::…` (Apache-2.0, repository [prompton-rust](https://github.com/polimo-dev/prompton-rust)) | check crates.io first. If it resolves, `prompton-sdk = "0.2"`. If it does not, depend on the repository: `prompton-sdk = { git = "https://github.com/polimo-dev/prompton-rust", branch = "main" }`. Rust 1.85 or newer |
 | **Elixir** | **Written, in the repository — not published yet** — `prompton_sdk`, module `PromptOnSDK` (Apache-2.0, repository [prompton-elixir](https://github.com/polimo-dev/prompton-elixir)) | check `mix hex.info prompton_sdk` first. If it resolves, `{:prompton_sdk, "~> 0.2"}`. If it does not, depend on the repository: `{:prompton_sdk, github: "polimo-dev/prompton-elixir"}`. Either way, start `{PromptOnSDK, []}` in the supervision tree |
 
-All eight implement the same contract and pass the same conformance suite, and that contract is also the specification a hand-written client has to meet in any other language: a **use-case document store** that polls `GET /use-cases` with `If-None-Match` behind a 10-second cache, keeps the document in memory, mirrors it to a disk cache and falls back to a bundled use-case document, so the app keeps running when PromptOn is unreachable and a `429` or a 5xx only means the last document keeps serving; a **UseCase** object that turns a use case key (plus an optional prompt name) into model, params, provider options and the pinned prompt template, with a `/use-cases/:key/prompt` client for smoke tests; `messages(vars)` / `text(vars)` methods that render that template locally on the Liquid subset; and **logs** — `log()` and `flush()`, plus `track()` to time your provider call and log the returned `Result` — with app-generated UUIDv7 ids, content truncation, batching, retries and a drain on shutdown. None of them needs a database, Redis or any other external service. Each SDK's README in its repository is the reference for its configuration keys, its bundle export and its test mode.
+All eight implement the same contract and pass the same conformance suite, and that contract is also the specification a hand-written client has to meet in any other language: a **use-case document store** that polls `GET /use-cases` with `If-None-Match` behind a 10-second cache, keeps the document in memory, mirrors it to a disk cache and falls back to a bundled use-case document, so the app keeps running when PromptOn is unreachable and a `429` or a 5xx only means the last document keeps serving; a **UseCase** object that turns a use case key (plus an optional prompt name) into model, params, provider options and the pinned prompt template, with a `/use-cases/:key/prompt` client for smoke tests; `messages(vars)` that renders that template locally on the Liquid subset; and **logs** — `log()` and `flush()`, plus `track()` to time your provider call and log the returned `Result` — with app-generated UUIDv7 ids, content truncation, batching, retries and a drain on shutdown. None of them needs a database, Redis or any other external service. Each SDK's README in its repository is the reference for its configuration keys, its bundle export and its test mode.
 
 **Verify before you assume.** Every row of that table is a point-in-time view of a moving target:
 
@@ -384,10 +384,10 @@ Global flags on every command: `--host`, `--token`, `--org <slug|personal>`, `--
 | `projects create <slug> [--name N] [--timezone TZ]` | `prompton projects create helpdesk --name Helpdesk --idempotent` |
 | `use-cases list` | `prompton use-cases list --json` |
 | `use-cases get <key>` | `prompton use-cases get support_reply --json` (prompts, versions, live deployments) |
-| `use-cases create <key> [--kind chat\|text\|embedding] [--name N] [--description D] [--input-schema-file F] [--default-params JSON] [--tags a,b]` | `prompton use-cases create support_reply --kind chat --input-schema-file schema.json` |
+| `use-cases create <key> [--name N] [--description D] [--input-schema-file F] [--default-params JSON] [--tags a,b]` | `prompton use-cases create support_reply --input-schema-file schema.json` |
 | `use-cases update <key> [--name] [--description] [--tags] [--input-schema-file] [--default-params]` | `prompton use-cases update support_reply --default-params '{"temperature":0.3}'` (schema/params replace, not merge) |
 | `prompts open <use-case> <name> [--description D]` | `prompton prompts open support_reply ko --description Korean` |
-| `prompts commit <use-case> <name> --file F [--format auto\|messages\|text] [--engine liquid\|raw] [--message M]` | `prompton prompts commit support_reply default --file messages.json --message "v1"` (`--file -` reads stdin) |
+| `prompts commit <use-case> <name> --file F [--engine liquid\|raw] [--message M]` | `prompton prompts commit support_reply default --file messages.json --message "v1"` (`--file -` reads stdin) |
 | `models list` | `prompton models list --json` |
 | `models register <model-id> [--provider P] [--display-name N]` | `prompton models register openai/gpt-4o-mini` |
 | `deploy <use-case> --model M [--environment E] [--params JSON] [--provider-options JSON] [--pin name=version ...]` | `prompton deploy support_reply --model openai/gpt-4o-mini --pin default=1 --pin ko=latest` |
@@ -457,7 +457,7 @@ POST /orgs/:org/projects/:project/use-cases
       "input_schema": [{"name": "question", "type": "string", "required": true, "description": "…", "example": "…"}],
       "default_params": {"temperature": 0.5}, "tags": ["support"]}
 // 201 {"id","key","name","description","kind","input_schema","default_params","tags","created_at"}
-// key required ([a-z0-9_], starts with a letter); kind chat (default) | text | embedding; type string|number|boolean|list|map
+// key required ([a-z0-9_], starts with a letter); kind chat (default); type string|number|boolean|list|map
 // 400 bad kind / schema · 409 {"details": {"use_case": {...}}}
 
 GET  /orgs/:org/projects/:project/use-cases/:key       // use case + prompts + live deployments
@@ -480,8 +480,7 @@ POST /orgs/:org/projects/:project/use-cases/:key/prompts
 
 POST /orgs/:org/projects/:project/use-cases/:key/prompts/:name/versions
      {"messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "{{ question }}"}],
-      "engine": "liquid", "message": "migrated from the app"}      // kind chat
-     {"text_template": "…"}                                        // kind text
+      "engine": "liquid", "message": "migrated from the app"}
 // 201
 {"id": "…", "prompt_id": "…", "number": 1, "engine": "liquid", "messages": [...], "text_template": null,
  "detected_variables": ["question"], "message": "migrated from the app", "content_sha256": "…", "created_at": "…"}
@@ -526,7 +525,7 @@ POST /orgs/:org/projects/:project/use-cases/:key/deployments/rollback
 // 200 new revision carrying the old pins · 404 {"details": {"revision": 9, "available_revisions": [2, 1]}}
 ```
 
-A revision is live the moment it is committed. Embedding use cases pin `{}`.
+A revision is live the moment it is committed.
 
 ### Runtime keys and the BYOK provider key
 
@@ -605,7 +604,7 @@ Poll every 10 s by default with `If-None-Match` (a `304` costs nothing); keep th
  "provider_options": {"only": ["OpenAI"], "allow_fallbacks": false},
  "source": "remote",
  "prompt_version": {"id": "…", "number": 1},
- "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…rendered…"}],   // kind text: "text": "…"; embedding: neither, prompt null, prompt_names [], prompt_version null
+ "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…rendered…"}],
  "warnings": [], "etag": "sha256-…"}
 ```
 
@@ -620,12 +619,12 @@ Errors: 400 `invalid_request` — `variables` not an object, `prompt` not a non-
    "model": "openai/gpt-4o-mini",            // required — provider model string
    "status": "ok",                           // required — "ok" | "error"
    "started_at": "2026-09-01T09:12:03.123Z", // required — ISO 8601; ≤ 5 min in the future, ≤ 7 days in the past
-   "kind": "chat",                           // chat (default) | text | embedding
+   "kind": "chat",
    "deployment_id": "…", "deployment_revision": 3, "prompt": "default", "prompt_version_id": "…", "model_id": "<catalog uuid>",
    "source": "remote",            // remote | disk | bundle | manual
    "provider": "openrouter", "model_used": "…", "upstream_provider": "OpenAI",
    "params": {"temperature": 0.3},           // > 4 KB → blanked, listed in metadata.truncated_fields
-   "input": {"variables": {...}, "messages": [{"role": "system", "content": "…"}], "truncated": false},   // or {"text": "…"}
+   "input": {"variables": {...}, "messages": [{"role": "system", "content": "…"}], "truncated": false},
    "output": {"content": "…", "tool_calls": [], "truncated": false},
    "finish_reason": "stop", "stop_kind": "stop",   // stop | length | tool_call | content_filter | other; derived from finish_reason when absent
    "error": {"kind": "rate_limited", "status": 429, "message": "…"},   // on status "error": kind http_4xx | http_5xx | rate_limited | timeout | transport | parse | app
@@ -649,7 +648,7 @@ Rules:
 - `503 unavailable` + `Retry-After` is the one status PromptOn itself asks you to retry — resend the same batch with the same ids. Be robust to whatever sits in front of it too: retry `429` and any 5xx (honour `Retry-After`, back off otherwise), split a `413` batch in half, and drop on any other 4xx.
 - Send failures too (`status: "error"` + `error`); error rates and truncation rates are meaningless without them.
 - Log content storage follows the use case's log content policy (`payload_policy`) from the use-case document: `mode` `full` stores `input`/`output` (encrypted at rest), sampled by `sample_rate` on a hash of `id` — errors and `stop_kind: "length"` are always kept; `hash` keeps only sha256 + byte size; `none` drops it. A client may pre-hash by sending `input`/`output` as `{"sha256": "<64 hex>", "bytes": n}`.
-- Truncate before sending, relative to `max_bytes` (default 262144): one message `content` ≤ `max_bytes/8`; `input.messages`, `input.text`, `input.variables` ≤ `max_bytes` each; `output.content` and `output.tool_calls` ≤ `max_bytes/4`. Keep head and tail, set `"truncated": true`. The server re-checks with the same rules. Strings with NUL bytes or invalid UTF-8 are rejected per record.
+- Truncate before sending, relative to `max_bytes` (default 262144): one message `content` ≤ `max_bytes/8`; `input.messages` and `input.variables` ≤ `max_bytes` each; `output.content` and `output.tool_calls` ≤ `max_bytes/4`. Keep head and tail, set `"truncated": true`. The server re-checks with the same rules. Strings with NUL bytes or invalid UTF-8 are rejected per record.
 - Retention is per plan and per use case: Free keeps the most recent 1,000 logs of each use case for at most 7 days, Team 100,000 for 30 days, Pro 100,000 for 90 days. Older logs and their payloads are purged nightly; ingest is never refused for retention. Free also caps an organization at 2 projects and a project at 10 use cases — creates beyond that fail with a clear message naming the plan.
 
 ## 5. Do / don't

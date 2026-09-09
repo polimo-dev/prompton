@@ -97,6 +97,23 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
              Prompts.append_arena_message(Map.delete(base, :use_case_id), scope(ctx.project))
   end
 
+  test "append rejects legacy non-chat parents", ctx do
+    legacy_id = legacy_use_case_row(ctx.project, "diary_embedding", :embedding)
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.append_arena_message(
+               %{
+                 use_case_id: legacy_id,
+                 model_id: ctx.sonnet.id,
+                 role: :user,
+                 content: "x"
+               },
+               scope(ctx.project)
+             )
+
+    assert Exception.message(error) =~ "not chat"
+  end
+
   test "for_use_case returns every column in insert order, and filters by model", ctx do
     a = arena_message_fixture(ctx.use_case, ctx.sonnet, %{content: "one"})
     b = arena_message_fixture(ctx.use_case, ctx.mini, %{content: "one"})
@@ -301,5 +318,20 @@ defmodule PromptOn.Prompts.ArenaMessageTest do
                  scope(ctx.project, actor)
                )
     end
+  end
+
+  defp legacy_use_case_row(project, key, kind) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO use_cases (project_id, key, name, kind)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), key, key, Atom.to_string(kind)]
+      )
+
+    id
   end
 end

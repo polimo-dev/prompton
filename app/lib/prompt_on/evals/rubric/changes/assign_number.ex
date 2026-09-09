@@ -46,7 +46,7 @@ defmodule PromptOn.Evals.Rubric.Changes.AssignNumber do
 
   defp lock_use_case(use_case_id, opts) do
     UseCase
-    |> Ash.Query.filter(id == ^use_case_id)
+    |> Ash.Query.filter(id == ^use_case_id and kind == :chat and is_nil(archived_at))
     |> Ash.Query.lock("FOR UPDATE")
     |> Ash.read_one(opts)
   end

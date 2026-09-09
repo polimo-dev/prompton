@@ -210,28 +210,20 @@ defmodule PromptOn.Deployments.DeploymentTest do
                "not found in this project"
     end
 
-    test "an embedding use case pins no prompt", ctx do
-      embedding = use_case_fixture(ctx.project, %{key: "embed_it", kind: :embedding})
-
-      d =
-        deployment_fixture(embedding, ctx.production, %{
-          model_id: ctx.model.id,
-          prompt_pins: %{}
-        })
-
-      assert d.prompt_pins == %{}
+    test "legacy non-chat use cases are not deployable", ctx do
+      embedding_id = legacy_use_case_row(ctx.project, "embed_it", :embedding)
 
       assert errors(
                Deployments.commit_deployment(
                  %{
-                   use_case_id: embedding.id,
+                   use_case_id: embedding_id,
                    environment_id: ctx.production.id,
                    model_id: ctx.model.id,
-                   prompt_pins: %{"default" => ctx.version.id}
+                   prompt_pins: %{}
                  },
                  ctx.opts
                )
-             ) =~ "embedding use cases pin no prompt"
+             ) =~ "embedding use cases are no longer deployable"
     end
 
     test "any committed version is deployable — ADR 0007 drops the publish gate", ctx do
@@ -448,5 +440,20 @@ defmodule PromptOn.Deployments.DeploymentTest do
 
       assert Exception.message(error) =~ "pins no prompt"
     end
+  end
+
+  defp legacy_use_case_row(project, key, kind) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO use_cases (project_id, key, name, kind)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), key, key, Atom.to_string(kind)]
+      )
+
+    id
   end
 end

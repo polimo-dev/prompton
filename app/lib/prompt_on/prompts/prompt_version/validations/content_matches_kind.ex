@@ -1,10 +1,9 @@
 defmodule PromptOn.Prompts.PromptVersion.Validations.ContentMatchesKind do
   @moduledoc """
-  Checks that the template shape matches the use case `kind` (plan.md §5.5 "messages and
-  text_template are mutually exclusive"): `:chat` -> `messages` non-empty and no `text_template`,
-  `:text` -> `text_template` present and `messages` empty, `:embedding` -> no prompt version can be
-  created at all. The Prompt is looked up in the same tenant only (a prompt_id of another project
-  is "not found").
+  Checks that active prompt versions are chat templates: `messages` must be non-empty and
+  `text_template` is rejected. Historical text/embedding rows remain readable, but no new versions
+  can be created for them. The Prompt is looked up in the same tenant only (a prompt_id of another
+  project is "not found").
   """
 
   use Ash.Resource.Validation
@@ -32,16 +31,11 @@ defmodule PromptOn.Prompts.PromptVersion.Validations.ContentMatchesKind do
 
   defp check(:chat, _messages, _text), do: :ok
 
-  defp check(:text, _messages, nil),
-    do: invalid(:text_template, "text use case needs text_template")
-
-  defp check(:text, [_ | _], _text),
-    do: invalid(:messages, "text use case takes text_template, not messages")
-
-  defp check(:text, _messages, _text), do: :ok
+  defp check(:text, _messages, _text),
+    do: invalid(:prompt_id, "text use cases are no longer supported for prompt versions")
 
   defp check(:embedding, _messages, _text),
-    do: invalid(:prompt_id, "embedding use cases have no prompt versions")
+    do: invalid(:prompt_id, "embedding use cases are no longer supported for prompt versions")
 
   defp use_case_kind(nil, _changeset),
     do:

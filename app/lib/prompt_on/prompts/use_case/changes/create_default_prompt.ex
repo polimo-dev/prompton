@@ -1,7 +1,7 @@
 defmodule PromptOn.Prompts.UseCase.Changes.CreateDefaultPrompt do
   @moduledoc """
-  Right after `:define`, creates `Prompt(name: "default")` for `:chat`/`:text` use cases in the
-  same transaction (plan.md §5.5). `:embedding` has no prompt, so nothing is created.
+  Right after `:define`, creates `Prompt(name: "default")` for chat use cases in the same
+  transaction.
   """
 
   use Ash.Resource.Change
@@ -11,7 +11,7 @@ defmodule PromptOn.Prompts.UseCase.Changes.CreateDefaultPrompt do
   @impl true
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_action(changeset, fn _changeset, use_case ->
-      if use_case.kind in [:chat, :text], do: open_default(use_case), else: {:ok, use_case}
+      if use_case.kind == :chat, do: open_default(use_case), else: {:ok, use_case}
     end)
   end
 

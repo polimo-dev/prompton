@@ -6,7 +6,7 @@
 # Every write goes through `%PromptOn.SystemActor{}` (policy bypass; the caller is recorded in the
 # logs).
 #
-# What it creates: a development sign-in account + a HeyDiary-shaped project (8 models, 9 use
+# What it creates: a development sign-in account + a HeyDiary-shaped project (6 models, 7 use
 # cases, committed prompt versions, live production/staging Deployments — **one pin** per revision
 # (1 model + one version per prompt name)).
 # The contents follow the mockup `design/mockup/app/data.jsx` — the goal is to have the screens run
@@ -211,37 +211,10 @@ else
     capabilities: [:streaming]
   })
 
-  whisper =
-    register_model.(%{
-      provider: :groq,
-      model_id: "whisper-large-v3",
-      display_name: "Whisper large v3",
-      pricing: %{"input_per_m" => 0.111, "currency" => "USD", "unit" => "audio_second"},
-      capabilities: []
-    })
-
-  embed =
-    register_model.(%{
-      provider: :openai,
-      model_id: "text-embedding-3-small",
-      display_name: "text-embedding-3-small",
-      pricing: %{"input_per_m" => 0.02, "currency" => "USD", "unit" => "token"},
-      context_length: 8_000,
-      capabilities: []
-    })
-
   # -------------------------------------------------------------------------
   # 4. Use cases (data.jsx USE_CASES)
 
   define_use_case = fn attrs -> unwrap.(Prompts.define_use_case(attrs, tenant)) end
-
-  voice_transcription =
-    define_use_case.(%{
-      key: "voice_transcription",
-      name: "Voice transcription",
-      kind: :text,
-      input_schema: [%{name: "language", type: :string, required?: true}]
-    })
 
   transcript_revision =
     define_use_case.(%{
@@ -315,14 +288,6 @@ else
       name: "Diary search content",
       kind: :chat,
       input_schema: [%{name: "query", type: :string, required?: true}]
-    })
-
-  diary_embedding =
-    define_use_case.(%{
-      key: "diary_embedding",
-      name: "Diary embedding",
-      kind: :embedding,
-      input_schema: [%{name: "text", type: :string, required?: true}]
     })
 
   # -------------------------------------------------------------------------
@@ -439,14 +404,6 @@ else
           content: "{% for m in history %}{{ m.role }}: {{ m.content }}\n{% endfor %}"
         }
       ]
-    })
-
-  stt_v4 =
-    voice_transcription
-    |> commit_version.(%{
-      commit_message: "Add proper-noun hint",
-      text_template:
-        "This is a diary voice memo. Transcribe the colloquial Korean speech as spoken, and keep personal and place names in their original form."
     })
 
   revision_v1 =
@@ -601,11 +558,6 @@ else
     prompt_pins: %{"default" => mood_v3.id}
   })
 
-  pin.(voice_transcription, production, %{
-    model_id: whisper.id,
-    prompt_pins: %{"default" => stt_v4.id}
-  })
-
   pin.(transcript_revision, production, %{
     model_id: gpt5_mini.id,
     prompt_pins: %{"default" => revision_v1.id}
@@ -627,11 +579,8 @@ else
     prompt_pins: %{"default" => search_v1.id}
   })
 
-  # diary_embedding is logs only — it has no prompt, so the pins map is empty.
-  pin.(diary_embedding, production, %{model_id: embed.id})
-
   Logger.info("""
-  [seeds] created the heydiary project (9 use cases, 8 models, 11 live Deployments — all pins).
+  [seeds] created the heydiary project (7 use cases, 6 models, 9 live Deployments — all pins).
   [seeds] sign-in: #{credentials}
   [seeds] start URL: http://localhost:4000/personal/heydiary/use-cases
   """)

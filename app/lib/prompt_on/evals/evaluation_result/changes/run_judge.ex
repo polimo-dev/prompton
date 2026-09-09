@@ -109,7 +109,8 @@ defmodule PromptOn.Evals.EvaluationResult.Changes.RunJudge do
   defp load_use_case(run, opts) do
     case PromptOn.Prompts.get_use_case(run.use_case_id, opts) do
       {:ok, nil} -> {:terminal, "the use case is gone"}
-      {:ok, use_case} -> {:ok, use_case}
+      {:ok, %{kind: :chat, archived_at: nil} = use_case} -> {:ok, use_case}
+      {:ok, _inactive} -> {:terminal, "the use case is no longer an active chat use case"}
       {:error, error} -> {:error, error}
     end
   end

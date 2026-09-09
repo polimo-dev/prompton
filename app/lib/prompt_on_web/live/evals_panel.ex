@@ -904,23 +904,13 @@ defmodule PromptOnWeb.EvalsPanel do
 
     ~H"""
     <div id={@id} style="display:flex;flex-direction:column;gap:16px;min-width:0;">
-      <DS.empty
-        :if={@use_case.kind == :embedding}
-        id="evals-not-applicable"
-        icon="flask"
-        title="Nothing to evaluate"
-        sub="Evals score a prompt's output. This use case is log-only (embedding)."
-      />
+      <.no_key_note :if={not @judge?} id="evals-no-key" providers_path={providers_path(assigns)} />
 
-      <%= if @use_case.kind != :embedding do %>
-        <.no_key_note :if={not @judge?} id="evals-no-key" providers_path={providers_path(assigns)} />
+      <.calibration_section {assigns} />
+      <.rubric_section :if={@rubric} {assigns} />
+      <.runs_section {assigns} />
 
-        <.calibration_section {assigns} />
-        <.rubric_section :if={@rubric} {assigns} />
-        <.runs_section {assigns} />
-
-        <.continuous_eval_card plan={@plan} settings_path={settings_path(assigns)} />
-      <% end %>
+      <.continuous_eval_card plan={@plan} settings_path={settings_path(assigns)} />
 
       <.revise_modal :if={@revise? and @rubric} {assigns} />
       <.rubric_editor_modal :if={@edit_rubric? and @rubric_form} {assigns} />

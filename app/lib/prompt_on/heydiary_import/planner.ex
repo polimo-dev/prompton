@@ -9,12 +9,12 @@ defmodule PromptOn.HeyDiaryImport.Planner do
   - **Model**: `ai_models` row → `provider :openrouter`, `model_id = model`,
     `metadata %{description_key}`, `provider_options %{"only" => providers}` (`providers` NULL →
     `%{"only" => nil}`, `[]` → `%{"only" => []}` — the contract under which HeyDiary sent
-    `provider.only: null`/`[]` as is). Plus the Groq whisper and embedding models.
-  - **UseCase**: the 9 of `Spec.use_cases/0`. `default_params.temperature` = the temperature of
+    `provider.only: null`/`[]` as is).
+  - **UseCase**: the 7 chat use cases of `Spec.use_cases/0`. `default_params.temperature` = the temperature of
     the source task's common (NULL-language) row (when present).
   - **Prompt/PromptVersion**: per (task × language) a Prompt `default` (NULL) / `<language>` with
     one committed version — `messages = [system: original (escaped), user: §12.3 Liquid template]`,
-    `voice_transcription` uses `text_template`, `chat_response` is system only,
+    `chat_response` is system only,
     `diary_content_removal` copies the `diary_generation` rows + the removal template. The engine
     is always `:liquid` — `{{`/`{%` in the original are turned into literal output by
     `Spec.escape_literal/1`.
@@ -36,6 +36,7 @@ defmodule PromptOn.HeyDiaryImport.Planner do
   @default_project_slug "heydiary"
   @default_project_name "HeyDiary"
   @default_environment "production"
+  @ignored_heydiary_tasks ~w(voice_transcription)
 
   @doc """
   Builds the plan. `opts`: `:project_slug` (default `"heydiary"`), `:project_name` (default
@@ -92,11 +93,7 @@ defmodule PromptOn.HeyDiaryImport.Planner do
         }
       end)
 
-    extra =
-      Enum.map([Spec.whisper_model(), Spec.embedding_model()], &Map.put(&1, :source_id, nil))
-
-    (from_dump ++ extra)
-    |> Enum.uniq_by(&{&1.provider, &1.model_id})
+    Enum.uniq_by(from_dump, &{&1.provider, &1.model_id})
   end
 
   # ---------------------------------------------------------------------------
@@ -114,11 +111,7 @@ defmodule PromptOn.HeyDiaryImport.Planner do
 
     acc = %{acc | use_cases: acc.use_cases ++ [use_case]}
 
-    case spec.kind do
-      :embedding -> {:ok, plan_embedding(spec, acc)}
-      :text -> plan_text(dump, spec, acc)
-      :chat -> plan_chat(dump, spec, acc)
-    end
+    plan_chat(dump, spec, acc)
   end
 
   defp default_params(_dump, %{source_task: nil}), do: %{}
@@ -130,75 +123,8 @@ defmodule PromptOn.HeyDiaryImport.Planner do
     end
   end
 
-  # diary_embedding: no prompt — only the model is pinned (the pins map is empty).
-  defp plan_embedding(spec, acc) do
-    model = Spec.embedding_model()
-
-    deployment = %{
-      use_case_key: spec.key,
-      model: {model.provider, model.model_id},
-      params: %{},
-      provider_options: %{},
-      prompt_names: [],
-      description: "HeyDiary.External.Embeddings @model (logs only)"
-    }
-
-    %{acc | deployments: acc.deployments ++ [deployment]}
-  end
-
-  # voice_transcription: text_template = system_prompt, and the model is Groq whisper (there are no
-  # plan_ai_models rows).
-  defp plan_text(dump, spec, acc) do
-    rows = Dump.task_rows(dump, spec.source_task)
-    whisper = Spec.whisper_model()
-
-    if rows == [] do
-      {:ok, warn(acc, {:missing_task, spec.key, spec.source_task})}
-    else
-      with {:ok, versions} <- text_versions(spec, rows) do
-        deployment = %{
-          use_case_key: spec.key,
-          model: {whisper.provider, whisper.model_id},
-          params: %{},
-          provider_options: %{},
-          prompt_names: prompt_names(rows),
-          description: "HeyDiary.External.Groq @model"
-        }
-
-        acc =
-          acc
-          |> add_prompts(spec, rows, versions)
-          |> maybe_warn_no_default_prompt(spec, rows)
-          |> Map.update!(:deployments, &(&1 ++ [deployment]))
-
-        {:ok, acc}
-      end
-    end
-  end
-
-  defp text_versions(spec, rows) do
-    Enum.reduce_while(rows, {:ok, []}, fn row, {:ok, acc} ->
-      case Spec.escape_literal(row.system_prompt) do
-        {:ok, text} ->
-          version = %{
-            use_case_key: spec.key,
-            prompt_name: prompt_name(row.language),
-            engine: :liquid,
-            messages: [],
-            text_template: text,
-            commit_message: commit_message(row)
-          }
-
-          {:cont, {:ok, acc ++ [version]}}
-
-        {:error, reason} ->
-          {:halt, {:error, {:unescapable_system_prompt, row.task_name, row.language, reason}}}
-      end
-    end)
-  end
-
-  # chat kind: transcript_revision / diary_generation / diary_content_removal / mood_inference / chat_response /
-  # memory_extraction / diary_search_content
+  # transcript_revision / diary_generation / diary_content_removal / mood_inference /
+  # chat_response / memory_extraction / diary_search_content
   defp plan_chat(dump, spec, acc) do
     rows = Dump.task_rows(dump, spec.source_task)
     plan_models = Dump.plan_models(dump, spec.source_task)
@@ -382,7 +308,7 @@ defmodule PromptOn.HeyDiaryImport.Planner do
     unknown =
       dump
       |> Dump.task_names()
-      |> Enum.reject(&(&1 in known))
+      |> Enum.reject(&(&1 in known or &1 in @ignored_heydiary_tasks))
       |> Enum.map(&{:unknown_task, &1})
 
     %{plan | warnings: plan.warnings ++ unknown}

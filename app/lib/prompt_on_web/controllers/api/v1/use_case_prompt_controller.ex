@@ -11,8 +11,8 @@ defmodule PromptOnWeb.API.V1.UseCasePromptController do
   segment and the only remaining selection axis is the prompt name.
 
   Response: `key`, `deployment{id,revision}`, `prompt`, `model`/`params`/
-  `provider_options`, `prompt_version{id,number}`, `messages` or `text`, `prompt_names[]` (the
-  names this deployment pinned), and `etag`.
+  `provider_options`, `prompt_version{id,number}`, `messages`, `prompt_names[]` (the names this
+  deployment pinned), and `etag`.
 
   Errors: unknown use case/environment -> 404, no deployment -> 404 (`details.reason =
   "unresolved"`), a prompt name that is not pinned -> 404 (`details.reason = "unknown_prompt"` +
@@ -132,14 +132,6 @@ defmodule PromptOnWeb.API.V1.UseCasePromptController do
     end
   end
 
-  defp render_templates(%{kind: :text, text_template: text} = resolution, variables)
-       when is_binary(text) do
-    case Template.render(text, variables, engine: resolution.engine || :liquid) do
-      {:ok, rendered} -> {:ok, %{messages: nil, text: rendered}}
-      {:error, reason} -> {:error, render_error(reason)}
-    end
-  end
-
   defp render_templates(resolution, _variables),
     do: {:ok, %{messages: resolution.messages, text: resolution.text_template}}
 
@@ -182,7 +174,6 @@ defmodule PromptOnWeb.API.V1.UseCasePromptController do
 
     case resolution.kind do
       :chat -> Map.put(base, "messages", Enum.map(rendered.messages || [], &message_map/1))
-      :text -> Map.put(base, "text", rendered.text)
       _ -> base
     end
   end

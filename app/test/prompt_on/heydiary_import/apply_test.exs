@@ -56,12 +56,12 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       refute summary.reused_project?
 
       assert summary.counts == %{
-               models: 6,
-               use_cases: 9,
-               prompts: 12,
-               prompt_versions: 12,
-               deployments: 9,
-               pins: 12
+               models: 4,
+               use_cases: 7,
+               prompts: 10,
+               prompt_versions: 10,
+               deployments: 7,
+               pins: 10
              }
 
       # Flattening warnings are carried in the summary as is (the very list the mix task asked to
@@ -76,7 +76,9 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
 
       # Every use case has exactly one live Deployment (revision 1), and each pins one model
       {:ok, use_cases} = Prompts.list_use_cases(scope)
-      assert length(use_cases) == 9
+      assert length(use_cases) == 7
+      assert Enum.all?(use_cases, &(&1.kind == :chat))
+      refute Enum.any?(use_cases, &(&1.key in ["voice_transcription", "diary_embedding"]))
 
       for use_case <- use_cases do
         {:ok, deployment} =
@@ -150,8 +152,8 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
 
       assert live.prompt_pins |> Map.values() |> Enum.sort() == Enum.sort(latest_ids)
 
-      assert second.counts.models == 6
-      assert second.counts.use_cases == 9
+      assert second.counts.models == 4
+      assert second.counts.use_cases == 7
     end
 
     test "rolls back everything when a step fails", %{plan: plan, org: org, actor: actor} do
@@ -197,9 +199,13 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert map["schema_version"] == 4
       assert map["project"] == "heydiary"
       assert map["environment"] == "production"
-      assert map |> Map.fetch!("use_cases") |> map_size() == 9
-      assert map |> Map.fetch!("deployments") |> map_size() == 9
+      assert map |> Map.fetch!("use_cases") |> map_size() == 7
+      assert map |> Map.fetch!("deployments") |> map_size() == 7
       refute Map.has_key?(map, "dimensions")
+      refute Map.has_key?(map["use_cases"], "voice_transcription")
+      refute Map.has_key?(map["use_cases"], "diary_embedding")
+      refute Map.has_key?(map["deployments"], "voice_transcription")
+      refute Map.has_key?(map["deployments"], "diary_embedding")
 
       # Language branching = the prompt name. Model and params are one regardless of the name.
       {:ok, ko} = Resolver.resolve(snapshot, "diary_generation", prompt: "ko")
@@ -238,12 +244,6 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert resolution_params(chat) == %{"temperature" => 0.7}
       assert [%{role: "system"}] = chat.messages
 
-      # voice: text_template per language, Groq
-      {:ok, stt} = Resolver.resolve(snapshot, "voice_transcription", prompt: "ko")
-      assert stt.provider == :groq
-      assert stt.model == "whisper-large-v3"
-      assert stt.text_template == Dump.task(dump, "voice_transcription", "ko").system_prompt
-
       # transcript_revision default row: escaped system prompt renders back to the original
       {:ok, rev} = Resolver.resolve(snapshot, "transcript_revision")
       [%{content: escaped} | _] = rev.messages
@@ -252,11 +252,8 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert {:ok, Dump.task(dump, "transcript_revision", nil).system_prompt} ==
                PromptOnSDK.Template.render(escaped, %{})
 
-      # embedding: no prompt, model attribution only
-      {:ok, embed} = Resolver.resolve(snapshot, "diary_embedding")
-      assert embed.model == "openai/text-embedding-3-small"
-      assert embed.messages == nil
-      assert embed.prompt == nil
+      assert {:error, :unknown_use_case} = Resolver.resolve(snapshot, "voice_transcription")
+      assert {:error, :unknown_use_case} = Resolver.resolve(snapshot, "diary_embedding")
 
       # §12.2 step 9 — exhaustive (task, language) comparison
       assert Verify.compare(dump, map) == []
@@ -323,7 +320,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       assert sql =~ "BEGIN;"
       assert String.ends_with?(sql, "COMMIT;\n")
 
-      # ai_models: only the openrouter models the pins point at (whisper/embedding excluded)
+      # ai_models: only the openrouter models the pins point at
       assert sql =~
                "INSERT INTO ai_models (id, model, display_name, description_key, providers) VALUES (gen_random_uuid(), 'google/gemini-3.6-flash', 'Gemini 3.6 Flash'"
 
@@ -337,7 +334,9 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
       refute sql =~ "'openai/gpt-5.4'"
 
       # ai_tasks: the pin's prompt names → (task, language). The original (unescaped) comes back.
-      for t <- dump.ai_tasks, t.task_name != "chat_response" or is_nil(t.language) do
+      for t <- dump.ai_tasks,
+          exportable_task?(t.task_name),
+          t.task_name != "chat_response" or is_nil(t.language) do
         escaped_prompt = String.replace(t.system_prompt, "'", "''")
 
         assert sql =~
@@ -387,4 +386,7 @@ defmodule PromptOn.HeyDiaryImport.ApplyTest do
     do:
       Map.get(resolution, :provider_options) ||
         %{}
+
+  defp exportable_task?("voice_transcription"), do: false
+  defp exportable_task?(_task_name), do: true
 end

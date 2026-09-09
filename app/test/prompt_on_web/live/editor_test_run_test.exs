@@ -55,13 +55,6 @@ defmodule PromptOnWeb.EditorTestRunTest do
              ]
     end
 
-    test "a text buffer becomes a single user message" do
-      buffer = [%{role: "text", content: "Transcribe {{ lang }}."}]
-
-      assert {:ok, [%{"role" => "user", "content" => "Transcribe ko."}]} =
-               EditorTestRun.build_messages(%{kind: :text}, buffer, %{"lang" => "ko"})
-    end
-
     test "a variable without a value is a render error" do
       buffer = [%{role: "user", content: "{{ input }}"}]
 

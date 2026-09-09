@@ -7,17 +7,21 @@ defmodule PromptOn.Prompts.UseCaseTest do
   alias PromptOn.Prompts.Prompt
   alias PromptOn.Prompts.PromptVersion
 
-  test "define creates the default prompt for chat and text, not for embedding" do
+  test "define creates the default prompt for chat and rejects new non-chat use cases" do
     project = project_fixture()
 
     chat = use_case_fixture(project, %{key: "diary_generation", kind: :chat})
     assert [%{name: "default"}] = chat.prompts
 
-    text = use_case_fixture(project, %{key: "voice_transcription", kind: :text})
-    assert [%{name: "default"}] = text.prompts
+    for kind <- [:text, :embedding] do
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               Prompts.define_use_case(
+                 %{key: "legacy_#{kind}", name: "Legacy #{kind}", kind: kind},
+                 scope(project)
+               )
 
-    embedding = use_case_fixture(project, %{key: "diary_embedding", kind: :embedding})
-    assert embedding.prompts == []
+      assert Exception.message(error) =~ "only chat use cases are supported"
+    end
 
     {:ok, loaded} =
       Prompts.get_use_case(
@@ -26,6 +30,22 @@ defmodule PromptOn.Prompts.UseCaseTest do
       )
 
     assert loaded.prompt_count == 1
+  end
+
+  test "legacy non-chat rows remain readable but are excluded from active use cases" do
+    project = project_fixture()
+    chat = use_case_fixture(project, %{key: "chat_response"})
+    text_id = legacy_use_case_row(project, "voice_transcription", :text)
+    embedding_id = legacy_use_case_row(project, "diary_embedding", :embedding)
+
+    assert {:ok, [active]} = Prompts.list_use_cases(scope(project))
+    assert active.id == chat.id
+
+    assert {:ok, %{id: ^text_id, kind: :text}} =
+             Prompts.get_use_case_by_key("voice_transcription", scope(project))
+
+    assert {:ok, %{id: ^embedding_id, kind: :embedding}} =
+             Prompts.get_use_case_by_key("diary_embedding", scope(project))
   end
 
   test "key must match ^[a-z][a-z0-9_]*$ and be unique per project" do
@@ -179,6 +199,24 @@ defmodule PromptOn.Prompts.UseCaseTest do
     assert id == default.id
   end
 
+  test "prompt writes are rejected for legacy non-chat parents" do
+    project = project_fixture()
+    legacy_id = legacy_use_case_row(project, "voice_transcription", :text)
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.open_prompt(%{use_case_id: legacy_id, name: "default"}, scope(project))
+
+    assert Exception.message(error) =~ "not chat"
+
+    prompt_id = legacy_prompt_row(project, legacy_id, "default")
+    {:ok, prompt} = Prompts.get_prompt(prompt_id, scope(project))
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.rename_prompt(prompt, %{name: "renamed"}, scope(project))
+
+    assert Exception.message(error) =~ "not chat"
+  end
+
   test "prompt draft: save_draft touches only the mutable draft and creates no version" do
     project = project_fixture()
     use_case = use_case_fixture(project)
@@ -212,6 +250,19 @@ defmodule PromptOn.Prompts.UseCaseTest do
     assert cleared.draft == nil
   end
 
+  test "prompt draft: text_template drafts are rejected for active chat prompts" do
+    project = project_fixture()
+    use_case = use_case_fixture(project)
+    [prompt] = use_case.prompts
+
+    draft = Prompt.draft_map(:liquid, [], "legacy text")
+
+    assert {:error, %Ash.Error.Invalid{} = error} =
+             Prompts.save_prompt_draft(prompt, %{draft: draft}, scope(project))
+
+    assert Exception.message(error) =~ "chat drafts use messages"
+  end
+
   test "prompt draft: the draft hash uses the same code as a committed version's content_sha256" do
     project = project_fixture()
     use_case = use_case_fixture(project)
@@ -227,5 +278,35 @@ defmodule PromptOn.Prompts.UseCaseTest do
 
     assert version.content_sha256 == same
     refute version.content_sha256 == other
+  end
+
+  defp legacy_use_case_row(project, key, kind) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO use_cases (project_id, key, name, kind)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), key, key, Atom.to_string(kind)]
+      )
+
+    id
+  end
+
+  defp legacy_prompt_row(project, use_case_id, name) do
+    %{rows: [[id]]} =
+      Ecto.Adapters.SQL.query!(
+        PromptOn.Repo,
+        """
+        INSERT INTO prompts (project_id, use_case_id, name)
+        VALUES ($1, $2, $3)
+        RETURNING id::text
+        """,
+        [Ecto.UUID.dump!(project.id), Ecto.UUID.dump!(use_case_id), name]
+      )
+
+    id
   end
 end

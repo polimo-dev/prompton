@@ -260,12 +260,11 @@ defmodule PromptOn.Fixtures do
 
   Returned map:
   - `:project`, `:user`, `:production`, `:staging`
-  - `:models` — `%{sonnet, mini, opus, whisper, embed}`
-  - `:use_cases` — `%{diary, chat, stt, embedding}` (keys `diary_generation`, `chat_response`,
-    `voice_transcription`, `diary_embedding`)
-  - `:prompts` — `%{diary_default, diary_ko, chat, stt}`
-  - `:prompt_versions` — `%{diary, diary_ko, chat, stt}`
-  - `:deployments` — `%{diary, chat, stt, embedding}` (production live revision #1)
+  - `:models` — `%{sonnet, mini, opus}`
+  - `:use_cases` — `%{diary, chat}` (keys `diary_generation`, `chat_response`)
+  - `:prompts` — `%{diary_default, diary_ko, chat}`
+  - `:prompt_versions` — `%{diary, diary_ko, chat}`
+  - `:deployments` — `%{diary, chat}` (production live revision #1)
   """
   def heydiary_project_fixture(attrs \\ %{}) do
     user = Map.get_lazy(attrs, :user, fn -> user_fixture() end)
@@ -307,28 +306,6 @@ defmodule PromptOn.Fixtures do
         provider_options: %{"only" => ["Anthropic"]}
       })
 
-    whisper =
-      model_fixture(project, %{
-        provider: :groq,
-        model_id: "whisper-large-v3",
-        display_name: "Whisper large v3",
-        metadata: %{},
-        provider_options: %{},
-        pricing: %{"input_per_m" => 0.111, "unit" => "audio_second"},
-        capabilities: []
-      })
-
-    embed =
-      model_fixture(project, %{
-        provider: :openai,
-        model_id: "text-embedding-3-small",
-        display_name: "Embedding 3 small",
-        metadata: %{},
-        provider_options: %{},
-        pricing: %{},
-        capabilities: []
-      })
-
     # --- Use cases (ai_tasks) ---------------------------------------------------
     diary =
       use_case_fixture(project, %{
@@ -351,20 +328,6 @@ defmodule PromptOn.Fixtures do
         kind: :chat,
         input_schema: [%{name: "tone", type: :string}],
         default_params: %{"temperature" => 0.7}
-      })
-
-    stt =
-      use_case_fixture(project, %{
-        key: "voice_transcription",
-        name: "Voice transcription",
-        kind: :text
-      })
-
-    embedding =
-      use_case_fixture(project, %{
-        key: "diary_embedding",
-        name: "Diary embedding",
-        kind: :embedding
       })
 
     # --- Prompts (per name) + versions ------------------------------------------
@@ -400,8 +363,6 @@ defmodule PromptOn.Fixtures do
         ]
       })
 
-    stt_v1 = prompt_version_fixture(stt, %{text_template: "diary, day, today's mood"})
-
     # --- Deployment (production): a revision is a pin, one model + one version per prompt name --
     d_diary =
       deployment_fixture(diary, production, %{
@@ -418,29 +379,20 @@ defmodule PromptOn.Fixtures do
         prompt_pins: %{"default" => chat_v1.id}
       })
 
-    d_stt =
-      deployment_fixture(stt, production, %{
-        model_id: whisper.id,
-        prompt_pins: %{"default" => stt_v1.id}
-      })
-
-    d_embedding = deployment_fixture(embedding, production, %{model_id: embed.id})
-
     %{
       project: project,
       user: user,
       production: production,
       staging: staging,
-      models: %{sonnet: sonnet, mini: mini, opus: opus, whisper: whisper, embed: embed},
-      use_cases: %{diary: diary, chat: chat, stt: stt, embedding: embedding},
+      models: %{sonnet: sonnet, mini: mini, opus: opus},
+      use_cases: %{diary: diary, chat: chat},
       prompts: %{
         diary_default: diary_default,
         diary_ko: diary_ko_prompt,
-        chat: default_prompt(chat),
-        stt: default_prompt(stt)
+        chat: default_prompt(chat)
       },
-      prompt_versions: %{diary: diary_v1, diary_ko: diary_ko_v1, chat: chat_v1, stt: stt_v1},
-      deployments: %{diary: d_diary, chat: d_chat, stt: d_stt, embedding: d_embedding}
+      prompt_versions: %{diary: diary_v1, diary_ko: diary_ko_v1, chat: chat_v1},
+      deployments: %{diary: d_diary, chat: d_chat}
     }
   end
 
@@ -466,7 +418,7 @@ defmodule PromptOn.Fixtures do
 
   @doc """
   A Deployment that pins one model + one `default` prompt. Creates `attrs.prompt_version` /
-  `attrs.model` when absent (embedding use cases get no prompt). The rest of `attrs`
+  `attrs.model` when absent. The rest of `attrs`
   (`params` / `provider_options` / `prompt_pins`) is passed through as is.
   """
   def simple_deployment_fixture(%PromptOn.Prompts.UseCase{} = use_case, env, attrs \\ %{}) do
@@ -475,7 +427,7 @@ defmodule PromptOn.Fixtures do
 
     {version, attrs} =
       Map.pop_lazy(attrs, :prompt_version, fn ->
-        if use_case.kind == :embedding, do: nil, else: prompt_version_fixture(use_case)
+        prompt_version_fixture(use_case)
       end)
 
     pins = if is_nil(version), do: %{}, else: %{"default" => record_id(version)}

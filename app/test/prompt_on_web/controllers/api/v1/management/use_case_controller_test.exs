@@ -77,7 +77,7 @@ defmodule PromptOnWeb.API.V1.Management.UseCaseControllerTest do
       assert details["use_case"]["key"] == "taken"
     end
 
-    test "400 on a missing key, a bad kind and a malformed input schema", %{raw: raw} do
+    test "400 on a missing key, unsupported kind and a malformed input schema", %{raw: raw} do
       assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
                json_response(
                  api_post(raw, ~p"/api/v1/orgs/personal/projects/heydiary/use-cases", %{name: "x"}),
@@ -94,6 +94,19 @@ defmodule PromptOnWeb.API.V1.Management.UseCaseControllerTest do
                  }),
                  400
                )
+
+      for kind <- ["text", "embedding"] do
+        assert %{"error" => %{"code" => "invalid_request", "message" => message}} =
+                 json_response(
+                   api_post(raw, ~p"/api/v1/orgs/personal/projects/heydiary/use-cases", %{
+                     key: "legacy_#{kind}",
+                     kind: kind
+                   }),
+                   400
+                 )
+
+        assert message =~ "only chat use cases are supported"
+      end
 
       assert %{"error" => %{"code" => "invalid_request", "message" => schema_message}} =
                json_response(

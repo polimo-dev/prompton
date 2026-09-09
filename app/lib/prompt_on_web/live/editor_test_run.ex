@@ -7,9 +7,7 @@ defmodule PromptOnWeb.EditorTestRun do
   it has been saved (ADR 0007). A Deployment is the artifact committed **after** "let's go with this
   model" has been decided, not a precondition for running.
 
-  - `build_messages/4` renders the buffer (`[%{role, content}]`) with the variables. `kind :text` is
-    a single template, so the rendered result becomes **one user message** (OpenRouter only accepts
-    messages).
+  - `build_messages/4` renders the buffer (`[%{role, content}]`) with the variables.
   - `context_turns/2` reduces the cell's **persistent history** (`PromptOn.Prompts.ArenaMessage`) to
     its last 30 turns, in the shape the request carries. See "Context window" below.
   - `run/1` appends `:turns` after the rendered buffer and calls `PromptOn.LLM.complete/2`. It runs
@@ -80,21 +78,11 @@ defmodule PromptOnWeb.EditorTestRun do
   @spec build_messages(map(), [map()], map(), atom()) :: {:ok, [map()]} | {:error, term()}
   def build_messages(use_case, buffer, variables, engine \\ :liquid)
 
-  def build_messages(%{kind: :text}, buffer, variables, engine) do
-    case Template.render(first_content(buffer), variables, engine: engine) do
-      {:ok, text} -> {:ok, [%{"role" => "user", "content" => text}]}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
   def build_messages(_use_case, buffer, variables, engine) do
     buffer
     |> Enum.map(&%{"role" => to_string(role_of(&1)), "content" => content_of(&1) || ""})
     |> Template.render_messages(variables, engine: engine)
   end
-
-  defp first_content([message | _rest]), do: content_of(message) || ""
-  defp first_content(_buffer), do: ""
 
   defp role_of(%{role: role}), do: role
   defp role_of(%{"role" => role}), do: role

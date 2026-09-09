@@ -88,6 +88,8 @@ defmodule PromptOn.Prompts.ArenaMessage do
         :cost_usd,
         :author_id
       ]
+
+      validate PromptOn.Prompts.ArenaMessage.Validations.ChatParent
     end
 
     read :for_use_case do

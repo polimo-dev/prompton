@@ -64,7 +64,10 @@ defmodule PromptOnWeb.UseCasesLive do
   end
 
   def handle_event("save", %{"use_case" => params}, socket) do
-    params = Map.put(params, "name", display_name(params["key"]))
+    params =
+      params
+      |> Map.put("name", display_name(params["key"]))
+      |> Map.put("kind", "chat")
 
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, use_case} ->
@@ -104,13 +107,9 @@ defmodule PromptOnWeb.UseCasesLive do
     end
   end
 
-  # Once defined, go straight to the **use case hub**: whatever the kind, everything to do next is
-  # there. (`:embedding` has no prompt to write, so the hub shows only the model and Deploy.)
+  # Once defined, go straight to the **use case hub**: everything to do next is there.
   defp created_path(org_slug, project, use_case),
     do: ~p"/#{org_slug}/#{project.slug}/use-cases/#{use_case.key}/prompt"
-
-  defp created_flash(%{kind: :embedding} = use_case),
-    do: "Use case #{use_case.key} defined — add models, then deploy."
 
   defp created_flash(_use_case),
     do: "Use case created — add models, write the prompt, then deploy."
@@ -224,8 +223,7 @@ defmodule PromptOnWeb.UseCasesLive do
 
   defp cols do
     [
-      %{label: "key", w: "1.6fr"},
-      %{label: "kind", w: "84px"},
+      %{label: "key", w: "1.7fr"},
       %{label: "variables", w: "1fr"},
       %{label: "prompts", w: "70px", align: "right"},
       %{label: "live in production", w: "200px"},
@@ -307,24 +305,14 @@ defmodule PromptOnWeb.UseCasesLive do
               navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases/#{uc.key}/prompt"}
             >
               <span style="display:flex;align-items:center;gap:8px;min-width:0;">
-                <DSIcons.icon name={kind_icon(uc.kind)} size={13} class="tx3" />
+                <DSIcons.icon name="note" size={13} class="tx3" />
                 <span
                   class="font-mono"
                   style="font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
                 >
                   {uc.key}
                 </span>
-                <DS.badge :if={log_only?(uc)} tone={:neutral} style="font-size:10px;">
-                  LOG ONLY
-                </DS.badge>
               </span>
-              <DS.badge
-                tone={if uc.kind == :chat, do: :accent, else: :neutral}
-                mono
-                style="font-size:10.5px;"
-              >
-                {uc.kind}
-              </DS.badge>
               <.variable_chips variables={uc.input_schema} limit={3} />
               <span class="font-mono" style="font-size:12.5px;text-align:right;color:var(--tx-1);">
                 {count_text(uc.prompt_count)}
@@ -361,16 +349,6 @@ defmodule PromptOnWeb.UseCasesLive do
               autocomplete="off"
             />
             <.field_error field={@form[:key]} />
-
-            <div style="margin-top:14px;">
-              <.field_label>kind</.field_label>
-              <.seg_radio
-                id="use-case-kind"
-                name="use_case[kind]"
-                value={@form[:kind].value}
-                options={[{"chat", "chat"}, {"text", "text"}, {"embedding", "embedding"}]}
-              />
-            </div>
           </.form>
 
           <:footer>

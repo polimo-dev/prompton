@@ -29,9 +29,6 @@ defmodule PromptOnWeb.UseCasesLiveTest do
 
     chat = Fixtures.use_case_fixture(project, %{key: "chat_response", kind: :chat})
 
-    embedding =
-      Fixtures.use_case_fixture(project, %{key: "diary_embedding", kind: :embedding})
-
     version = Fixtures.prompt_version_fixture(diary)
     model = Fixtures.model_fixture(project, %{model_id: "m/a", display_name: "Model A"})
 
@@ -48,7 +45,6 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       production: production,
       diary: diary,
       chat: chat,
-      embedding: embedding,
       model: model,
       version: version,
       deployment: deployment
@@ -66,7 +62,6 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       assert has_element?(view, "#use-cases-table")
       assert has_element?(view, "#use-case-diary_generation")
       assert has_element?(view, "#use-case-chat_response")
-      assert has_element?(view, "#use-case-diary_embedding")
 
       assert html =~ "diary_generation"
       assert html =~ "live in production"
@@ -107,11 +102,14 @@ defmodule PromptOnWeb.UseCasesLiveTest do
              |> render() =~ ~p"/personal/#{project.slug}/use-cases/diary_generation/prompt"
     end
 
-    test "an embedding use case gets the LOG ONLY badge", %{conn: conn, project: project} do
+    test "the chat-only list has no kind column or badges", %{conn: conn, project: project} do
       {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases")
 
-      assert view |> element("#use-case-diary_embedding") |> render() =~ "LOG ONLY"
-      refute view |> element("#use-case-diary_generation") |> render() =~ "LOG ONLY"
+      html = render(view)
+
+      refute html =~ "LOG ONLY"
+      refute html =~ ">kind<"
+      refute html =~ "kind-badge"
     end
 
     test "shows up to 3 variable chips and folds the rest into +N", %{
@@ -133,13 +131,13 @@ defmodule PromptOnWeb.UseCasesLiveTest do
 
       html =
         view
-        |> form("#use-case-filter-form", %{"q" => "embedding"})
+        |> form("#use-case-filter-form", %{"q" => "diary"})
         |> render_change()
 
-      assert_patch(view, ~p"/personal/#{project.slug}/use-cases?#{[q: "embedding"]}")
-      assert html =~ "diary_embedding"
-      assert has_element?(view, "#use-case-diary_embedding")
-      refute has_element?(view, "#use-case-diary_generation")
+      assert_patch(view, ~p"/personal/#{project.slug}/use-cases?#{[q: "diary"]}")
+      assert html =~ "diary_generation"
+      assert has_element?(view, "#use-case-diary_generation")
+      refute has_element?(view, "#use-case-chat_response")
     end
 
     test "the filter is restored from ?q= in the URL alone (remount)", %{
@@ -177,6 +175,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       assert has_element?(view, "#define-use-case-modal")
       assert has_element?(view, "#define-use-case-form")
       assert has_element?(view, "#use-case-key")
+      refute has_element?(view, "#use-case-kind")
     end
 
     test "the button patches to ?new=1", %{conn: conn, project: project} do
@@ -198,7 +197,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
 
     # The first-run flow is use case → model → prompt → arena → deploy: once the definition is
     # done, send straight to the use case hub, which has all of that.
-    test "defining a text use case navigates to the use case hub", %{
+    test "defining a use case creates chat", %{
       conn: conn,
       project: project
     } do
@@ -208,8 +207,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
         view
         |> form("#define-use-case-form", %{
           "use_case" => %{
-            "key" => "diary_summary",
-            "kind" => "text"
+            "key" => "diary_summary"
           }
         })
         |> render_submit()
@@ -226,7 +224,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
                  actor: PromptOn.Fixtures.system_actor()
                )
 
-      assert use_case.kind == :text
+      assert use_case.kind == :chat
       assert use_case.name == "Diary summary"
     end
 
@@ -236,38 +234,11 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       assert {:error, {:live_redirect, %{to: to}}} =
                view
                |> form("#define-use-case-form", %{
-                 "use_case" => %{
-                   "key" => "support_reply",
-                   "kind" => "chat"
-                 }
+                 "use_case" => %{"key" => "support_reply"}
                })
                |> render_submit()
 
       assert to == ~p"/personal/#{project.slug}/use-cases/support_reply/prompt"
-    end
-
-    # An embedding use case has no prompt to write: the hub shows only models and Deploy (the
-    # destination is the same).
-    test "an embedding use case navigates to the use case hub too", %{
-      conn: conn,
-      project: project
-    } do
-      {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases?#{[new: 1]}")
-
-      assert {:error, {:live_redirect, %{to: to}}} =
-               view
-               |> form("#define-use-case-form", %{
-                 "use_case" => %{
-                   "key" => "note_embedding",
-                   "kind" => "embedding"
-                 }
-               })
-               |> render_submit()
-
-      assert to == ~p"/personal/#{project.slug}/use-cases/note_embedding/prompt"
-
-      assert {^to, flash} = assert_redirect(view)
-      assert flash["info"] == "Use case note_embedding defined — add models, then deploy."
     end
 
     test "an invalid key stays as a form error", %{conn: conn, project: project} do
@@ -276,7 +247,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       html =
         view
         |> form("#define-use-case-form", %{
-          "use_case" => %{"key" => "Bad Key", "kind" => "chat"}
+          "use_case" => %{"key" => "Bad Key"}
         })
         |> render_submit()
 
@@ -289,7 +260,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
 
       view
       |> form("#define-use-case-form", %{
-        "use_case" => %{"key" => "chat_response", "kind" => "chat"}
+        "use_case" => %{"key" => "chat_response"}
       })
       |> render_submit()
 
@@ -303,8 +274,8 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       project: project,
       user: user
     } do
-      # three use cases already exist in the fixture; take the project to the Free limit
-      for n <- 4..PromptOn.Entitlements.limit(:free, :use_cases_per_project) do
+      # two use cases already exist in the fixture; take the project to the Free limit
+      for n <- 3..PromptOn.Entitlements.limit(:free, :use_cases_per_project) do
         Fixtures.use_case_fixture(project, %{key: "filler_#{n}", kind: :chat})
       end
 
@@ -313,7 +284,7 @@ defmodule PromptOnWeb.UseCasesLiveTest do
       html =
         view
         |> form("#define-use-case-form", %{
-          "use_case" => %{"key" => "one_too_many", "kind" => "chat"}
+          "use_case" => %{"key" => "one_too_many"}
         })
         |> render_submit()
 

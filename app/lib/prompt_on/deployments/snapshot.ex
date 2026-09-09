@@ -14,8 +14,8 @@ defmodule PromptOn.Deployments.Snapshot do
     keys, enum values as strings).
   - `prompt_versions/models` are normalized (deduplicated) by id at the top level. Only what the
     pins and models of live Deployments point at is included.
-  - **All** non-archived UseCases are included; a use case without a live Deployment has no entry
-    in `deployments` (the SDK resolves that use case as `{:error, :unresolved}`).
+  - **All** non-archived chat UseCases are included; a use case without a live Deployment has no
+    entry in `deployments` (the SDK resolves that use case as `{:error, :unresolved}`).
   - **ETag = sha256 of the canonical JSON body (sorted keys, no whitespace)**
     (`PromptOn.CanonicalJSON`). The body carries no time fields; `last_modified` is the latest
     change time of the Deployments, referenced resources, project and use cases (now when there is
@@ -65,6 +65,7 @@ defmodule PromptOn.Deployments.Snapshot do
          {:ok, use_cases} <- read_all(UseCase, :active, read),
          {:ok, deployments} <- read_current_deployments(env.id, read),
          deployments = apply_overrides(deployments, overrides),
+         deployments = deployments_for_use_cases(deployments, use_cases),
          {:ok, prompt_versions} <-
            read_by_ids(PromptVersion, ids(deployments, &Deployment.prompt_version_ids/1), read),
          {:ok, models} <-
@@ -139,6 +140,11 @@ defmodule PromptOn.Deployments.Snapshot do
   defp apply_overrides(deployments, overrides) do
     overridden = MapSet.new(overrides, & &1.use_case_id)
     Enum.reject(deployments, &MapSet.member?(overridden, &1.use_case_id)) ++ overrides
+  end
+
+  defp deployments_for_use_cases(deployments, use_cases) do
+    active_chat_ids = MapSet.new(use_cases, & &1.id)
+    Enum.filter(deployments, &MapSet.member?(active_chat_ids, &1.use_case_id))
   end
 
   # ---------------------------------------------------------------------------

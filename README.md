@@ -102,7 +102,7 @@ PostgreSQL 18 and an outbound route to [Resend](https://resend.com) for sign-in 
 | `PTN_MAIL_FROM` | no | Sender, default `PromptOn <noreply@prompton.ai>` |
 | `PTN_DOCS_URL` | no | If set, `/docs/agent` redirects there instead of serving the built-in copy |
 | `PTN_OPENROUTER_API_KEY` | no | Fallback OpenRouter key for the arena/AI draft until an organization registers its own |
-| `PTN_MODE` | no | `server` (default) \| `library` — start only the data layer (Repo, vault, PubSub; no endpoint, no Oban), for embedding the domain in another OTP app or running scripts. In `library` mode `PTN_SECRET_KEY_BASE` and `PTN_PHX_HOST` are not required. See [Embedding](#embedding). |
+| `PTN_MODE` | no | `server` (default) \| `library` — start only the data layer (Repo, vault, PubSub; no endpoint, no Oban), for running the domain inside another OTP app or scripts. In `library` mode `PTN_SECRET_KEY_BASE` and `PTN_PHX_HOST` are not required. See [Library mode](#library-mode). |
 | `PTN_POOL_SIZE`, `PORT`, `ECTO_IPV6`, `DNS_CLUSTER_QUERY` | no | Pool size (10), HTTP port (4000), IPv6 DB socket, DNS clustering |
 
 See `app/config/runtime.exs` for the full list (the old `PON_*` prefix is still read as a deprecated
@@ -139,7 +139,7 @@ dependency pinned to a commit in `app/mix.exs`. The Docker build context is the 
 `docker build -f app/Dockerfile .`. CI (`.github/workflows/ci.yml`)
 runs the same checks; `image.yml` publishes the image on pushes to `main` and on `v*` tags.
 
-## Embedding
+## Library Mode
 
 The Ash domains (`PromptOn.Accounts`, `PromptOn.Projects`, `PromptOn.Catalog`, `PromptOn.Prompts`,
 `PromptOn.Deployments`, `PromptOn.Observability`) can be used from another OTP application or a

@@ -42,7 +42,7 @@ defmodule PromptOnWeb.IntegrationComponents do
   The ingredients both bodies share.
 
   * `:host` — `https://app.example.com` (with scheme, no trailing slash)
-  * `:use_case_key`, `:kind` — this use case
+  * `:use_case_key` — this use case
   * `:environment` — the currently selected environment slug
   * `:prompts` — the prompt names this deployment pins (`[]` when none)
   * `:variables` — `input_schema` as is (`%{name:, type:, required?:, description:, example:}`)
@@ -96,8 +96,6 @@ defmodule PromptOnWeb.IntegrationComponents do
     %Jason.OrderedObject{values: values}
   end
 
-  # Kind embedding pins no prompt, so there is no name to send either.
-  defp prompt_entry(%{kind: :embedding}), do: []
   defp prompt_entry(spec), do: [{"prompt", first_prompt(spec.prompts)}]
 
   defp variables_entry(%{variables: variables}) do
@@ -195,9 +193,8 @@ defmodule PromptOnWeb.IntegrationComponents do
     return result.content
     ```
 
-    Use `.text(variables, prompt=...)` instead of `.messages(...)` for a text use case. A kind
-    mismatch is an error. The SDK records `source` as `remote`, `disk`, or `bundle`, and batches
-    monitoring logs through `POST /api/v1/logs`.
+    The SDK records `source` as `remote`, `disk`, or `bundle`, and batches monitoring logs through
+    `POST /api/v1/logs`.
 
     ### Server-filled prompt — smoke tests and low-volume paths
 
@@ -224,7 +221,7 @@ defmodule PromptOnWeb.IntegrationComponents do
      "model_id": "…", "model": "openai/gpt-4o-mini", "provider": "openrouter",
      "params": {"temperature": 0.3},
      "provider_options": {"allow_fallbacks": false}, "source": "remote",
-    #{resolve_pin_lines(spec.kind)}
+    #{resolve_pin_lines()}
      "warnings": [], "etag": "sha256-…"}
     ```
 
@@ -258,10 +255,10 @@ defmodule PromptOnWeb.IntegrationComponents do
     provider_options = model.provider_options                          <- deployment.provider_options
     ```
 
-    (`<-` is a shallow merge, right-hand side wins.) `version` gives you `messages` (chat) or \
-    `text_template` (text) plus `engine`: `"liquid"` means render `{{ variable }}` placeholders, \
-    `"raw"` means send the text verbatim. A `prompt` name that is not a key of `prompt_pins` is an \
-    **error, not a silent fallback** — the pinned names are the whole selection axis.
+    (`<-` is a shallow merge, right-hand side wins.) `version` gives you `messages` plus `engine`: \
+    `"liquid"` means render `{{ variable }}` placeholders, `"raw"` means send the text verbatim. \
+    A `prompt` name that is not a key of `prompt_pins` is an **error, not a silent fallback** — the \
+    pinned names are the whole selection axis.
 
     ## 2. Call the provider yourself
 
@@ -270,7 +267,8 @@ defmodule PromptOnWeb.IntegrationComponents do
     using **this app's** provider credentials. Measure the wall-clock latency and keep the token \
     usage and cost the provider reports — the monitoring log wants them.
 
-    #{kind_note(spec.kind)}
+    The pinned version is a list of messages. Render each `content`, keep the roles as they are,
+    and append this call's own user turn after them.
 
     ## 3. Monitoring-log wire contract
 
@@ -368,49 +366,20 @@ defmodule PromptOnWeb.IntegrationComponents do
   defp prompt_list([]), do: "none (this deployment pins no prompt)"
   defp prompt_list(names), do: Enum.map_join(names, ", ", &"`#{&1}`")
 
-  # An embedding use case pins no prompt, so there is no chosen name either.
-  defp resolve_prompt_line(%{kind: :embedding}), do: ~s| "prompt_names": [],|
-
   defp resolve_prompt_line(spec),
     do:
       ~s| "prompt": "#{first_prompt(spec.prompts)}", "prompt_names": | <>
         Jason.encode!(spec.prompts) <> ","
 
-  # The lines of the prompt response that differ per kind (chat has messages, text has text,
-  # embedding has no prompt at all).
-  defp resolve_pin_lines(:chat) do
+  defp resolve_pin_lines do
     ~s| "prompt_version": {"id": "…", "number": 7},\n| <>
       ~s| "messages": [{"role": "system", "content": "…"}, {"role": "user", "content": "…"}],|
   end
-
-  defp resolve_pin_lines(:text),
-    do: ~s| "prompt_version": {"id": "…", "number": 7},\n| <> ~s| "text": "…",|
-
-  defp resolve_pin_lines(_kind), do: ~s| "prompt_version": null,|
-
-  # The line of the monitoring log example that points at the prompt source; an embedding use
-  # case has no prompt.
-  defp log_pin_line(%{kind: :embedding}), do: ~s|   "source": "remote",|
 
   defp log_pin_line(spec) do
     ~s|   "prompt": "#{first_prompt(spec.prompts)}", "prompt_version_id": "…",\n| <>
       ~s|   "source": "remote",|
   end
-
-  defp kind_note(:chat),
-    do:
-      "This is a `chat` use case: the pinned version is a list of messages. Render each " <>
-        "`content`, keep the roles as they are, and append this call's own user turn after them."
-
-  defp kind_note(:text),
-    do:
-      "This is a `text` use case: the pinned version is a single template, not a message list. " <>
-        "Render it and send it as the whole prompt (as one user message for chat-only providers)."
-
-  defp kind_note(_kind),
-    do:
-      "This is an `embedding` use case: the deployment pins a model only, no prompt. " <>
-        "Fetch the model and its params and embed the input text directly."
 
   @doc "Variable table (markdown). When empty, says so in one line."
   @spec variable_table([map()]) :: String.t()

@@ -119,7 +119,7 @@ defmodule PromptOnWeb.DeploymentsComponents do
   defp format_value(value) when is_map(value), do: Jason.encode!(value)
   defp format_value(value), do: to_string(value)
 
-  @doc "Number of pins (0 for `kind :embedding`)."
+  @doc "Number of prompt pins in a deployment."
   @spec pin_count(map() | nil) :: non_neg_integer()
   def pin_count(%{prompt_pins: pins}) when is_map(pins), do: map_size(pins)
   def pin_count(_deployment), do: 0

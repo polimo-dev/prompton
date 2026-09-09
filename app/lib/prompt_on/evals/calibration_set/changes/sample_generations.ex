@@ -72,7 +72,8 @@ defmodule PromptOn.Evals.CalibrationSet.Changes.SampleGenerations do
   defp fetch_use_case(id, opts) do
     case PromptOn.Prompts.get_use_case(id, opts) do
       {:ok, nil} -> {:error, invalid("use case not found in this project")}
-      {:ok, use_case} -> {:ok, use_case}
+      {:ok, %{kind: :chat, archived_at: nil} = use_case} -> {:ok, use_case}
+      {:ok, _inactive} -> {:error, invalid("use case is not an active chat use case")}
       {:error, error} -> {:error, error}
     end
   end

@@ -76,8 +76,6 @@ defmodule PromptOnWeb.PromptEditorLive do
     (what happened is the record). `prompt_version_number` is that number **only when the draft
     equals the latest commit**; if the draft has been edited it is `nil` (a draft is not a version,
     so there is no number to point at).
-  - `kind :text` is one-shot, so it accumulates **only `:assistant` rows** and puts that run's
-    variables in `params` (`%{"variables" => …}`). The screen shows only the last output per cell.
   - Editing the prompt does not clear the history (it is a log, not a session); a quiet one-liner
     merely announces that "the next turns go out with the new prompt". The only things that delete
     are the per-cell clear and the global Clear history.
@@ -125,7 +123,6 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   @ai_model "anthropic/claude-sonnet-4"
   @chat_roles ~w(system user assistant)
-  @text_roles ~w(text)
   @draft_option "draft"
   @prompt_changed_notice "Prompt changed — the next turns use the new prompt (history is kept)."
   @picker_limit 50
@@ -303,8 +300,10 @@ defmodule PromptOnWeb.PromptEditorLive do
     end
   end
 
-  # The default prompt is `"default"`, else the first prompt (`nil` when there is none at all, as
-  # with an embedding use case).
+  defp active_use_case?(%{kind: :chat, archived_at: nil}), do: true
+  defp active_use_case?(_use_case), do: false
+
+  # The default prompt is `"default"`, else the first prompt (`nil` when there is none at all).
   defp default_prompt(prompts) when is_list(prompts),
     do: Enum.find(prompts, &(&1.name == "default")) || List.first(prompts)
 
@@ -648,10 +647,6 @@ defmodule PromptOnWeb.PromptEditorLive do
     |> assign_detection()
   end
 
-  # A draft has the same shape as a version, so the per-kind extraction rule is the same.
-  defp draft_messages(%{kind: :text}, draft),
-    do: [%{role: "text", content: draft.text_template || ""}]
-
   defp draft_messages(_use_case, %{messages: []}), do: [%{role: "system", content: ""}]
   defp draft_messages(_use_case, %{messages: messages}), do: messages
 
@@ -684,8 +679,8 @@ defmodule PromptOnWeb.PromptEditorLive do
       else: socket
   end
 
-  # Auto-save. With no prompt (embedding) there is nowhere to write; if equal to the saved draft,
-  # nothing is written.
+  # Auto-save. With no prompt there is nowhere to write; if equal to the saved draft, nothing is
+  # written.
   defp write_draft(%{assigns: %{prompt: nil}} = socket), do: socket
 
   defp write_draft(socket) do
@@ -707,7 +702,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     Prompt.draft_map(
       assigns.engine,
       Map.get(attrs, :messages, []),
-      Map.get(attrs, :text_template)
+      nil
     )
   end
 
@@ -726,9 +721,6 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   @doc false
   @spec version_messages(map(), map() | nil) :: [%{role: String.t(), content: String.t()}]
-  def version_messages(%{kind: :text}, version),
-    do: [%{role: "text", content: (version && version.text_template) || ""}]
-
   def version_messages(_use_case, nil), do: [%{role: "system", content: ""}]
 
   def version_messages(_use_case, %{messages: []}), do: [%{role: "system", content: ""}]
@@ -736,7 +728,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   def version_messages(_use_case, %{messages: messages}),
     do: Enum.map(messages, &%{role: to_string(&1.role), content: &1.content || ""})
 
-  defp roles(%{kind: :text}), do: @text_roles
   defp roles(_use_case), do: @chat_roles
 
   # ---------------------------------------------------------------------------
@@ -1173,8 +1164,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   defp arena_missing(assigns),
     do: EditorTestRun.missing_required(assigns.declared, assigns.arena_vars)
 
-  # `kind :text` is one-shot, so each cell shows **only the last output** (the history still
-  # accumulates).
   defp arena_columns(assigns) do
     Enum.map(assigns.arena_models, fn model ->
       rows = Map.get(assigns.arena_history, model.id, [])
@@ -1184,7 +1173,7 @@ defmodule PromptOnWeb.PromptEditorLive do
         label: model.display_name,
         model_id: model.model_id,
         price: known_price(model_pricing(assigns.catalog_prices, model)),
-        rows: visible_rows(assigns.use_case.kind, rows),
+        rows: rows,
         running?: Map.has_key?(assigns.arena_running, model.id)
       }
     end)
@@ -1198,15 +1187,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       label -> label
     end
   end
-
-  defp visible_rows(:text, rows) do
-    case Enum.reverse(rows) do
-      [last | _rest] -> [last]
-      [] -> []
-    end
-  end
-
-  defp visible_rows(_kind, rows), do: rows
 
   defp arena_running?(assigns), do: assigns.arena_running != %{}
 
@@ -1232,6 +1212,16 @@ defmodule PromptOnWeb.PromptEditorLive do
   # The single door every edit event passes through: swap the buffer and write it as the draft
   # right there (there is no save button).
   @impl Phoenix.LiveView
+  def handle_event(_event, _params, %{assigns: %{use_case: %{kind: kind}}} = socket)
+      when kind != :chat do
+    {:noreply, socket}
+  end
+
+  def handle_event(_event, _params, %{assigns: %{use_case: %{archived_at: archived_at}}} = socket)
+      when not is_nil(archived_at) do
+    {:noreply, socket}
+  end
+
   def handle_event("validate", %{"editor" => editor}, socket) do
     {:noreply, put_buffer(socket, decode_messages(editor["messages"], socket.assigns.messages))}
   end
@@ -1709,7 +1699,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     PromptVersion.content_hash(
       assigns.engine,
       Map.get(attrs, :messages, []),
-      Map.get(attrs, :text_template)
+      nil
     )
   end
 
@@ -1748,11 +1738,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       model -> {:ok, model}
     end
   end
-
-  # An embedding use case's target has no prompt version (model only); `Committable` requires it
-  # that way.
-  defp deploy_version(%{assigns: %{use_case: %{kind: :embedding}}} = socket, _id, _env, _message),
-    do: {:ok, socket, nil, false}
 
   # "Current draft": v(N+1) is minted **only when** the draft differs from the latest commit.
   # Otherwise that version is reused (no two versions with the same content). A blank commit
@@ -1824,8 +1809,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   # Name → version id. `current_version_id` is the version to pin for the prompt being edited
   # (including a minting result).
   @spec deploy_pins(map(), Ash.UUID.t() | nil) :: %{String.t() => Ash.UUID.t()}
-  def deploy_pins(%{use_case: %{kind: :embedding}}, _current_version_id), do: %{}
-
   def deploy_pins(assigns, current_version_id) do
     current_id = current_prompt_id(assigns.prompt)
 
@@ -1860,7 +1843,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   defp dispatch_arena(socket, input) do
-    if socket.assigns.use_case.kind == :chat and input == "" do
+    if input == "" do
       put_flash(socket, :error, "Write a message to send.")
     else
       variables = EditorTestRun.cast_variables(socket.assigns.declared, socket.assigns.arena_vars)
@@ -1878,26 +1861,21 @@ defmodule PromptOnWeb.PromptEditorLive do
   # *the new user turn*, so cells never mix. The user turn is kept as **one row per model** (each
   # column is an independent conversation, so it can be cleared separately).
   defp start_arena_column(socket, model, variables, input) do
-    chat? = socket.assigns.use_case.kind == :chat
     prior = EditorTestRun.context_turns(Map.get(socket.assigns.arena_history, model.id, []))
-    turns = if chat?, do: prior ++ [%{role: "user", content: input}], else: []
+    turns = prior ++ [%{role: "user", content: input}]
 
     # The version is stamped **only when the draft is literally equal** to the latest commit: an
     # edited draft has no version to point at.
     version = clean_version(socket.assigns)
     number = version && version.number
-    params = if chat?, do: %{}, else: %{"variables" => stringify(variables)}
+    params = %{}
 
     socket =
-      if chat? do
-        append_arena(socket, model.id, %{
-          role: :user,
-          content: input,
-          author_id: author_id(socket)
-        })
-      else
-        socket
-      end
+      append_arena(socket, model.id, %{
+        role: :user,
+        content: input,
+        author_id: author_id(socket)
+      })
 
     context = %{
       project: socket.assigns.project,
@@ -1921,11 +1899,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       _other -> nil
     end
   end
-
-  # The variable map goes into jsonb, so keys are fixed as strings (atom keys come back as strings
-  # anyway).
-  defp stringify(map) when is_map(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
-  defp stringify(other), do: other
 
   defp append_assistant(socket, model_id, result) do
     meta = Map.get(socket.assigns.arena_running, model_id, %{})
@@ -2095,16 +2068,6 @@ defmodule PromptOnWeb.PromptEditorLive do
       {:ok, %Catalog.Model{} = model} -> {:ok, model}
       _other -> {:error, (error && ErrorText.message(error)) || "Could not register #{model_id}."}
     end
-  end
-
-  defp content_attrs(%{kind: :text}, messages) do
-    content =
-      case messages do
-        [%{content: content} | _rest] -> content
-        _other -> ""
-      end
-
-    %{messages: [], text_template: content}
   end
 
   defp content_attrs(_use_case, messages) do
@@ -2397,8 +2360,9 @@ defmodule PromptOnWeb.PromptEditorLive do
       |> assign(:diff_target, diff_target(assigns))
       |> assign(:declared_rows, declared_rows(assigns))
       |> assign(:tab_rows, tab_rows(assigns))
-      |> assign(:runnable?, assigns.use_case.kind != :embedding and assigns.prompt != nil)
-      |> assign(:editable?, assigns.prompt != nil and assigns.use_case.kind != :embedding)
+      |> assign(:active_use_case?, active_use_case?(assigns.use_case))
+      |> assign(:runnable?, active_use_case?(assigns.use_case) and assigns.prompt != nil)
+      |> assign(:editable?, active_use_case?(assigns.use_case) and assigns.prompt != nil)
 
     ~H"""
     <Layouts.app
@@ -2427,7 +2391,6 @@ defmodule PromptOnWeb.PromptEditorLive do
         />
         <:crumb label={@use_case.key} />
         <:actions>
-          <DS.badge id="kind-badge" tone={:neutral} mono>{@use_case.kind}</DS.badge>
           <DS.badge
             :if={@editable? and @selected == nil and @tab == "editor"}
             id="draft-badge"
@@ -2446,7 +2409,7 @@ defmodule PromptOnWeb.PromptEditorLive do
             Viewing v{@selected_number}
           </DS.badge>
           <DS.btn_link
-            :if={@use_case.kind != :embedding and @tab == "editor"}
+            :if={@active_use_case? and @tab == "editor"}
             id="open-versions"
             size="sm"
             variant="ghost"
@@ -2456,6 +2419,7 @@ defmodule PromptOnWeb.PromptEditorLive do
             {if @selected_number, do: "v#{@selected_number}", else: "History"}
           </DS.btn_link>
           <DS.btn_link
+            :if={@active_use_case?}
             id="open-deploy"
             variant="primary"
             icon="flag"
@@ -2465,24 +2429,27 @@ defmodule PromptOnWeb.PromptEditorLive do
           </DS.btn_link>
         </:actions>
 
-        <div :if={@tab == "editor"} style="display:flex;flex-direction:column;gap:16px;min-width:0;">
+        <DS.empty
+          :if={not @active_use_case?}
+          id="retired-use-case"
+          icon="history"
+          title="Use case retired"
+          sub="This legacy use case is kept for historical logs and deployment history, but it can no longer be edited, run, or deployed."
+        />
+
+        <div
+          :if={@active_use_case? and @tab == "editor"}
+          style="display:flex;flex-direction:column;gap:16px;min-width:0;"
+        >
           <.prompt_switcher :if={@prompts != []} rows={@prompt_rows} new_patch={@new_prompt_patch} />
 
           <DS.empty
-            :if={@prompt == nil and @use_case.kind != :embedding}
+            :if={@prompt == nil}
             id="prompt-editor-empty"
             icon="code"
             title="No prompt"
-            sub={"This #{@use_case.kind} use case has no prompt versions."}
+            sub="This use case has no prompt versions."
           />
-
-          <div
-            :if={@use_case.kind == :embedding}
-            id="embedding-note"
-            style="font-size:13px;color:var(--tx-3);"
-          >
-            Embedding use cases have no prompt — pick a model and deploy it.
-          </div>
 
           <div :if={@prompt} style="display:flex;flex-direction:column;gap:10px;min-width:0;">
             <%= cond do %>
@@ -2520,7 +2487,6 @@ defmodule PromptOnWeb.PromptEditorLive do
                     ai_patch={row.ai_patch}
                   />
                   <DS.btn
-                    :if={@use_case.kind != :text}
                     id="add-message"
                     variant="outline"
                     icon="plus"
@@ -2545,24 +2511,14 @@ defmodule PromptOnWeb.PromptEditorLive do
         </div>
 
         <div
-          :if={@tab == "arena"}
+          :if={@active_use_case? and @tab == "arena"}
           id="arena-tab"
           style="display:flex;flex-direction:column;gap:16px;min-width:0;"
         >
           <.arena_bar models={arena_model_rows(assigns)} add_patch={@picker_patch} />
 
-          <div
-            :if={@use_case.kind == :embedding}
-            id="arena-embedding-note"
-            style="font-size:13px;color:var(--tx-3);"
-          >
-            Embedding use cases have nothing to run — the models picked here are what Deploy
-            chooses from.
-          </div>
-
           <.arena
             :if={@runnable?}
-            kind={@use_case.kind}
             columns={arena_columns(assigns)}
             add_patch={@picker_patch}
             variables={arena_variable_rows(assigns)}
@@ -2579,10 +2535,10 @@ defmodule PromptOnWeb.PromptEditorLive do
           />
         </div>
 
-        <.deployments_tab :if={@tab == "deployments"} {assigns} />
+        <.deployments_tab :if={@active_use_case? and @tab == "deployments"} {assigns} />
 
         <.live_component
-          :if={@tab == "evals"}
+          :if={@active_use_case? and @tab == "evals"}
           module={PromptOnWeb.EvalsPanel}
           id="evals-panel"
           org_slug={@org_slug}
@@ -2597,7 +2553,7 @@ defmodule PromptOnWeb.PromptEditorLive do
       </DS.screen>
 
       <.versions_drawer
-        :if={@versions_open? and @use_case.kind != :embedding}
+        :if={@active_use_case? and @versions_open?}
         rows={@version_rows}
         draft_patch={@draft_patch}
         draft_selected?={@selected == nil}
@@ -2605,7 +2561,7 @@ defmodule PromptOnWeb.PromptEditorLive do
       />
 
       <.model_picker_modal
-        :if={@picker_open?}
+        :if={@active_use_case? and @picker_open?}
         query={@model_query}
         rows={picker_rows(assigns)}
         picks={@model_picks}
@@ -2618,12 +2574,11 @@ defmodule PromptOnWeb.PromptEditorLive do
       />
 
       <.deploy_modal
-        :if={@deploy?}
+        :if={@active_use_case? and @deploy?}
         envs={deploy_env_rows(assigns)}
         models={deploy_model_rows(assigns)}
         version_options={deploy_version_options(assigns)}
         version_value={@deploy_version_id}
-        version_required?={@use_case.kind != :embedding}
         default_params={@use_case.default_params}
         pins={deploy_pin_rows(assigns)}
         deployments_patch={dep_path(assigns, %{})}
@@ -2633,7 +2588,7 @@ defmodule PromptOnWeb.PromptEditorLive do
       />
 
       <.ai_draft_modal
-        :if={@prompt && @selected == nil && ai_message(@messages, @ai_index)}
+        :if={(@active_use_case? and @prompt) && @selected == nil && ai_message(@messages, @ai_index)}
         stage={@ai_stage}
         role={ai_role(@messages, @ai_index)}
         current={ai_content(@messages, @ai_index)}
@@ -2645,13 +2600,13 @@ defmodule PromptOnWeb.PromptEditorLive do
       />
 
       <.new_prompt_modal
-        :if={@new_prompt?}
+        :if={@active_use_case? and @new_prompt?}
         name={@prompt_name}
         description={@prompt_description}
         close_patch={@close_patch}
       />
 
-      <.rollback_modal :if={@tab == "deployments" and @dep_confirm} {assigns} />
+      <.rollback_modal :if={@active_use_case? and @tab == "deployments" and @dep_confirm} {assigns} />
     </Layouts.app>
     """
   end
@@ -2811,17 +2766,21 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   # The tab rows. Only Editor carries `?v=`: the version preview is prompt editing screen state.
   # Deployments has its own parameters (`env`/`rev`/`edit`), so `dep_path/2` builds it.
-  defp tab_rows(assigns) do
-    [
-      %{
-        id: "editor",
-        label: @tab_labels["editor"],
-        patch: editor_path(assigns, tab: nil, v: assigns.selected_number)
-      },
-      %{id: "arena", label: @tab_labels["arena"], patch: editor_path(assigns, tab: "arena")},
-      %{id: "deployments", label: @tab_labels["deployments"], patch: dep_path(assigns, %{})},
-      %{id: "evals", label: @tab_labels["evals"], patch: evals_path(assigns)}
-    ]
+  defp tab_rows(%{use_case: use_case} = assigns) do
+    if active_use_case?(use_case) do
+      [
+        %{
+          id: "editor",
+          label: @tab_labels["editor"],
+          patch: editor_path(assigns, tab: nil, v: assigns.selected_number)
+        },
+        %{id: "arena", label: @tab_labels["arena"], patch: editor_path(assigns, tab: "arena")},
+        %{id: "deployments", label: @tab_labels["deployments"], patch: dep_path(assigns, %{})},
+        %{id: "evals", label: @tab_labels["evals"], patch: evals_path(assigns)}
+      ]
+    else
+      []
+    end
   end
 
   # The Evals tab link. It carries `?env=` when the URL named one, so coming from the Deployments
@@ -2941,8 +2900,8 @@ defmodule PromptOnWeb.PromptEditorLive do
 
   # The commit message field is shown only when this Deploy will actually create a version.
   defp deploy_minting?(assigns) do
-    assigns.use_case.kind != :embedding and assigns.prompt != nil and
-      assigns.deploy_version_id == @draft_option and clean_version(assigns) == nil
+    assigns.prompt != nil and assigns.deploy_version_id == @draft_option and
+      clean_version(assigns) == nil
   end
 
   defp version_note(%{commit_message: message}) when is_binary(message) and message != "",
@@ -2954,8 +2913,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   # The prompt being edited gets the version chosen in the modal (or the next number to be
   # minted); the rest get their own latest commit. A prompt with no version at all is plainly
   # shown as not pinned.
-  defp deploy_pin_rows(%{use_case: %{kind: :embedding}}), do: []
-
   defp deploy_pin_rows(assigns) do
     current_id = current_prompt_id(assigns.prompt)
 
@@ -3000,7 +2957,7 @@ defmodule PromptOnWeb.PromptEditorLive do
     %{
       host: integration_host(),
       use_case_key: assigns.use_case.key,
-      kind: assigns.use_case.kind,
+      kind: :chat,
       environment: (assigns.dep_env && assigns.dep_env.slug) || "production",
       prompts: assigns.dep_revision |> pin_rows(assigns.version_index) |> Enum.map(& &1.name),
       variables: List.wrap(assigns.use_case.input_schema)
@@ -3084,7 +3041,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   defp message_rows(assigns) do
-    removable? = length(assigns.messages) > 1 and assigns.use_case.kind != :text
+    removable? = length(assigns.messages) > 1
 
     assigns.messages
     |> Enum.with_index()

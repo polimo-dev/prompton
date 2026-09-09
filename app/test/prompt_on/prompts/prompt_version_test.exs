@@ -131,22 +131,6 @@ defmodule PromptOn.Prompts.PromptVersionTest do
                scope(ctx.project)
              )
 
-    text_uc = use_case_fixture(ctx.project, %{key: "voice_transcription", kind: :text})
-    text_prompt = default_prompt(text_uc)
-
-    assert {:error, %Ash.Error.Invalid{}} =
-             Prompts.commit_prompt_version(
-               %{prompt_id: text_prompt.id, messages: @messages},
-               scope(ctx.project)
-             )
-
-    assert {:ok,
-            %{text_template: "Diary entry, {{ language }}", detected_variables: ["language"]}} =
-             Prompts.commit_prompt_version(
-               %{prompt_id: text_prompt.id, text_template: "Diary entry, {{ language }}"},
-               scope(ctx.project)
-             )
-
     # a prompt_id of another project is "not found"
     other = project_fixture()
 

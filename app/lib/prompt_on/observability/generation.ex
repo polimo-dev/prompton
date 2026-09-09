@@ -47,6 +47,7 @@ defmodule PromptOn.Observability.Generation do
 
   @providers [:openrouter, :groq, :openai, :anthropic, :google, :other]
   @sources [:live, :playground, :experiment, :judge]
+  # Retain legacy kinds for historical records and delayed logs from pre-cutover SDKs.
   @kinds [:chat, :text, :embedding]
   @stop_kinds [:stop, :length, :tool_call, :content_filter, :other]
   @error_kinds [:http_4xx, :http_5xx, :rate_limited, :timeout, :transport, :parse, :app]
