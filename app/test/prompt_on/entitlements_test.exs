@@ -37,7 +37,7 @@ defmodule PromptOn.EntitlementsTest do
       assert Entitlements.limit(:free, :use_cases_per_project) == 10
       assert Entitlements.limit(:free, :log_count_per_use_case) == 1_000
       assert Entitlements.limit(:free, :log_retention_days) == 7
-      assert Entitlements.limit(:free, :members_per_organization) == 1
+      assert Entitlements.limit(:free, :members_per_organization) == 5
 
       assert Entitlements.limit(:team, :log_retention_days) == 30
       assert Entitlements.limit(:pro, :log_retention_days) == 90

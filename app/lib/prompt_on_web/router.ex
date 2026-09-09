@@ -199,7 +199,7 @@ defmodule PromptOnWeb.Router do
     end
   end
 
-  # Sign-in is **a single 6-digit code sent by email** (ADR 0008, revised 2026-09-03). It is a
+  # General sign-in uses **a single 6-digit code sent by email** (ADR 0008, revised 2026-09-03). It is a
   # **controller flow** (`PromptOnWeb.SignInController`), not a LiveView — the code verification
   # request is the very HTTP request that plants the session. ash_authentication's `auth_routes` and
   # `sign_in_route` are not used (`User` has no strategy); only `sign_out_route` (`GET /sign-out`
@@ -218,6 +218,9 @@ defmodule PromptOnWeb.Router do
     post "/sign-in/resend", SignInController, :resend
     post "/sign-in/reset", SignInController, :reset
 
+    get "/invitations/:token", InvitationController, :show, log: false
+    post "/invitations/:token/join", InvitationController, :join, log: false
+
     sign_out_route AuthController
   end
 
@@ -230,9 +233,6 @@ defmodule PromptOnWeb.Router do
   # email code is verified (`PromptOnWeb.UserSession.pop_return_to/2`).
   scope "/", PromptOnWeb do
     pipe_through [:browser, PromptOnWeb.Plugs.RequireUserWithReturnTo]
-
-    get "/invitations/:token", InvitationController, :show, log: false
-    post "/invitations/:token/join", InvitationController, :join, log: false
 
     ash_authentication_live_session :device_routes,
       on_mount: [{PromptOnWeb.LiveUserAuth, :live_user_required}] do

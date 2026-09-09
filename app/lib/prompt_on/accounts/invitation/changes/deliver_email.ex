@@ -6,23 +6,24 @@ defmodule PromptOn.Accounts.Invitation.Changes.DeliverEmail do
   use Ash.Resource.Change
 
   alias PromptOn.Accounts.Invitation.Email
+  alias PromptOn.Accounts.Organization
   alias PromptOn.Mailer
 
   @impl true
-  def change(changeset, _opts, _context) do
+  def change(changeset, _opts, %{actor: actor}) do
     Ash.Changeset.after_action(changeset, fn _changeset, invitation ->
       token = Ash.Resource.get_metadata(invitation, :token)
 
-      invitation.email
-      |> to_string()
-      |> Email.build(token)
-      |> Mailer.deliver()
-      |> case do
-        {:ok, _delivered} ->
-          {:ok, invitation}
-
-        {:error, _reason} ->
-          {:error, delivery_error()}
+      with {:ok, organization} <-
+             Ash.get(Organization, invitation.organization_id, actor: actor),
+           {:ok, _delivered} <-
+             invitation.email
+             |> to_string()
+             |> Email.build(token, organization.name, to_string(actor.email))
+             |> Mailer.deliver() do
+        {:ok, invitation}
+      else
+        {:error, _reason} -> {:error, delivery_error()}
       end
     end)
   end

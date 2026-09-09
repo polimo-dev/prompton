@@ -78,6 +78,20 @@ defmodule PromptOn.Accounts.Invitation do
       run Actions.Preview
     end
 
+    action :preview_link, :struct do
+      description "Internal email-proof preview. Opening the link never consumes it."
+      constraints instance_of: __MODULE__
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      run {Actions.Preview, email_proof?: true}
+    end
+
+    action :accept_link, :struct do
+      description "Internal Join action: the emailed token verifies the invited address."
+      constraints instance_of: __MODULE__
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      run {Actions.Accept, email_proof?: true}
+    end
+
     action :accept, :struct do
       description """
       Accepts the invitation once, under a row lock, and creates the membership only after the

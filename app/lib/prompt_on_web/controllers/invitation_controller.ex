@@ -2,21 +2,21 @@ defmodule PromptOnWeb.InvitationController do
   @moduledoc """
   Invitation accept flow.
 
-  The router requires a signed-in user while preserving the invitation URL through the email-code
-  sign-in flow. This controller never accepts on `GET`; it previews the target organization and
-  requires an explicit Join button click.
+  The emailed token proves ownership of the invited address. GET only previews the invitation;
+  an explicit, CSRF-protected Join POST accepts it and creates a signed-in session without an
+  additional email code.
   """
 
   use PromptOnWeb, :controller
 
   alias PromptOn.Accounts
-  alias PromptOnWeb.ErrorText
+  alias PromptOnWeb.{ErrorText, UserSession}
 
   plug :private_token_response
 
   def show(conn, %{"token" => token}) do
     preview(conn, token, fn conn, view ->
-      if matching_email?(conn.assigns.current_user, view) do
+      if is_nil(conn.assigns.current_user) or matching_email?(conn.assigns.current_user, view) do
         render(conn, :show, assigns(view, token))
       else
         render(conn, :wrong_account, assigns(view, token))
@@ -25,29 +25,25 @@ defmodule PromptOnWeb.InvitationController do
   end
 
   def join(conn, %{"token" => token}) do
-    preview(conn, token, fn conn, view ->
-      if matching_email?(conn.assigns.current_user, view) do
-        case Accounts.accept_invitation(token, actor: conn.assigns.current_user) do
-          {:ok, accepted} ->
-            redirect_to = organization_path(accepted) || organization_path(view) || ~p"/personal"
+    case Accounts.accept_invitation_link(token, actor: PromptOn.SystemActor.new()) do
+      {:ok, accepted} ->
+        user = Ash.Resource.get_metadata(accepted, :accepted_user)
 
-            conn
-            |> put_flash(:info, "You joined #{view.organization_name}.")
-            |> redirect(to: redirect_to)
-
-          {:error, error} ->
-            render(conn, :unavailable, assigns(view, token, ErrorText.message(error)))
-        end
-      else
         conn
-        |> put_status(:forbidden)
-        |> render(:wrong_account, assigns(view, token))
-      end
-    end)
+        |> AshAuthentication.Phoenix.Controller.clear_session(:prompton)
+        |> UserSession.sign_in(user)
+        |> put_flash(:info, "You joined #{accepted.organization.name}.")
+        |> redirect(to: organization_path(accepted))
+
+      {:error, error} ->
+        conn
+        |> put_status(:not_found)
+        |> render(:unavailable, assigns(empty_view(), token, ErrorText.message(error)))
+    end
   end
 
   defp preview(conn, token, fun) do
-    case Accounts.preview_invitation(token, actor: conn.assigns.current_user) do
+    case Accounts.preview_invitation_link(token, actor: PromptOn.SystemActor.new()) do
       {:ok, invitation} ->
         fun.(conn, view(invitation))
 

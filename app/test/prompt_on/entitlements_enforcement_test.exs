@@ -165,33 +165,47 @@ defmodule PromptOn.EntitlementsEnforcementTest do
       end
     end
 
-    test "a second member is refused on free and allowed on team" do
+    test "free allows five members and refuses the sixth" do
       owner = Fixtures.user_fixture()
-      Fixtures.set_plan(Fixtures.organization_for(owner), :team)
+      team = Fixtures.team_org_fixture(%{user: owner, slug: "acme-free-members"})
+      team = Fixtures.set_plan(team, :free)
 
-      {:ok, team} =
-        Accounts.create_organization(%{name: "Acme", slug: "acme-second"}, actor: owner)
+      for index <- 2..5 do
+        mate = Fixtures.user_fixture()
 
-      mate = Fixtures.user_fixture()
+        assert {:ok, _} =
+                 Accounts.add_member(
+                   %{organization_id: team.id, user_id: mate.id, role: :member},
+                   actor: Fixtures.system_actor()
+                 ),
+               "member #{index} should fit in the Free plan"
+      end
 
-      # the organization inherited :team from its creator, so the second member goes in
-      assert {:ok, _} =
-               Accounts.add_member(%{organization_id: team.id, user_id: mate.id, role: :member},
-                 actor: Fixtures.system_actor()
-               )
-
-      # dropped back to free by the admin: the next member is refused
-      Fixtures.set_plan(team, :free)
-      third = Fixtures.user_fixture()
+      sixth = Fixtures.user_fixture()
 
       assert {:error, error} =
-               Accounts.add_member(%{organization_id: team.id, user_id: third.id, role: :member},
+               Accounts.add_member(%{organization_id: team.id, user_id: sixth.id, role: :member},
                  actor: Fixtures.system_actor()
                )
 
       assert ErrorText.message(error) ==
-               "plan: the Free plan is a single-member organization. " <>
-                 "Upgrade to Team to invite members."
+               "plan: the Free plan allows 5 members per organization."
+    end
+
+    test "team allows the sixth member" do
+      owner = Fixtures.user_fixture()
+      team = Fixtures.team_org_fixture(%{user: owner, slug: "acme-team-members"})
+      team = Fixtures.set_plan(team, :team)
+
+      for _index <- 2..6 do
+        mate = Fixtures.user_fixture()
+
+        assert {:ok, _} =
+                 Accounts.add_member(
+                   %{organization_id: team.id, user_id: mate.id, role: :member},
+                   actor: Fixtures.system_actor()
+                 )
+      end
     end
 
     test "a personal organization is skipped entirely" do

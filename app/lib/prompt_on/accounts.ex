@@ -77,6 +77,8 @@ defmodule PromptOn.Accounts do
       define :revoke_invitation, action: :revoke
       define :preview_invitation, action: :preview, args: [:token]
       define :accept_invitation, action: :accept, args: [:token]
+      define :preview_invitation_link, action: :preview_link, args: [:token]
+      define :accept_invitation_link, action: :accept_link, args: [:token]
     end
 
     # BYOK provider keys are **organization-owned** (2026-09-01 revision: moved up from the

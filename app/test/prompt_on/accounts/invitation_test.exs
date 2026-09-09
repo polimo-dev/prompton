@@ -378,6 +378,152 @@ defmodule PromptOn.Accounts.InvitationTest do
              (reloaded.accepted_at && is_nil(reloaded.revoked_at))
   end
 
+  test "email-proof actions are restricted to the trusted controller actor" do
+    %{owner: owner, organization: organization, project: project} = team_context()
+    email = Fixtures.unique_email()
+
+    {:ok, invitation} =
+      invite(owner, invitation_attrs(organization, %{email: email}, :member, [project.id]))
+
+    token = Ash.Resource.get_metadata(invitation, :token)
+
+    for actor <- [nil, owner], action <- [:preview_link, :accept_link] do
+      assert {:error, _} =
+               Invitation
+               |> Ash.ActionInput.for_action(action, %{token: token}, actor: actor)
+               |> Ash.run_action()
+    end
+
+    assert {:ok, nil} = Accounts.get_user_by_email(email, actor: Fixtures.system_actor())
+    assert {:ok, _} = Accounts.preview_invitation_link(token, actor: Fixtures.system_actor())
+    assert {:ok, nil} = Accounts.get_user_by_email(email, actor: Fixtures.system_actor())
+  end
+
+  test "email proof registers the invited address and grants only the selected projects" do
+    %{owner: owner, organization: organization, project: project} = team_context()
+    unselected = project_fixture(owner, organization)
+    email = Fixtures.unique_email()
+
+    {:ok, invitation} =
+      invite(owner, invitation_attrs(organization, %{email: email}, :member, [project.id]))
+
+    token = Ash.Resource.get_metadata(invitation, :token)
+
+    assert {:ok, accepted} =
+             Accounts.accept_invitation_link(token, actor: Fixtures.system_actor())
+
+    user = Ash.Resource.get_metadata(accepted, :accepted_user)
+    assert to_string(user.email) == email
+    assert accepted.accepted_by_id == user.id
+    assert {:ok, [%{role: :member}]} = memberships(organization, user)
+    assert project_granted?(project.id, user.id)
+    refute project_granted?(unselected.id, user.id)
+
+    assert {:ok, %{personal?: true}} =
+             Accounts.personal_organization_for(user.id, actor: Fixtures.system_actor())
+
+    assert {:error, _} = Accounts.accept_invitation_link(token, actor: Fixtures.system_actor())
+  end
+
+  test "email proof reuses existing users case-insensitively without changing their profile or role" do
+    %{owner: owner, organization: organization, project: project} = team_context()
+    user = Fixtures.user_fixture(%{email: "Existing.User@example.com"})
+    personal = Fixtures.organization_for(user)
+
+    {:ok, _} =
+      Accounts.add_member(%{organization_id: organization.id, user_id: user.id, role: :member},
+        actor: Fixtures.system_actor()
+      )
+
+    {:ok, invitation} =
+      invite(
+        owner,
+        invitation_attrs(organization, %{email: "existing.user@example.com"}, :admin, [project.id])
+      )
+
+    token = Ash.Resource.get_metadata(invitation, :token)
+
+    assert {:ok, accepted} =
+             Accounts.accept_invitation_link(token, actor: Fixtures.system_actor())
+
+    assert accepted.accepted_by_id == user.id
+    assert Ash.Resource.get_metadata(accepted, :accepted_user).email == user.email
+
+    assert {:ok, same_personal} =
+             Accounts.personal_organization_for(user.id, actor: Fixtures.system_actor())
+
+    assert same_personal.id == personal.id
+    assert {:ok, [%{role: :member}]} = memberships(organization, user)
+  end
+
+  test "failed email-proof acceptance rolls back a new account when the Free organization is full" do
+    %{owner: owner, organization: organization, project: project} = team_context()
+    Fixtures.set_plan(organization, :free)
+    email = Fixtures.unique_email()
+
+    {:ok, invitation} =
+      invite(owner, invitation_attrs(organization, %{email: email}, :member, [project.id]))
+
+    token = Ash.Resource.get_metadata(invitation, :token)
+
+    for _ <- 1..4 do
+      user = Fixtures.user_fixture()
+
+      assert {:ok, _} =
+               Accounts.add_member(
+                 %{organization_id: organization.id, user_id: user.id, role: :member},
+                 actor: Fixtures.system_actor()
+               )
+    end
+
+    user_count = Ash.count!(Accounts.User, actor: Fixtures.system_actor())
+    org_count = Ash.count!(Accounts.Organization, actor: Fixtures.system_actor())
+
+    assert {:error, error} =
+             Accounts.accept_invitation_link(token, actor: Fixtures.system_actor())
+
+    assert ErrorText.message(error) =~ "Free plan allows 5 members"
+    assert {:ok, nil} = Accounts.get_user_by_email(email, actor: Fixtures.system_actor())
+    assert Ash.count!(Accounts.User, actor: Fixtures.system_actor()) == user_count
+    assert Ash.count!(Accounts.Organization, actor: Fixtures.system_actor()) == org_count
+
+    assert Invitation.pending?(
+             Ash.get!(Invitation, invitation.id, actor: Fixtures.system_actor())
+           )
+  end
+
+  test "email proof does not create an account after the inviter loses permission" do
+    %{owner: owner, organization: organization, project: project} = team_context()
+    admin = Fixtures.user_fixture()
+
+    {:ok, membership} =
+      Accounts.add_member(%{organization_id: organization.id, user_id: admin.id, role: :admin},
+        actor: Fixtures.system_actor()
+      )
+
+    email = Fixtures.unique_email()
+
+    {:ok, invitation} =
+      invite(admin, invitation_attrs(organization, %{email: email}, :admin, [project.id]))
+
+    token = Ash.Resource.get_metadata(invitation, :token)
+
+    assert {:ok, _} =
+             Ash.update(
+               Ash.Changeset.for_update(membership, :change_role, %{role: :member}, actor: owner)
+             )
+
+    assert {:error, error} =
+             Accounts.accept_invitation_link(token, actor: Fixtures.system_actor())
+
+    assert ErrorText.message(error) =~ "role: cannot be invited"
+    assert {:ok, nil} = Accounts.get_user_by_email(email, actor: Fixtures.system_actor())
+
+    assert Invitation.pending?(
+             Ash.get!(Invitation, invitation.id, actor: Fixtures.system_actor())
+           )
+  end
+
   defp memberships(organization, user) do
     with {:ok, memberships} <- Accounts.list_memberships(actor: Fixtures.system_actor()) do
       {:ok,

@@ -1,6 +1,6 @@
 defmodule PromptOn.Accounts.Invitation.Actions.Preview do
   @moduledoc """
-  Finds a pending invitation by raw token for the signed-in invited user.
+  Finds a pending invitation by raw token without consuming it.
   """
 
   use Ash.Resource.Actions.Implementation
@@ -11,12 +11,12 @@ defmodule PromptOn.Accounts.Invitation.Actions.Preview do
   require Ash.Query
 
   @impl true
-  def run(input, _opts, context) do
+  def run(input, opts, context) do
     token = Ash.ActionInput.get_argument(input, :token)
 
     with {:ok, invitation} <- find(token),
          :ok <- validate_pending(invitation),
-         :ok <- validate_email(invitation, context.actor) do
+         :ok <- validate_actor(invitation, context.actor, opts) do
       load_preview(invitation)
     end
   end
@@ -36,6 +36,12 @@ defmodule PromptOn.Accounts.Invitation.Actions.Preview do
     if Invitation.pending?(invitation),
       do: :ok,
       else: {:error, invalid(:token, "is expired, revoked, or already used")}
+  end
+
+  def validate_actor(invitation, actor, opts) do
+    if Keyword.get(opts, :email_proof?, false),
+      do: :ok,
+      else: validate_email(invitation, actor)
   end
 
   def validate_email(invitation, %PromptOn.Accounts.User{} = actor) do

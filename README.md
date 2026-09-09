@@ -100,9 +100,12 @@ schema steps while application instances from before `3cbc36e` are still running
 ## Members and invitations
 
 Open an organization's **Members** page to invite people by email, choose a role and select their
-projects. The recipient signs in with the invited email address, then clicks **Join** on the
-invitation page. Opening the email link does not accept it. Links expire after seven days, are
-single-use, and can be revoked from Members. Only a hash of the invitation token is stored.
+projects. Free organizations allow **5 members including the owner**. The emailed invitation
+verifies the recipient's address: clicking **Join** creates their account if needed, signs them in,
+and grants membership without another verification code. If a different account is signed in,
+the page shows which invited account Join will switch to. Opening the link only previews it, so
+mail scanners cannot consume invitations. Links expire after seven days, are single-use, and can
+be revoked from Members. Only a hash of the invitation token is stored.
 Invitations use the same mail adapter and `PTN_MAIL_FROM` as sign-in codes; local development can
 inspect them in `/dev/mailbox`.
 

@@ -6,15 +6,15 @@ defmodule PromptOn.Accounts.Membership.Validations.WithinPlanLimit do
   ## Why counting existing rows does not break sign-up
 
   The check is `count >= limit`, and the **first** owner membership of a fresh organization sees
-  `count == 0` while even `:free` allows `1` — so both creation paths (`create_personal` at
-  sign-up, `AddCreatorAsOwner` for a team organization) pass unchanged. The second membership of a
-  free organization sees `count == 1` and is refused.
+  `count == 0` while even `:free` allows member seats — so both creation paths (`create_personal` at
+  sign-up, `AddCreatorAsOwner` for a team organization) pass unchanged. A free organization is
+  refused only after it reaches the Free plan's member limit.
 
   ## Why the system actor is *not* skipped here
 
   Unlike the other three plan gates, `:add` is a system-only action today (the policy forbids every
-  other actor), so skipping the system actor would mean the limit never applies at all. The future
-  `:invite` inherits this validation by living on the same resource.
+  other actor), so skipping the system actor would mean the limit never applies at all. Invitation
+  acceptance inherits this validation by living on the same resource.
 
   Personal organizations are skipped entirely: they are single-member by definition and their owner
   row must always be creatable.

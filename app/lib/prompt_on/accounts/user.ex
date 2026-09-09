@@ -2,7 +2,7 @@ defmodule PromptOn.Accounts.User do
   @moduledoc """
   A signed-in user (LiveView actor, management API actor).
 
-  **The one and only sign-in method is a 6-digit code sent by email** (user decision 2026-09-03,
+  **General sign-in uses a 6-digit code sent by email** (user decision 2026-09-03,
   ADR 0008 `docs/adr/0008-email-only-sign-in.md`; it started as a magic link and changed to a
   code the same day). The password strategy and its actions (`register_with_password`,
   `sign_in_with_password`, `sign_in_with_token`, `change_password`, `set_password`) and the magic
@@ -26,6 +26,10 @@ defmodule PromptOn.Accounts.User do
   3. The controller mints a session token and plants it in the session
      (`PromptOnWeb.UserSession.sign_in/2`: `AshAuthentication.Jwt.token_for_user/2` +
      `store_in_session`).
+
+  Invitations are a separate email-proof entry point: `Invitation.:accept_link` validates the
+  one-use emailed token, registers or reuses its invited address and grants membership atomically.
+  `InvitationController` seeds the session after the explicit Join POST; GET never signs in.
 
   seeds, fixtures, and `mix prompton.seed_admin` create users via `:register` (system actor only)
   without mail.
@@ -78,7 +82,7 @@ defmodule PromptOn.Accounts.User do
 
     create :register do
       description """
-      Creates a user from an email alone: the first success of code sign-in
+      Creates a user from an email alone: an accepted invitation or the first success of code sign-in
       (`PromptOn.Accounts.SignIn.verify/3`), seeds, test fixtures, and `mix prompton.seed_admin`
       (system actor only). Creates the personal Organization/Membership (owner) along with it.
 

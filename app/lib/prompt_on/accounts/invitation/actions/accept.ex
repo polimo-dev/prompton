@@ -20,18 +20,21 @@ defmodule PromptOn.Accounts.Invitation.Actions.Accept do
   @notifications {__MODULE__, :notifications}
 
   @impl true
-  def run(input, _opts, context) do
+  def run(input, opts, context) do
     token = Ash.ActionInput.get_argument(input, :token)
     actor = context.actor
 
-    case Repo.transaction(fn ->
-           Process.put(@notifications, [])
+    result = transaction(token, actor, opts)
 
-           case accept(token, actor) do
-             {:ok, invitation} -> {invitation, Process.get(@notifications)}
-             {:error, error} -> Repo.rollback(error)
-           end
-         end) do
+    # A competing invitation or code sign-in can create this email after our lookup. Ash's
+    # registration rolls back the transaction on a unique conflict; retry once from fresh locks
+    # so we can reuse the committed account and re-check the invitation and seat limit.
+    result =
+      if registration_conflict?(result),
+        do: transaction(token, actor, opts),
+        else: result
+
+    case result do
       {:ok, {%Invitation{} = invitation, notifications}} ->
         Ash.Notifier.notify(notifications)
         {:ok, invitation}
@@ -43,17 +46,64 @@ defmodule PromptOn.Accounts.Invitation.Actions.Accept do
     Process.delete(@notifications)
   end
 
-  defp accept(token, actor) do
+  defp transaction(token, actor, opts) do
+    Repo.transaction(fn ->
+      Process.put(@notifications, [])
+
+      case accept(token, actor, opts) do
+        {:ok, invitation} -> {invitation, Process.get(@notifications)}
+        {:error, error} -> Repo.rollback(error)
+      end
+    end)
+  end
+
+  defp registration_conflict?({:error, %{errors: errors}}) do
+    Enum.any?(errors, fn
+      %Ash.Error.Changes.InvalidAttribute{private_vars: vars} ->
+        Keyword.get(vars || [], :constraint) == "users_unique_email_index"
+
+      _other ->
+        false
+    end)
+  end
+
+  defp registration_conflict?(_result), do: false
+
+  defp accept(token, actor, opts) do
     with {:ok, invitation} <- locked_invitation(token),
          :ok <- Preview.validate_pending(invitation),
-         :ok <- Preview.validate_email(invitation, actor),
+         :ok <- Preview.validate_actor(invitation, actor, opts),
          {:ok, _organization} <- lock_team_organization(invitation.organization_id),
          :ok <- authorize_current_inviter(invitation),
+         {:ok, actor} <- invited_user(invitation, actor, opts),
          :ok <- ensure_membership(invitation, actor),
          :ok <- grant_projects(invitation, actor),
          {:ok, accepted} <- mark_accepted(invitation, actor) do
-      Preview.load_preview(accepted)
+      accepted
+      |> Ash.Resource.put_metadata(:accepted_user, actor)
+      |> Preview.load_preview()
     end
+  end
+
+  defp invited_user(invitation, actor, opts) do
+    if Keyword.get(opts, :email_proof?, false) do
+      # The address comes only from the locked invitation, never from request parameters.
+      case Accounts.get_user_by_email(invitation.email, actor: PromptOn.SystemActor.new()) do
+        {:ok, %Accounts.User{} = user} -> {:ok, user}
+        {:ok, nil} -> register_invited_user(invitation.email)
+        {:error, error} -> {:error, error}
+      end
+    else
+      {:ok, actor}
+    end
+  end
+
+  defp register_invited_user(email) do
+    Accounts.register_user(%{email: email},
+      actor: PromptOn.SystemActor.new(),
+      return_notifications?: true
+    )
+    |> ok()
   end
 
   defp locked_invitation(token) do

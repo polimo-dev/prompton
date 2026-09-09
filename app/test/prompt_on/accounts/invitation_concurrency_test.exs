@@ -25,8 +25,12 @@ defmodule PromptOn.Accounts.InvitationConcurrencyTest do
     unboxed(fn ->
       owner = user(prefix, "owner")
       invited = user(prefix, "invited")
-      organization = Fixtures.team_org_fixture(%{user: owner, slug: prefix})
-      organization = Fixtures.set_plan(organization, :team)
+
+      organization =
+        %{user: owner, slug: prefix}
+        |> Fixtures.team_org_fixture()
+        |> Fixtures.set_plan(:free)
+
       project = Fixtures.project_fixture(%{user: owner, organization: organization})
 
       %{
@@ -157,14 +161,108 @@ defmodule PromptOn.Accounts.InvitationConcurrencyTest do
     end)
   end
 
+  test "simultaneous email-proof Join requests consume one invitation and create one account",
+       context do
+    email = "#{context.prefix}-fresh@example.com"
+    invitation = unboxed(fn -> invite_email(context, email) end)
+    token = Ash.Resource.get_metadata(invitation, :token)
+
+    results =
+      concurrently([
+        fn -> accept_link(token) end,
+        fn -> accept_link(token) end
+      ])
+
+    assert_one_winner(results)
+    accepted_user = accepted_user!(results)
+
+    unboxed(fn ->
+      stored = Ash.get!(Invitation, invitation.id, actor: Fixtures.system_actor())
+      assert stored.accepted_at
+      assert stored.accepted_by_id == accepted_user.id
+      assert is_nil(stored.revoked_at)
+      assert user_count(email) == 1
+      assert personal_organization_count(accepted_user.id) == 1
+      assert membership_count(context.organization.id, accepted_user.id) == 1
+      assert project_grant_count(context.project.id, accepted_user.id) == 1
+    end)
+  end
+
+  test "simultaneous email-proof Join requests across organizations share one new account",
+       context do
+    email = "#{context.prefix}-shared-fresh@example.com"
+
+    {second_organization, second_project, first_invitation, second_invitation} =
+      unboxed(fn ->
+        second_owner = user(context.prefix, "second-owner")
+
+        second_organization =
+          %{user: second_owner, slug: "#{context.prefix}-2"}
+          |> Fixtures.team_org_fixture()
+          |> Fixtures.set_plan(:free)
+
+        second_project =
+          Fixtures.project_fixture(%{user: second_owner, organization: second_organization})
+
+        {
+          second_organization,
+          second_project,
+          invite_email(context, email),
+          invite_email(
+            %{
+              context
+              | owner: second_owner,
+                organization: second_organization,
+                project: second_project
+            },
+            email
+          )
+        }
+      end)
+
+    first_token = Ash.Resource.get_metadata(first_invitation, :token)
+    second_token = Ash.Resource.get_metadata(second_invitation, :token)
+
+    results =
+      concurrently([
+        fn -> accept_link(first_token) end,
+        fn -> accept_link(second_token) end
+      ])
+
+    assert [{:ok, %Invitation{}}, {:ok, %Invitation{}}] = Enum.sort_by(results, &elem(&1, 0))
+    [accepted_user_id] = results |> Enum.map(&accepted_user!([&1]).id) |> Enum.uniq()
+
+    unboxed(fn ->
+      accepted_user = Accounts.get_user_by_email!(email, actor: Fixtures.system_actor())
+      assert accepted_user.id == accepted_user_id
+      assert user_count(email) == 1
+      assert personal_organization_count(accepted_user.id) == 1
+
+      assert membership_count(context.organization.id, accepted_user.id) == 1
+      assert membership_count(second_organization.id, accepted_user.id) == 1
+      assert project_grant_count(context.project.id, accepted_user.id) == 1
+      assert project_grant_count(second_project.id, accepted_user.id) == 1
+
+      assert Ash.get!(Invitation, first_invitation.id, actor: Fixtures.system_actor()).accepted_by_id ==
+               accepted_user.id
+
+      assert Ash.get!(Invitation, second_invitation.id, actor: Fixtures.system_actor()).accepted_by_id ==
+               accepted_user.id
+    end)
+  end
+
   defp invite(context, invited) do
+    invite_email(context, invited.email)
+  end
+
+  defp invite_email(context, email) do
     {:ok, invitation} =
       Invitation
       |> Ash.Changeset.for_create(
         :invite,
         %{
           organization_id: context.organization.id,
-          email: invited.email,
+          email: email,
           role: :member,
           project_ids: [context.project.id]
         },
@@ -181,6 +279,9 @@ defmodule PromptOn.Accounts.InvitationConcurrencyTest do
     |> Ash.run_action()
   end
 
+  defp accept_link(token),
+    do: Accounts.accept_invitation_link(token, actor: Fixtures.system_actor())
+
   defp revoke(actor, invitation) do
     invitation
     |> Ash.Changeset.for_update(:revoke, %{}, actor: actor)
@@ -190,6 +291,11 @@ defmodule PromptOn.Accounts.InvitationConcurrencyTest do
   defp assert_one_winner(results) do
     assert [{:error, %Ash.Error.Invalid{}}, {:ok, %Invitation{}}] =
              Enum.sort_by(results, &elem(&1, 0))
+  end
+
+  defp accepted_user!(results) do
+    {:ok, invitation} = Enum.find(results, &(elem(&1, 0) == :ok))
+    Ash.Resource.get_metadata(invitation, :accepted_user)
   end
 
   defp concurrently(funs) do
@@ -245,6 +351,23 @@ defmodule PromptOn.Accounts.InvitationConcurrencyTest do
     )
   end
 
+  defp user_count(email) do
+    Repo.one(from(u in "users", where: u.email == ^email, select: count()))
+  end
+
+  defp personal_organization_count(user_id) do
+    user_id = Ecto.UUID.dump!(user_id)
+
+    Repo.one(
+      from(o in "organizations",
+        join: m in "memberships",
+        on: m.organization_id == o.id,
+        where: field(o, :personal?) == true and m.user_id == ^user_id,
+        select: count()
+      )
+    )
+  end
+
   defp user(prefix, suffix),
     do: Fixtures.user_fixture(%{email: "#{prefix}-#{suffix}@example.com"})
 
@@ -266,7 +389,7 @@ defmodule PromptOn.Accounts.InvitationConcurrencyTest do
           Repo.delete_all(
             from(o in "organizations",
               where:
-                o.slug == ^prefix or
+                like(o.slug, ^"#{prefix}%") or
                   (field(o, :personal?) == true and o.id in subquery(personal_organizations))
             )
           )

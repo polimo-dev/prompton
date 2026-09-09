@@ -120,7 +120,12 @@ written in English.
   `%PromptOn.Projects.ApiKey{}` (public API, `scopes [:read, :logs]` — `:read` = config-fetch,
   `:logs` = monitoring logs, **project-scoped — no environment binding**). Mix tasks and jobs use
   `%PromptOn.SystemActor{}`.
-- **Sign-in is a single 6-digit code sent by email** (user decision 2026-09-03, ADR 0008
+- **Invitation email proof**: `Invitation.:preview_link` and `:accept_link` are SystemActor-only
+  actions used by the public browser invitation controller. GET is read-only; CSRF-protected Join
+  POST verifies the one-use token, creates/reuses its invited email and grants membership in one
+  transaction, then renews the browser session. No extra code is required. Failed acceptance must
+  not create an account; wrong-account previews explicitly offer switching to the invited email.
+- **General sign-in uses a single 6-digit code sent by email** (user decision 2026-09-03, ADR 0008
   `../docs/adr/0008-email-only-sign-in.md` — it started as a magic link and was amended to a code
   the same day: no link scanners, crossing devices/browsers is fine, no token in the URL). **`User`
   has no ash_authentication strategy** — the extension stays only for session tokens (`tokens`,

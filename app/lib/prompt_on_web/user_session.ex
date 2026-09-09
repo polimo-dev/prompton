@@ -1,7 +1,8 @@
 defmodule PromptOnWeb.UserSession do
   @moduledoc """
   The two jobs of the browser session - **seeding** and **the return-to path**. Used by
-  `PromptOnWeb.SignInController` (after code verification) and
+  `PromptOnWeb.SignInController` (after code verification),
+  `PromptOnWeb.InvitationController` (after explicit email-proof Join), and
   `PromptOnWeb.AuthController.sign_out/2`.
 
   ## Seeding (`sign_in/2`)

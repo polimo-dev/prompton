@@ -1,15 +1,17 @@
 <.auth_page id="invitation-wrong-account-card" flash={@flash}>
-  <h2 class="auth-h2">Use the invited email</h2>
+  <h2 class="auth-h2">Join {@organization_name}</h2>
   <p class="auth-info">
-    This invitation was sent to <strong>{@invited_email}</strong>. You are signed in with a different account.
+    This invitation was sent to <strong>{@invited_email}</strong>.
+    You are signed in as <strong>{@current_user.email}</strong>.
+    Joining will switch you to the invited account.
   </p>
 
-  <a
-    id="invitation-sign-out"
-    class="auth-submit"
-    href={~p"/sign-out"}
-    style="display:block;text-align:center;text-decoration:none;"
+  <.form
+    for={%{}}
+    id="join-invitation-form"
+    action={~p"/invitations/#{@token}/join"}
+    method="post"
   >
-    Sign out
-  </a>
+    <button id="join-invitation" type="submit" class="auth-submit">Join as {@invited_email}</button>
+  </.form>
 </.auth_page>

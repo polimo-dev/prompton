@@ -64,7 +64,7 @@ defmodule PromptOn.Entitlements do
       use_cases_per_project: 10,
       log_count_per_use_case: 1_000,
       log_retention_days: 7,
-      members_per_organization: 1,
+      members_per_organization: 5,
       team_organizations: false,
       automatic_evaluation: false,
       evaluation_sample_limit: 1_000
@@ -202,10 +202,6 @@ defmodule PromptOn.Entitlements do
   defp sentence(plan, :use_cases_per_project) do
     "the #{label(plan)} plan allows #{limit(plan, :use_cases_per_project)} use cases " <>
       "per project. " <> archive_hint(plan, "use case")
-  end
-
-  defp sentence(:free, :members_per_organization) do
-    "the Free plan is a single-member organization. Upgrade to Team to invite members."
   end
 
   defp sentence(plan, :members_per_organization) do
