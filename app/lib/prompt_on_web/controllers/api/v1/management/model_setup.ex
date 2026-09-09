@@ -13,20 +13,20 @@ defmodule PromptOnWeb.API.V1.Management.ModelSetup do
   ## Filling in pricing (best-effort)
 
   For an OpenRouter model given without `pricing`, the display name, context length, capabilities,
-  and **per-million-token rates** are copied from the public list (`PromptOnWeb.ProviderCatalog`,
+  and **per-million-token rates** are copied from the public list (`PromptOn.Catalog.ProviderCatalog`,
   no authentication needed). Without rates, the cost aggregation of monitoring logs depends solely
   on the values the provider returned, and in a setup where the app calls the provider directly
   those are often absent - better to fill them in once during onboarding.
 
-  Failures are **swallowed**: registration itself must succeed even if the provider list lookup is
-  blocked or slow (nor is an unknown rate written as 0 - `ProviderCatalog` gives `nil` for values
+  Lookup failure leaves optional metadata unknown: registration must still succeed when the
+  provider list is unavailable (nor is an unknown rate written as 0 - `ProviderCatalog` gives `nil` for values
   it does not know). If the caller gave no `display_name` and the lookup also fails, the raw
   `model_id` is used as the name.
   """
 
   alias PromptOn.Catalog
   alias PromptOn.Catalog.Model
-  alias PromptOnWeb.ProviderCatalog
+  alias PromptOn.Catalog.ProviderCatalog
 
   @default_provider "openrouter"
 
@@ -96,8 +96,6 @@ defmodule PromptOnWeb.API.V1.Management.ModelSetup do
       {:ok, models} -> Enum.find(models, &(&1.model_id == model_id))
       {:error, _reason} -> nil
     end
-  rescue
-    _error -> nil
   end
 
   defp put_new_present(attrs, _key, nil), do: attrs

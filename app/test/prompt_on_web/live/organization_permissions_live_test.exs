@@ -62,22 +62,36 @@ defmodule PromptOnWeb.OrganizationPermissionsLiveTest do
     member: member,
     organization: organization
   } do
+    organization =
+      organization
+      |> Accounts.set_organization_judge_model!(%{judge_model: "openai/gpt-4.1-mini"},
+        actor: Fixtures.system_actor()
+      )
+      |> Accounts.set_organization_draft_model!(%{draft_model: "anthropic/claude-sonnet-4"},
+        actor: Fixtures.system_actor()
+      )
+
     {:ok, view, _html} = conn |> log_in_user(member) |> live(~p"/#{organization.slug}/settings")
 
-    assert has_element?(view, "#org-evaluation-model[readonly]")
-    assert has_element?(view, "#org-draft-model[readonly]")
-    refute has_element?(view, "#save-evaluation-model")
-    refute has_element?(view, "#save-draft-model")
+    assert has_element?(view, "#evaluation-model-selection", "openai/gpt-4.1-mini")
+    assert has_element?(view, "#draft-model-selection", "anthropic/claude-sonnet-4")
+    refute has_element?(view, "#open-evaluation-model-picker")
+    refute has_element?(view, "#open-draft-model-picker")
+    refute has_element?(view, "#clear-evaluation-model")
+    refute has_element?(view, "#clear-draft-model")
 
-    render_submit(view, "save_draft_model", %{"draft" => %{"draft_model" => "unauthorized/model"}})
+    for target <- ["evaluation", "draft"] do
+      render_click(view, "select_org_model", %{
+        "target" => target,
+        "model-id" => "unauthorized/model"
+      })
 
-    render_submit(view, "save_evaluation_model", %{
-      "evaluation" => %{"evaluation_model" => "unauthorized/model"}
-    })
+      render_click(view, "clear_org_model", %{"target" => target})
+    end
 
     unchanged = Ash.get!(Accounts.Organization, organization.id, actor: member)
-    assert is_nil(unchanged.draft_model)
-    assert is_nil(unchanged.judge_model)
+    assert unchanged.draft_model == organization.draft_model
+    assert unchanged.judge_model == organization.judge_model
     assert has_element?(view, "#org-name[readonly]")
     refute has_element?(view, "#save-org-name")
     render_submit(view, "save_name", %{"organization" => %{"name" => "Forbidden rename"}})

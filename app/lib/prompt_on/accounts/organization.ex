@@ -83,8 +83,8 @@ defmodule PromptOn.Accounts.Organization do
 
     update :set_judge_model do
       description """
-      The organization's default judge model for evals. `nil` falls back to
-      `config :prompton, :judge_model`. Members set it from organization settings.
+      The organization's selected evaluation model. `nil` disables AI evaluation.
+      Owners and admins select it from organization settings.
       """
 
       accept [:judge_model]
@@ -92,8 +92,7 @@ defmodule PromptOn.Accounts.Organization do
 
     update :set_draft_model do
       description """
-      The organization's default model for AI draft generation. `nil` falls back to
-      `config :prompton, :draft_model` and then the built-in draft default.
+      The organization's selected model for AI draft generation. `nil` disables AI drafts.
       """
 
       accept [:draft_model]
@@ -246,8 +245,7 @@ defmodule PromptOn.Accounts.Organization do
 
     attribute :judge_model, :string do
       description """
-      Organization default judge model for evals (ADR 0010 §4.4). nil falls back to
-      `config :prompton, :judge_model`.
+      The selected evaluation model. nil disables AI evaluation for this organization.
       """
 
       public? true
@@ -255,8 +253,7 @@ defmodule PromptOn.Accounts.Organization do
 
     attribute :draft_model, :string do
       description """
-      Organization default model for AI draft generation. nil falls back to
-      `config :prompton, :draft_model` and then the built-in draft default.
+      The selected AI draft model. nil disables AI drafts for this organization.
       """
 
       public? true
@@ -283,17 +280,10 @@ defmodule PromptOn.Accounts.Organization do
     end
   end
 
-  @default_draft_model "anthropic/claude-sonnet-4"
-
-  @doc "The fallback model for AI draft generation."
-  @spec default_draft_model() :: String.t()
-  def default_draft_model,
-    do: Application.get_env(:prompton, :draft_model) || @default_draft_model
-
-  @doc "Returns the organization's draft model override, or the configured default."
-  @spec effective_draft_model(t()) :: String.t()
+  @doc "Returns the selected draft model, or nil when AI drafts are disabled."
+  @spec effective_draft_model(t()) :: String.t() | nil
   def effective_draft_model(%__MODULE__{draft_model: draft_model}) do
-    blank_to_nil(draft_model) || default_draft_model()
+    blank_to_nil(draft_model)
   end
 
   defp blank_to_nil(value) when is_binary(value) do

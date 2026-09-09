@@ -15,6 +15,8 @@ defmodule PromptOnWeb.API.V1.Management.ModelControllerTest do
   alias PromptOn.Catalog
 
   setup do
+    PromptOn.Catalog.ProviderCatalog.reset_cache()
+    on_exit(fn -> PromptOn.Catalog.ProviderCatalog.reset_cache() end)
     user = user_fixture()
     org = organization_for(user)
     project = project_fixture(%{user: user, organization: org, slug: "heydiary"})
@@ -115,6 +117,29 @@ defmodule PromptOnWeb.API.V1.Management.ModelControllerTest do
                "currency" => "USD",
                "unit" => "token"
              }
+    end
+
+    test "registration remains available when the public catalog cannot be fetched", %{raw: raw} do
+      previous_options = Application.get_env(:prompton, :provider_catalog_req_options)
+
+      Application.put_env(:prompton, :provider_catalog_req_options,
+        plug: fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end
+      )
+
+      on_exit(fn ->
+        Application.put_env(:prompton, :provider_catalog_req_options, previous_options)
+      end)
+
+      conn =
+        api_post(raw, ~p"/api/v1/orgs/personal/projects/heydiary/models", %{
+          model_id: "openai/offline-model"
+        })
+
+      body = json_response(conn, 201)
+      assert body["model_id"] == "openai/offline-model"
+      assert body["display_name"] == "openai/offline-model"
+      refute body["pricing"]["input_per_m"]
+      refute body["pricing"]["output_per_m"]
     end
 
     test "409 with the existing model", %{raw: raw, project: project} do

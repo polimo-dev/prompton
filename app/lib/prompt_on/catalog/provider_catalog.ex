@@ -1,13 +1,12 @@
-defmodule PromptOnWeb.ProviderCatalog do
+defmodule PromptOn.Catalog.ProviderCatalog do
   @moduledoc """
-  The **provider's public model list** read by "Import from provider" (the Import modal of the
-  mockup `s_settings.jsx` ModelsScreen).
+  The **provider's public model list** shared by screens and management API import flows.
 
   Only OpenRouter is supported for now: `GET https://openrouter.ai/api/v1/models` needs no
   authentication, so the catalog can be filled even before a provider key is registered. The
   response is returned **narrowed** to `%{model_id, display_name, context_length, capabilities,
-  pricing, created}`: only the values that go into the catalog should reach the screen, so the raw
-  provider response does not linger whole in the LiveView socket.
+  pricing, created}`: only the values that go into the catalog should reach callers, so the raw
+  provider response does not linger whole in LiveView sockets or controller state.
 
   `pricing` is carried over in **the same unit** as `pricing` on `PromptOn.Catalog.Model` (dollars
   per million tokens). OpenRouter gives dollar strings **per token**, like
@@ -20,12 +19,14 @@ defmodule PromptOnWeb.ProviderCatalog do
   it is missing or does not read as a positive integer it is `nil` ("unknown"): writing an unknown
   time as `0` would make the model date from 1970 and the sort would lie.
 
-  The URL is overridden with `config :prompton, :openrouter_models_url`, and the `Req` options (the
-  test's `plug:` injection) with `config :prompton, :provider_catalog_req_options`; tests never hit
-  real HTTP.
+  In server mode calls use a node-local supervised cache by default. Library mode, tests with
+  custom `req_options`, or callers passing `cache: false` fetch directly and do not require a cache
+  process. The URL is overridden with `config :prompton, :openrouter_models_url`, and `Req` options
+  with `config :prompton, :provider_catalog_req_options`.
 
-  Retries are off (`retry: false`) and it cuts off at 10 seconds. A failed list fetch must end as
-  the screen's err flash, never kill the LiveView.
+  Retries are off (`retry: false`) and it cuts off at 10 seconds. A failed cold fetch returns an
+  explicit error; after a successful fetch, refresh failures keep serving the last catalog while the
+  cache backs off briefly before another automatic retry.
   """
 
   @default_url "https://openrouter.ai/api/v1/models"
@@ -45,6 +46,16 @@ defmodule PromptOnWeb.ProviderCatalog do
   @doc "OpenRouter's public model list. On failure `{:error, human-readable reason}`."
   @spec list_openrouter_models(keyword()) :: {:ok, [provider_model()]} | {:error, String.t()}
   def list_openrouter_models(opts \\ []) do
+    if cached?(opts) do
+      PromptOn.Catalog.ProviderCatalog.Cache.list_openrouter_models(opts)
+    else
+      fetch_openrouter_models(opts)
+    end
+  end
+
+  @doc false
+  @spec fetch_openrouter_models(keyword()) :: {:ok, [provider_model()]} | {:error, String.t()}
+  def fetch_openrouter_models(opts \\ []) do
     request =
       [url: url(), receive_timeout: @receive_timeout, retry: false]
       |> Keyword.merge(Application.get_env(:prompton, :provider_catalog_req_options, []))
@@ -66,9 +77,34 @@ defmodule PromptOnWeb.ProviderCatalog do
     end
   end
 
+  @doc "Invalidate the supervised cache entry; the next cached call fetches again."
+  @spec invalidate_cache(GenServer.server()) :: :ok
+  def invalidate_cache(server \\ PromptOn.Catalog.ProviderCatalog.Cache) do
+    PromptOn.Catalog.ProviderCatalog.Cache.invalidate(server)
+  end
+
+  @doc "Reset the cache process state. Intended for isolated tests and config-changing tests."
+  @spec reset_cache(GenServer.server()) :: :ok
+  def reset_cache(server \\ PromptOn.Catalog.ProviderCatalog.Cache) do
+    PromptOn.Catalog.ProviderCatalog.Cache.reset(server)
+  end
+
   @doc "The OpenRouter model list URL."
   @spec url() :: String.t()
   def url, do: Application.get_env(:prompton, :openrouter_models_url, @default_url)
+
+  defp cached?(opts) do
+    cond do
+      Keyword.get(opts, :cache) == false ->
+        false
+
+      Keyword.has_key?(opts, :req_options) ->
+        false
+
+      true ->
+        true
+    end
+  end
 
   defp normalize(%{"id" => id} = model) when is_binary(id) and id != "" do
     %{

@@ -22,6 +22,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
     user = Fixtures.user_fixture()
     project = Fixtures.project_fixture(%{user: user, slug: "acme", description: "Acme"})
     use_case = Fixtures.use_case_fixture(project, %{key: "diary_generation"})
+    organization = select_evaluation_model(Fixtures.organization_for(user), "openai/gpt-4o-mini")
 
     on_exit(&PromptOn.LLM.Fake.reset/0)
 
@@ -29,7 +30,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
       conn: log_in_user(conn, user),
       user: user,
       project: project,
-      organization: Fixtures.organization_for(user),
+      organization: organization,
       use_case: use_case
     }
   end
@@ -47,6 +48,12 @@ defmodule PromptOnWeb.EvalsPanelTest do
     do: Fixtures.stored_generations_fixture(project, use_case, count, %{})
 
   defp with_key(project), do: Fixtures.provider_key_fixture(project, provider: :openrouter)
+
+  defp select_evaluation_model(organization, model) do
+    PromptOn.Accounts.set_organization_judge_model!(organization, %{judge_model: model},
+      actor: Fixtures.system_actor()
+    )
+  end
 
   # A set whose ten samples all carry a human score, so "Draft criteria with AI" is unlocked.
   defp scored_set(project, use_case) do
@@ -98,6 +105,77 @@ defmodule PromptOnWeb.EvalsPanelTest do
       assert has_element?(view, "#evals-no-logs")
       assert has_element?(view, "#evals-open-api-keys")
       refute has_element?(view, "#sample-logs")
+    end
+
+    test "without a selected model AI evaluation is blocked even with a key and rubric override",
+         %{
+           conn: conn,
+           project: project,
+           use_case: use_case,
+           organization: organization
+         } do
+      with_key(project)
+      %{set: set} = scored_set(project, use_case)
+
+      EvalsFixtures.rubric_fixture(use_case, %{
+        calibration_set_id: set.id,
+        judge_model: "openai/gpt-4o-mini"
+      })
+
+      select_evaluation_model(organization, nil)
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(test_pid, :evaluation_called)
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      {:ok, view, _html} = live(conn, evals_path(project, use_case))
+      assert has_element?(view, "#evals-no-model")
+      assert has_element?(view, "#resample-logs:not([disabled])")
+      assert has_element?(view, "#draft-rubric[disabled]")
+      assert has_element?(view, "#rescore-rubric[disabled]")
+      refute has_element?(view, "#evals-no-key")
+
+      view |> with_target("#evals-panel") |> render_click("draft")
+      view |> with_target("#evals-panel") |> render_click("rescore")
+      render_async(view)
+      refute_received :evaluation_called
+
+      view |> element("#evaluate-open") |> render_click()
+      assert has_element?(view, "#evaluate-model-settings-link")
+      refute has_element?(view, "#run-evaluation")
+      refute has_element?(view, "#evaluate-cost")
+      view |> with_target("#evals-panel") |> render_click("evaluate")
+      assert {:ok, %{results: []}} = Evals.list_evaluation_runs(use_case.id, scope(project))
+    end
+
+    test "clearing the selected model blocks AI from an already open panel", %{
+      conn: conn,
+      project: project,
+      use_case: use_case,
+      organization: organization
+    } do
+      with_key(project)
+      scored_set(project, use_case)
+      {:ok, view, _html} = live(conn, evals_path(project, use_case))
+      refute has_element?(view, "#draft-rubric[disabled]")
+
+      select_evaluation_model(organization, nil)
+      test_pid = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(test_pid, :evaluation_called)
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      view |> element("#draft-rubric") |> render_click()
+      render_async(view)
+
+      assert has_element?(view, "#evals-no-model")
+      assert has_element?(view, "#draft-rubric[disabled]")
+      assert render(view) =~ "Select an Evaluation model"
+      refute_received :evaluation_called
     end
 
     test "without a provider key sampling still works and only the AI step is blocked", %{
@@ -273,6 +351,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
     test "without a provider key the AI buttons are disabled" do
       user = Fixtures.user_fixture()
       other = Fixtures.project_fixture(%{user: user, slug: "no-key"})
+      select_evaluation_model(Fixtures.organization_for(user), "openai/gpt-4o-mini")
       use_case = Fixtures.use_case_fixture(other, %{key: "unkeyed"})
       scored_set(other, use_case)
 
@@ -503,6 +582,7 @@ defmodule PromptOnWeb.EvalsPanelTest do
     test "is blocked without a provider key" do
       user = Fixtures.user_fixture()
       project = Fixtures.project_fixture(%{user: user, slug: "unkeyed"})
+      select_evaluation_model(Fixtures.organization_for(user), "openai/gpt-4o-mini")
       use_case = Fixtures.use_case_fixture(project, %{key: "diary_generation"})
       EvalsFixtures.evaluatable_fixture(project, use_case: use_case, count: 6)
 

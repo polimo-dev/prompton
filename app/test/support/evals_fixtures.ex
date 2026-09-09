@@ -20,7 +20,9 @@ defmodule PromptOn.EvalsFixtures do
       stored_generations_fixture: 4
     ]
 
-  alias PromptOn.Evals
+  alias PromptOn.{Accounts, Evals}
+
+  @default_judge_model "openai/gpt-4o-mini"
 
   @default_criteria %{
     summary: "A good answer restates the request and answers it in the user's language.",
@@ -34,6 +36,24 @@ defmodule PromptOn.EvalsFixtures do
 
   @doc "The rubric body used by `rubric_fixture/2` when the caller gives none."
   def default_criteria, do: @default_criteria
+
+  @doc "Selects the organization evaluation model required by new eval judge calls."
+  def select_judge_model(project_or_organization_id, model \\ @default_judge_model)
+
+  def select_judge_model(%{organization_id: organization_id}, model),
+    do: select_judge_model(organization_id, model)
+
+  def select_judge_model(organization_id, model) when is_binary(organization_id) do
+    organization =
+      Ash.get!(PromptOn.Accounts.Organization, organization_id, actor: system_actor())
+
+    {:ok, updated} =
+      Accounts.set_organization_judge_model(organization, %{judge_model: model},
+        actor: system_actor()
+      )
+
+    updated
+  end
 
   @doc """
   Samples a calibration set from the use case's stored logs. The logs must already exist (see

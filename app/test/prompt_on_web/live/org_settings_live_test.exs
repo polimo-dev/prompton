@@ -8,13 +8,55 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
   BYOK is **OpenRouter only** (2026-09-01), so there is neither a provider row nor a provider
   picker. Tab and modal targets must stay in the URL (zero-downtime deployment discipline).
   """
-  use PromptOnWeb.ConnCase, async: true
+  use PromptOnWeb.ConnCase, async: false
 
   alias PromptOn.Accounts
   alias PromptOn.Fixtures
 
   doctest PromptOnWeb.OrgComponents, import: true
   doctest PromptOnWeb.OrgSettingsLive
+
+  @openrouter_payload %{
+    "data" => [
+      %{
+        "id" => "openai/gpt-4.1-mini",
+        "name" => "OpenAI: GPT 4.1 mini",
+        "context_length" => 128_000,
+        "created" => 1_745_000_000,
+        "supported_parameters" => ["tools", "response_format"],
+        "pricing" => %{"prompt" => "0.0000004", "completion" => "0.0000016"}
+      },
+      %{
+        "id" => "anthropic/claude-sonnet-4",
+        "name" => "Anthropic: Claude Sonnet 4",
+        "context_length" => 200_000,
+        "created" => 1_746_000_000,
+        "supported_parameters" => ["tools"],
+        "pricing" => %{"prompt" => "0.000003", "completion" => "0.000015"}
+      }
+    ]
+  }
+
+  setup do
+    stub_openrouter(@openrouter_payload)
+    :ok
+  end
+
+  defp stub_openrouter(payload) do
+    PromptOn.Catalog.ProviderCatalog.reset_cache()
+
+    Application.put_env(:prompton, :provider_catalog_req_options,
+      plug: fn conn -> Req.Test.json(conn, payload) end
+    )
+
+    on_exit(fn ->
+      Application.put_env(:prompton, :provider_catalog_req_options,
+        plug: fn conn -> Req.Test.json(conn, %{"data" => []}) end
+      )
+
+      PromptOn.Catalog.ProviderCatalog.reset_cache()
+    end)
+  end
 
   setup %{conn: conn} do
     user = Fixtures.user_fixture()
@@ -342,58 +384,175 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
                  "whichever comes first (Free plan)."
     end
 
-    test "the evaluation model field saves and clears", %{conn: conn, user: user} do
+    test "evaluation and draft models are chosen from the OpenRouter picker", %{
+      conn: conn,
+      user: user
+    } do
       {:ok, view, html} = live(conn, ~p"/personal/settings")
 
-      assert html =~ "openai/gpt-4o-mini"
-      assert has_element?(view, "#org-models-card label", "Evaluation model")
-      refute html =~ "Judge model"
-      refute html =~ "judge model"
+      assert has_element?(view, "#org-models-card .mono-label", "Evaluation model")
+      assert has_element?(view, "#evaluation-model-unavailable", "Evaluations are unavailable")
+      assert has_element?(view, "#draft-model-unavailable", "AI draft writing is unavailable")
+      refute html =~ "openai/gpt-4o-mini"
+      refute has_element?(view, "#org-evaluation-form")
+      refute has_element?(view, "#org-draft-form")
+
+      view |> element("#open-evaluation-model-picker") |> render_click()
+      assert_patched(view, ~p"/personal/settings?tab=general&model-picker=evaluation")
+
+      html = render_async(view)
+      assert html =~ "OpenAI: GPT 4.1 mini"
+      assert has_element?(view, "#org-model-row-openai-gpt-4-1-mini")
 
       view
-      |> form("#org-evaluation-form", evaluation: %{"evaluation_model" => "openai/gpt-4.1-mini"})
-      |> render_submit()
+      |> form("#org-model-search-form", picker: %{"q" => "not-real"})
+      |> render_change()
 
+      assert has_element?(view, "#org-model-picker-empty", "No model matches this search.")
+
+      view
+      |> form("#org-model-search-form", picker: %{"q" => "gpt"})
+      |> render_change()
+
+      assert has_element?(view, "#org-model-row-openai-gpt-4-1-mini")
+      refute has_element?(view, "#org-model-row-anthropic-claude-sonnet-4")
+
+      view |> element("#select-org-model-openai-gpt-4-1-mini") |> render_click()
+
+      assert_patched(view, ~p"/personal/settings?tab=general")
       assert render(view) =~ "Evaluation model saved"
 
-      assert {:ok, %{judge_model: "openai/gpt-4.1-mini"}} =
+      assert {:ok, %{judge_model: "openai/gpt-4.1-mini", draft_model: nil}} =
                Accounts.personal_organization_for(user.id, actor: user)
 
-      view
-      |> form("#org-evaluation-form", evaluation: %{"evaluation_model" => "  "})
-      |> render_submit()
+      view |> element("#open-draft-model-picker") |> render_click()
+      render_async(view)
+      view |> element("#select-org-model-anthropic-claude-sonnet-4") |> render_click()
 
-      assert {:ok, %{judge_model: nil}} =
+      assert render(view) =~ "Draft model saved"
+
+      assert {:ok,
+              %{
+                judge_model: "openai/gpt-4.1-mini",
+                draft_model: "anthropic/claude-sonnet-4"
+              }} = Accounts.personal_organization_for(user.id, actor: user)
+
+      {:ok, remounted, html} = live(conn, ~p"/personal/settings")
+
+      assert html =~ "openai/gpt-4.1-mini"
+      assert html =~ "anthropic/claude-sonnet-4"
+
+      remounted |> element("#clear-evaluation-model") |> render_click()
+
+      assert render(remounted) =~ "Evaluation model cleared"
+
+      assert {:ok, %{judge_model: nil, draft_model: "anthropic/claude-sonnet-4"}} =
+               Accounts.personal_organization_for(user.id, actor: user)
+
+      remounted |> element("#clear-draft-model") |> render_click()
+
+      assert render(remounted) =~ "Draft model cleared"
+
+      assert {:ok, %{judge_model: nil, draft_model: nil}} =
                Accounts.personal_organization_for(user.id, actor: user)
     end
 
-    test "the draft model setting persists independently and clears to the default", %{
+    test "malformed model events do not persist arbitrary model ids", %{
       conn: conn,
       user: user
     } do
       {:ok, view, _html} = live(conn, ~p"/personal/settings")
-      assert has_element?(view, "#org-models-card label", "Draft model")
-      assert has_element?(view, "#org-draft-model[placeholder='anthropic/claude-sonnet-4']")
 
-      view
-      |> form("#org-draft-form", draft: %{"draft_model" => " openai/gpt-4.1-mini "})
-      |> render_submit()
+      render_change(view, "org_model_search", %{"picker" => %{"q" => %{}}})
+      render_click(view, "select_org_model", %{"target" => "evaluation"})
 
-      assert render(view) =~ "Draft model saved"
+      render_click(view, "select_org_model", %{
+        "target" => "evaluation",
+        "model-id" => "unknown/forged"
+      })
 
-      assert {:ok, %{draft_model: "openai/gpt-4.1-mini", judge_model: nil}} =
+      assert render(view) =~ "Choose a model from the OpenRouter list."
+
+      assert {:ok, %{judge_model: nil, draft_model: nil}} =
                Accounts.personal_organization_for(user.id, actor: user)
+    end
 
-      {:ok, reloaded, _html} = live(conn, ~p"/personal/settings")
-      assert has_element?(reloaded, "#org-draft-model[value='openai/gpt-4.1-mini']")
-      reloaded |> form("#org-draft-form", draft: %{"draft_model" => "  "}) |> render_submit()
+    test "a saved model stays visible when catalog loading fails and can still be cleared", %{
+      conn: conn,
+      user: user
+    } do
+      organization = Fixtures.organization_for(user)
 
-      assert {:ok, %{draft_model: nil}} = Accounts.personal_organization_for(user.id, actor: user)
-      assert has_element?(reloaded, "#org-draft-model[value='']")
+      assert {:ok, _organization} =
+               Accounts.set_organization_judge_model(
+                 organization,
+                 %{judge_model: "openai/vanished"},
+                 actor: user
+               )
+
+      stub_openrouter(%{"error" => "not a catalog"})
+
+      {:ok, view, _html} = live(conn, ~p"/personal/settings")
+
+      assert has_element?(view, "#evaluation-model-selection", "openai/vanished")
+
+      view |> element("#open-evaluation-model-picker") |> render_click()
+      html = render_async(view)
+
+      assert html =~ "unexpected response from openrouter"
+      assert has_element?(view, "#org-model-picker-error")
+      assert has_element?(view, "#clear-evaluation-model-from-picker")
+
+      view |> element("#clear-evaluation-model-from-picker") |> render_click()
+
+      assert render(view) =~ "Evaluation model cleared"
+
+      assert {:ok, %{judge_model: nil}} =
+               Accounts.personal_organization_for(user.id, actor: user)
     end
   end
 
   describe "access control" do
+    test "a member sees selected organization models without management controls" do
+      owner = Fixtures.user_fixture()
+
+      org =
+        Fixtures.team_org_fixture(%{user: owner, slug: "readonly-models"})
+        |> Fixtures.set_plan(:team)
+
+      member = Fixtures.user_fixture(%{email: "settings-member@example.com"})
+
+      {:ok, _membership} =
+        Accounts.add_member(
+          %{organization_id: org.id, user_id: member.id, role: :member},
+          actor: Fixtures.system_actor()
+        )
+
+      assert {:ok, org} =
+               Accounts.set_organization_judge_model(
+                 org,
+                 %{judge_model: "openai/gpt-4.1-mini"},
+                 actor: owner
+               )
+
+      assert {:ok, _org} =
+               Accounts.set_organization_draft_model(
+                 org,
+                 %{draft_model: "anthropic/claude-sonnet-4"},
+                 actor: owner
+               )
+
+      {:ok, view, html} =
+        live(log_in_user(build_conn(), member), ~p"/readonly-models/settings")
+
+      assert html =~ "openai/gpt-4.1-mini"
+      assert html =~ "anthropic/claude-sonnet-4"
+      refute has_element?(view, "#open-evaluation-model-picker")
+      refute has_element?(view, "#open-draft-model-picker")
+      refute has_element?(view, "#clear-evaluation-model")
+      refute has_element?(view, "#clear-draft-model")
+    end
+
     test "a non-member cannot open another organization's settings", %{conn: conn} do
       stranger = Fixtures.user_fixture()
       _closed = Fixtures.team_org_fixture(%{user: stranger, slug: "closed-doors"})

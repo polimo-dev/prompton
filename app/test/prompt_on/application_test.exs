@@ -22,6 +22,7 @@ defmodule PromptOn.ApplicationTest do
     assert PromptOnWeb.Telemetry in server
     assert PromptOn.Deployments.SnapshotCache in server
     assert PromptOn.Accounts.ProviderKeyCache in server
+    assert PromptOn.Catalog.ProviderCatalog.Cache in server
     assert Enum.any?(server, &match?({Oban, _config}, &1))
     assert Enum.any?(server, &match?({PromptOn.RateLimit, _opts}, &1))
     assert Enum.any?(server, &match?({AshAuthentication.Supervisor, _opts}, &1))

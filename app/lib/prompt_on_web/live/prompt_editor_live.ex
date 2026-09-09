@@ -113,6 +113,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   alias PromptOn.Accounts
   alias PromptOn.Accounts.Organization
   alias PromptOn.Catalog
+  alias PromptOn.Catalog.ProviderCatalog
   alias PromptOn.Deployments
   alias PromptOn.Deployments.Deployment
   alias PromptOn.Prompts
@@ -127,7 +128,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.EvalsComponents
   alias PromptOnWeb.IntegrationComponents
-  alias PromptOnWeb.ProviderCatalog
 
   @chat_roles ~w(system user assistant)
   @draft_option "draft"
@@ -207,6 +207,7 @@ defmodule PromptOnWeb.PromptEditorLive do
            model_query: "",
            model_picks: [],
            provider_key: nil,
+           draft_model: Organization.effective_draft_model(socket.assigns.organization),
            arena_models: [],
            arena_history: %{},
            arena_running: %{},
@@ -927,10 +928,10 @@ defmodule PromptOnWeb.PromptEditorLive do
       else: socket
   end
 
-  defp start_catalog(socket) do
+  defp start_catalog(socket, opts \\ []) do
     socket
     |> assign(:catalog_state, :loading)
-    |> start_async(:model_catalog, fn -> ProviderCatalog.list_openrouter_models() end)
+    |> start_async(:model_catalog, fn -> ProviderCatalog.list_openrouter_models(opts) end)
   end
 
   # OpenRouter list pricing as `(model_id → pricing in stored form)`. Entries with unknown pricing
@@ -1497,7 +1498,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   def handle_event("retry_model_catalog", _params, socket) do
-    {:noreply, start_catalog(socket)}
+    {:noreply, start_catalog(socket, refresh: true)}
   end
 
   # A model picked from the catalog (`catalog:<model-id>`) is registered in the project catalog
@@ -1666,24 +1667,29 @@ defmodule PromptOnWeb.PromptEditorLive do
          {:ok, %Organization{} = organization} <-
            Ash.get(Organization, socket.assigns.project.organization_id,
              actor: socket.assigns.current_user
-           ) do
+           ),
+         model when is_binary(model) <- Organization.effective_draft_model(organization) do
       case is_integer(socket.assigns.ai_index) &&
              Enum.at(socket.assigns.messages, socket.assigns.ai_index) do
         message when not is_map(message) ->
           {:noreply, socket}
 
         message ->
-          request = ai_request(socket.assigns, message, organization)
+          request = ai_request(socket.assigns, message, model)
           organization_id = organization.id
 
           {:noreply,
            socket
-           |> assign(ai_stage: :running, ai_result: nil, ai_error: nil)
+           |> assign(draft_model: model, ai_stage: :running, ai_result: nil, ai_error: nil)
            |> start_async({:ai_draft, socket.assigns.ai_index}, fn ->
              PromptOn.LLM.complete(request, organization_id: organization_id)
            end)}
       end
     else
+      nil ->
+        {:noreply,
+         assign(socket, draft_model: nil, ai_stage: :intro, ai_result: nil, ai_error: nil)}
+
       {:ok, nil} ->
         {:noreply, put_flash(socket, :error, "Organization access is no longer available.")}
 
@@ -2432,9 +2438,9 @@ defmodule PromptOnWeb.PromptEditorLive do
   # ---------------------------------------------------------------------------
   # AI draft meta prompt
 
-  defp ai_request(assigns, message, organization) do
+  defp ai_request(assigns, message, model) do
     %{
-      model: Organization.effective_draft_model(organization),
+      model: model,
       messages: [
         %{role: "system", content: ai_system_prompt()},
         %{role: "user", content: ai_user_prompt(assigns, message)}
@@ -2672,6 +2678,18 @@ defmodule PromptOnWeb.PromptEditorLive do
                 <.schema_banner :if={@lint_error} id="lint-error" tone={:err} icon="alert">
                   {@lint_error}
                 </.schema_banner>
+                <.schema_banner
+                  :if={is_nil(@draft_model)}
+                  id="draft-model-required"
+                  tone={:warn}
+                  icon="sparkles"
+                >
+                  AI drafts are off. Select a draft model in
+                  <.link id="draft-model-settings" navigate={~p"/#{@org_slug}/settings"}>
+                    Organization settings
+                  </.link>
+                  to enable them.
+                </.schema_banner>
                 <.form
                   for={@form}
                   id="prompt-editor-form"
@@ -2685,6 +2703,7 @@ defmodule PromptOnWeb.PromptEditorLive do
                     roles={@roles}
                     removable?={row.removable?}
                     ai_patch={row.ai_patch}
+                    ai_enabled?={not is_nil(@draft_model)}
                   />
                   <DS.btn
                     id="add-message"
@@ -2813,7 +2832,9 @@ defmodule PromptOnWeb.PromptEditorLive do
         instruction={@ai_instruction}
         result={@ai_result}
         error={@ai_error}
+        model={@draft_model}
         close_patch={@close_patch}
+        settings_path={~p"/#{@org_slug}/settings"}
         providers_path={~p"/#{@org_slug}/settings?#{[tab: "providers"]}"}
       />
 

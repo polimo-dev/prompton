@@ -35,6 +35,7 @@ defmodule PromptOn.Evals.PolicyTest do
     user = user_fixture()
     project = project_fixture(%{user: user})
     provider_key_fixture(organization_id(project))
+    select_judge_model(project)
     use_case = use_case_fixture(project)
     target = evaluatable_fixture(project, use_case: use_case, count: 6)
 

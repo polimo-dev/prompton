@@ -142,7 +142,8 @@ defmodule PromptOn.Evals.Rubric do
 
     attribute :judge_model, :string do
       description """
-      Per-rubric judge model override. nil falls back to the organization, then the app default.
+      Per-rubric judge model override. New judge calls require the organization to have selected
+      an evaluation model; when present, this override wins for that rubric.
       """
 
       public? true

@@ -12,7 +12,16 @@ defmodule PromptOnWeb.ProjectAccessRevocationTest do
 
   setup %{conn: conn} do
     owner = user_fixture()
-    organization = team_org_fixture(%{user: owner})
+
+    organization =
+      team_org_fixture(%{user: owner})
+      |> Accounts.set_organization_draft_model!(%{draft_model: "openai/gpt-4.1-mini"},
+        actor: system_actor()
+      )
+      |> Accounts.set_organization_judge_model!(%{judge_model: "openai/gpt-4o-mini"},
+        actor: system_actor()
+      )
+
     set_plan(organization, :pro)
     admin = user_fixture()
 

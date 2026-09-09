@@ -444,7 +444,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
   One line of model pricing: `"$3.00 / $15.00 per 1M"` (input / output, per million tokens).
 
   It accepts either the `pricing` of `PromptOn.Catalog.Model` (string keys) or the `pricing` of
-  `PromptOnWeb.ProviderCatalog` (atom keys). **When both are unknown it is `"—"`**, and when only
+  `PromptOn.Catalog.ProviderCatalog` (atom keys). **When both are unknown it is `"—"`**, and when only
   one is known just the unknown side is `—`: writing an unknown price as 0 makes the screen lie
   that the model is "free".
 
@@ -547,6 +547,7 @@ defmodule PromptOnWeb.PromptEditorComponents do
 
   attr :removable?, :boolean, default: false
   attr :ai_patch, :string, required: true
+  attr :ai_enabled?, :boolean, default: false
 
   def message_card(assigns) do
     assigns = assign(assigns, :min_height, min_height(assigns.message.role))
@@ -567,9 +568,22 @@ defmodule PromptOnWeb.PromptEditorComponents do
         />
         <.message_stats id={"message-#{@index}-stats"} content={@message.content} />
         <span style="margin-left:auto;display:flex;align-items:center;gap:2px;">
-          <.link id={"message-#{@index}-ai"} patch={@ai_patch} class="tr" style={accent_chip()}>
-            <DSIcons.icon name="sparkles" size={12} /> Draft with AI
-          </.link>
+          <%= if @ai_enabled? do %>
+            <.link id={"message-#{@index}-ai"} patch={@ai_patch} class="tr" style={accent_chip()}>
+              <DSIcons.icon name="sparkles" size={12} /> Draft with AI
+            </.link>
+          <% else %>
+            <button
+              id={"message-#{@index}-ai"}
+              type="button"
+              disabled
+              title="Select a draft model in Organization settings first"
+              aria-describedby="draft-model-required"
+              style={accent_chip() <> "opacity:.5;cursor:not-allowed;"}
+            >
+              <DSIcons.icon name="sparkles" size={12} /> Draft with AI
+            </button>
+          <% end %>
           <DS.icon_btn
             :if={@removable?}
             id={"message-#{@index}-remove"}
@@ -1870,7 +1884,9 @@ defmodule PromptOnWeb.PromptEditorComponents do
   attr :instruction, :string, default: ""
   attr :result, :string, default: nil
   attr :error, :string, default: nil
+  attr :model, :string, default: nil
   attr :close_patch, :string, required: true
+  attr :settings_path, :string, required: true
 
   attr :providers_path, :string,
     required: true,
@@ -1885,7 +1901,21 @@ defmodule PromptOnWeb.PromptEditorComponents do
       icon="sparkles"
       title={"Draft #{@role} message"}
     >
-      <div :if={@stage == :intro}>
+      <div :if={is_nil(@model)} id="ai-no-model">
+        <.schema_banner id="ai-no-model-banner" tone={:warn} icon="sparkles">
+          Select a draft model in Organization settings to enable AI drafts.
+        </.schema_banner>
+        <DS.btn_link
+          id="ai-model-settings-link"
+          variant="outline"
+          navigate={@settings_path}
+          style="margin-top:10px;"
+        >
+          Open Organization settings
+        </DS.btn_link>
+      </div>
+
+      <div :if={@stage == :intro and not is_nil(@model)}>
         <form id="ai-draft-form" phx-change="ai_change">
           <div class="mono-label" style="margin-bottom:7px;">What should it focus on?</div>
           <textarea
@@ -1976,7 +2006,13 @@ defmodule PromptOnWeb.PromptEditorComponents do
         </span>
         <%= if @stage in [:intro, :error] do %>
           <DS.btn_link id="ai-cancel" variant="ghost" patch={@close_patch}>Cancel</DS.btn_link>
-          <DS.btn id="ai-generate" variant="primary" icon="sparkles" phx-click="ai_generate">
+          <DS.btn
+            id="ai-generate"
+            variant="primary"
+            icon="sparkles"
+            phx-click="ai_generate"
+            disabled={is_nil(@model)}
+          >
             Generate
           </DS.btn>
         <% end %>
@@ -1984,7 +2020,14 @@ defmodule PromptOnWeb.PromptEditorComponents do
           Stop
         </DS.btn_link>
         <%= if @stage == :done do %>
-          <DS.btn id="ai-regenerate" variant="ghost" phx-click="ai_generate">Regenerate</DS.btn>
+          <DS.btn
+            id="ai-regenerate"
+            variant="ghost"
+            phx-click="ai_generate"
+            disabled={is_nil(@model)}
+          >
+            Regenerate
+          </DS.btn>
           <DS.btn id="ai-replace" variant="primary" icon="check" phx-click="ai_replace">
             Replace message
           </DS.btn>

@@ -57,7 +57,7 @@ defmodule PromptOn.Accounts.OrganizationPlanTest do
   end
 
   describe "judge_model" do
-    test "a member sets and clears it", %{user: user, organization: organization} do
+    test "an owner sets and clears it", %{user: user, organization: organization} do
       assert {:ok, updated} =
                Accounts.set_organization_judge_model(
                  organization,
@@ -84,11 +84,15 @@ defmodule PromptOn.Accounts.OrganizationPlanTest do
   end
 
   describe "draft_model" do
-    test "falls back to the default draft model", %{organization: organization} do
-      assert PromptOn.Accounts.Organization.default_draft_model() == "anthropic/claude-sonnet-4"
-
-      assert PromptOn.Accounts.Organization.effective_draft_model(organization) ==
-               "anthropic/claude-sonnet-4"
+    test "has no draft model until one is selected", %{organization: organization} do
+      for value <- [nil, "", "   "] do
+        assert is_nil(
+                 PromptOn.Accounts.Organization.effective_draft_model(%{
+                   organization
+                   | draft_model: value
+                 })
+               )
+      end
     end
 
     test "an owner sets and clears it", %{user: user, organization: organization} do
@@ -109,8 +113,7 @@ defmodule PromptOn.Accounts.OrganizationPlanTest do
 
       assert is_nil(cleared.draft_model)
 
-      assert PromptOn.Accounts.Organization.effective_draft_model(cleared) ==
-               "anthropic/claude-sonnet-4"
+      assert is_nil(PromptOn.Accounts.Organization.effective_draft_model(cleared))
     end
 
     test "an admin can set it, while a member and stranger cannot" do
