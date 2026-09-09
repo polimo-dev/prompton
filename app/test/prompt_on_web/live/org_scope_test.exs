@@ -116,7 +116,7 @@ defmodule PromptOnWeb.OrgScopeTest do
       # Links keep the viewer's addressing: under a team organization they carry the team slug.
       assert has_element?(view, "#nav-overview[href='/#{org.slug}/#{p.slug}']")
       assert has_element?(view, "#nav-settings[href='/#{org.slug}/#{p.slug}/settings']")
-      refute has_element?(view, "#org-menu #org-projects")
+      assert has_element?(view, "#org-menu #org-menu-projects[href='/#{org.slug}']")
       assert has_element?(view, "#switch-org-#{org.slug}.is-current")
     end
 

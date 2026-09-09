@@ -17,7 +17,6 @@ defmodule PromptOnWeb.OrgMembersLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Accounts
-  alias PromptOnWeb.OrgComponents, as: OC
   alias PromptOnWeb.SettingsComponents, as: SC
 
   @cols [
@@ -98,10 +97,6 @@ defmodule PromptOnWeb.OrgMembersLive do
         max_w={880}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:actions>
-          <OC.org_nav org_slug={@org_slug} active={:members} />
-        </:actions>
-
         <DS.table id="members-table" cols={@cols}>
           <DS.row
             :for={{membership, index} <- Enum.with_index(@members)}

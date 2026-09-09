@@ -15,9 +15,9 @@ defmodule PromptOnWeb.Layouts do
 
   1. **Top = the current organization** (`#org-menu`). This is where the brand block (the PromptOn
      logo) used to be — the tab title already says the app's name, and what belongs in that spot is
-     "which organization am I looking at". Clicking it opens the organization menu: the **switch
-     organization** list of the organizations the user belongs to (personal organization first) +
-     New organization.
+     "which organization am I looking at". Clicking it opens Projects · Members · Usage ·
+     Organization settings, the **switch organization** list (personal organization first), and
+     New organization. Organization screens do not repeat this navigation in their top-right header.
      The collapse toggle (`#sidebar-toggle`) is the small icon at the right end of this row (in the
      rail it drops below the mark).
   2. **Middle = organization screens or project screens**. On an organization screen, the middle
@@ -67,7 +67,8 @@ defmodule PromptOnWeb.Layouts do
   ]
 
   # Organization nav items — the four organization-level screens. The organization home has no
-  # suffix. `id` is the DOM id (`#org-<id>`); `nav` is the `nav` value used for the active marker
+  # suffix. IDs use `#org-<id>` in the sidebar and `#org-menu-<id>` in the switcher to stay unique.
+  # `nav` is the value used for the active marker
   # (the two differ — the organization settings nav value is `:org_settings` to keep it apart from
   # project settings, but its DOM id is `#org-settings`).
   @org_items [
@@ -166,6 +167,7 @@ defmodule PromptOnWeb.Layouts do
           org_slug={@org_slug}
           organization={@organization}
           organizations={@organizations}
+          nav={@nav}
         />
         <button
           id="sidebar-toggle"
@@ -295,6 +297,7 @@ defmodule PromptOnWeb.Layouts do
   attr :org_slug, :string, required: true
   attr :organization, :map, default: nil
   attr :organizations, :list, default: []
+  attr :nav, :atom, default: nil
 
   defp org_menu(assigns) do
     ~H"""
@@ -319,6 +322,18 @@ defmodule PromptOnWeb.Layouts do
         class="fadeup dsmenu"
         style="position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:32;"
       >
+        <.link
+          :for={item <- org_items()}
+          id={"org-menu-#{item.id}"}
+          navigate={"/#{@org_slug}#{item.path}"}
+          class={["dsmenu-item", @nav == item.nav && "is-current"]}
+          aria-current={@nav == item.nav && "page"}
+        >
+          <DSIcons.icon name={item.icon} size={13} class="tx2" />
+          <span style="font-size:14px;flex:1;text-align:left;">{item.label}</span>
+        </.link>
+
+        <div style="height:1px;background:var(--line);margin:5px 0;" />
         <div class="mono-label" style="padding:5px 8px 4px;">Switch organization</div>
         <.link
           :for={org <- @organizations}

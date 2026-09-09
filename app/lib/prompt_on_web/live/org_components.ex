@@ -3,37 +3,9 @@ defmodule PromptOnWeb.OrgComponents do
   Pieces shared by the organization-level screens (`/:org_slug`,
   `/:org_slug/settings|members|usage`).
 
-  The sidebar does not point at the organization screens yet (the sidebar overhaul is separate
-  work); in the meantime the organization screens move between each other with the `org_nav/1`
-  segment in the screen header. The links here are the only way into the organization screens, so
-  **all four screens mount the same segment in the same place**.
+  Organization navigation is rendered by `Layouts` in the sidebar and organization switcher.
   """
   use PromptOnWeb, :html
-
-  @sections [
-    {:projects, "Projects", ""},
-    {:usage, "Usage", "/usage"},
-    {:members, "Members", "/members"},
-    {:settings, "Settings", "/settings"}
-  ]
-
-  @doc "Segment for moving between organization screens (goes in `DS.screen`'s `<:actions>`)."
-  attr :org_slug, :string, required: true
-  attr :active, :atom, required: true, values: [:projects, :usage, :members, :settings]
-
-  def org_nav(assigns) do
-    assigns = assign(assigns, :options, options(assigns.org_slug))
-
-    ~H"""
-    <DS.seg id="org-nav" value={to_string(@active)} options={@options} />
-    """
-  end
-
-  defp options(org_slug) do
-    Enum.map(@sections, fn {id, label, suffix} ->
-      %{value: to_string(id), label: label, navigate: "/#{org_slug}#{suffix}"}
-    end)
-  end
 
   @doc """
   One set of provider key inputs (shared by register and rotate). The form itself is built by the

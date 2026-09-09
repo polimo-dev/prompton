@@ -42,7 +42,6 @@ defmodule PromptOnWeb.OrgHomeLive do
   alias PromptOn.Accounts
   alias PromptOn.Prompts
   alias PromptOnWeb.ErrorText
-  alias PromptOnWeb.OrgComponents, as: OC
   alias PromptOnWeb.OrgSettingsLive
   alias PromptOnWeb.SettingsComponents, as: SC
 
@@ -304,7 +303,6 @@ defmodule PromptOnWeb.OrgHomeLive do
         max_w={900}
       >
         <:actions>
-          <OC.org_nav org_slug={@org_slug} active={:projects} />
           <DS.btn_link
             id="new-org-btn"
             variant="outline"

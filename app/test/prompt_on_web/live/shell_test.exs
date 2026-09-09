@@ -148,16 +148,16 @@ defmodule PromptOnWeb.ShellTest do
       assert has_element?(view, "#user-menu #app-version")
     end
 
-    test "the organization menu only holds organization switching actions", %{
+    test "the organization switcher retains organization screens and switching actions", %{
       conn: conn,
       project: project
     } do
       for path <- [~p"/personal/#{project.slug}/use-cases", ~p"/personal"] do
         {:ok, view, _html} = live(conn, path)
-        refute has_element?(view, "#org-menu #org-projects")
-        refute has_element?(view, "#org-menu #org-members")
-        refute has_element?(view, "#org-menu #org-usage")
-        refute has_element?(view, "#org-menu #org-settings")
+        assert has_element?(view, "#org-menu #org-menu-projects[href='/personal']")
+        assert has_element?(view, "#org-menu #org-menu-members[href='/personal/members']")
+        assert has_element?(view, "#org-menu #org-menu-usage[href='/personal/usage']")
+        assert has_element?(view, "#org-menu #org-menu-settings[href='/personal/settings']")
         assert has_element?(view, "#switch-org-personal[href='/personal']")
         assert has_element?(view, "#new-organization")
       end
@@ -208,9 +208,35 @@ defmodule PromptOnWeb.ShellTest do
 
         assert has_element?(view, "#{selector}[title]"), "#{path}: #{selector} has no rail title"
         assert has_element?(view, "#{selector} .sidebar-label")
+        menu_selector = String.replace(selector, "#org-", "#org-menu-")
+
+        assert has_element?(
+                 view,
+                 "#org-menu #{menu_selector}.is-current[aria-current='page'][href='#{path}']"
+               )
+
+        refute has_element?(view, "#org-nav"), "#{path}: organization links remain in the header"
         refute has_element?(view, "#project-switcher")
         refute has_element?(view, ".sidebar-subnav")
       end
+    end
+
+    test "the organization switcher opens organization screens from a project", %{
+      conn: conn,
+      project: project
+    } do
+      {:ok, view, _html} = live(conn, ~p"/personal/#{project.slug}/use-cases")
+
+      {:ok, view, _html} =
+        view
+        |> element("#org-menu-usage")
+        |> render_click()
+        |> follow_redirect(conn, ~p"/personal/usage")
+
+      assert has_element?(view, "#organization-nav #org-usage.active")
+      assert has_element?(view, "#org-menu #org-menu-usage.is-current")
+      refute has_element?(view, "#project-switcher")
+      refute has_element?(view, "#org-nav")
     end
 
     test "the switch list holds all of the user's organizations, personal first", %{

@@ -353,10 +353,6 @@ defmodule PromptOnWeb.OrgSettingsLive do
         active_tab={@tab}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:actions>
-          <OC.org_nav org_slug={@org_slug} active={:settings} />
-        </:actions>
-
         <.general_tab
           :if={@tab == "general"}
           organization={@organization}

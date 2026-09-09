@@ -24,7 +24,6 @@ defmodule PromptOnWeb.OrgUsageLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Observability.Stats
-  alias PromptOnWeb.OrgComponents, as: OC
   alias PromptOnWeb.SettingsComponents, as: SC
 
   @periods [
@@ -255,10 +254,6 @@ defmodule PromptOnWeb.OrgUsageLive do
         max_w={980}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:actions>
-          <OC.org_nav org_slug={@org_slug} active={:usage} />
-        </:actions>
-
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
           <DS.seg
             id="usage-period"

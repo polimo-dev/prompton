@@ -318,13 +318,16 @@ written in English.
   entries (the hub absorbed them) — a model is registered the moment the hub's searchable picker
   selects it. `/use-cases/:key` is a redirect to the hub.
 - **The sidebar is the hierarchy itself** (`PromptOnWeb.Layouts`): top = the current organization
-  (`#org-menu` popup — organization switch list + New organization), middle = the current scope
+  (`#org-menu` popup — Projects, Members, Usage, Organization settings + organization switch list
+  + New organization), middle = the current scope
   (Projects, Members, Usage, Organization settings when no project is selected; otherwise the
   project switcher + the four project screens indented along a vertical guide), bottom = the
   account (`#user-menu` popup — Account settings, Sign out). The collapse
   toggle (`#sidebar-toggle`) is a small icon at the right of the organization row, and its state is
   `localStorage["pon:sidebar"]` + `<html>.sidebar-collapsed` (not URL state). A new sidebar entry
-  attaches to **its own scope**; organization screen links belong in the main sidebar navigation.
+  attaches to **its own scope**. Organization screen links remain in the organization switcher
+  and appear in the main sidebar when no project is selected; the top-right screen header has no
+  organization navigation.
 - **Organization screens** (amended 2026-09-02): `/{org}` (project list), `/{org}/settings`
   (General + **Provider Keys** only — the "Management keys" tab was deleted along with the keys.
   Coding AIs/CLIs get a person's CLI session token via `prompton login` (→ `/device`)),
