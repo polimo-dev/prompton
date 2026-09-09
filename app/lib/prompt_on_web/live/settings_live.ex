@@ -255,7 +255,7 @@ defmodule PromptOnWeb.SettingsLive do
     >
       <DS.screen id="settings-screen" title="Settings" max_w={880}>
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
+        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases"} />
         <.project_settings
           org_slug={@org_slug}
           project={@project}

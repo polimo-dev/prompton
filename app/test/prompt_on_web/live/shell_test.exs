@@ -113,6 +113,7 @@ defmodule PromptOnWeb.ShellTest do
       use_case: uc
     } do
       for {path, screen} <- [
+            {~p"/personal/#{project.slug}", "#project-overview-screen"},
             {~p"/personal/#{project.slug}/use-cases", "#use-cases-screen"},
             {~p"/personal/#{project.slug}/use-cases/#{uc.key}/prompt", "#use-case-hub"},
             {~p"/personal/#{project.slug}/api-keys", "#api-keys-screen"},
@@ -125,10 +126,12 @@ defmodule PromptOnWeb.ShellTest do
         assert has_element?(view, "a[href='/personal']"), "#{path}: no organization home link"
         assert html =~ project.slug, "#{path}: no project crumb"
 
-        project_crumb = "#{screen} > div:first-child a[href='/personal/#{project.slug}']"
+        project_crumb =
+          "#{screen} > div:first-child a[href='/personal/#{project.slug}/use-cases']"
+
         assert has_element?(view, project_crumb, project.slug)
         view |> element(project_crumb) |> render_click()
-        assert_redirect(view, ~p"/personal/#{project.slug}")
+        assert_redirect(view, ~p"/personal/#{project.slug}/use-cases")
       end
     end
   end

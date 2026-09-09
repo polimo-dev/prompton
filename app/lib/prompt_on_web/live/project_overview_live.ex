@@ -196,7 +196,7 @@ defmodule PromptOnWeb.ProjectOverviewLive do
         max_w={980}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
+        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases"} />
         <:actions>
           <DS.seg
             id="overview-period"

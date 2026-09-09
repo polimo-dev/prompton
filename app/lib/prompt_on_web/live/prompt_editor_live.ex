@@ -2404,7 +2404,7 @@ defmodule PromptOnWeb.PromptEditorLive do
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <:crumb
           label={@project.slug}
-          navigate={~p"/#{@org_slug}/#{@project.slug}"}
+          navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases"}
         />
         <:crumb label={@use_case.key} />
         <:actions>

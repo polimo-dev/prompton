@@ -252,7 +252,7 @@ defmodule PromptOnWeb.UseCasesLive do
         max_w={1000}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
+        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases"} />
         <:actions>
           <form phx-change="filter" phx-submit="filter" id="use-case-filter-form">
             <DS.ds_input

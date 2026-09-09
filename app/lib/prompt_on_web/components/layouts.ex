@@ -301,7 +301,12 @@ defmodule PromptOnWeb.Layouts do
 
   defp org_menu(assigns) do
     ~H"""
-    <details id="org-menu" class="dsswitch" style="position:relative;flex:1;min-width:0;">
+    <details
+      id="org-menu"
+      class="dsswitch"
+      style="position:relative;flex:1;min-width:0;"
+      phx-click-away={JS.remove_attribute("open")}
+    >
       <summary title={org_label(@organization)}>
         <.org_mark organization={@organization} />
         <span
@@ -423,7 +428,12 @@ defmodule PromptOnWeb.Layouts do
 
   defp project_switcher(assigns) do
     ~H"""
-    <details id="project-switcher" class="dsswitch" style="position:relative;">
+    <details
+      id="project-switcher"
+      class="dsswitch"
+      style="position:relative;"
+      phx-click-away={JS.remove_attribute("open")}
+    >
       <summary title={(@project && @project.slug) || "no project"}>
         <span style={[
           "width:22px;height:22px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0;",

@@ -205,7 +205,7 @@ defmodule PromptOnWeb.ApiKeysLive do
     >
       <DS.screen id="api-keys-screen" title="API keys" max_w={880}>
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
-        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}"} />
+        <:crumb label={@project.slug} navigate={~p"/#{@org_slug}/#{@project.slug}/use-cases"} />
 
         <div id="api-keys-body">
           <SC.setting_card
