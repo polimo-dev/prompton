@@ -84,6 +84,19 @@ Manifests remain in the deployment repository (`deployment/macmini/prompton/`).
 `make test-worktrees` checks lifecycle/path safety and deployment ordering in disposable Git
 repositories with Docker/Kubernetes mocked; it never deploys anything.
 
+## Project identity
+
+A project is identified by its key (stored as `slug`) and may have an optional `description`.
+Project selection opens Overview. Existing display names that differ from the key are preserved
+as descriptions; duplicate names are left empty.
+
+When upgrading an installation from before this change, deploy commit `3cbc36e` first and wait
+for every application instance, including processes embedding the application as a library,
+to restart before deploying later revisions. That expansion
+preserves and synchronizes existing names without reading the legacy column in the new code.
+The following release removes the legacy column and synchronization trigger. Do not apply both
+schema steps while application instances from before `3cbc36e` are still running.
+
 ## Members and invitations
 
 Open an organization's **Members** page to invite people by email, choose a role and select their

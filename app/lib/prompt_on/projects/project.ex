@@ -22,42 +22,6 @@ defmodule PromptOn.Projects.Project do
     references do
       reference :organization, on_delete: :delete
     end
-
-    custom_statements do
-      statement :transition_project_descriptions do
-        up """
-        DO $migration$
-        BEGIN
-          CREATE FUNCTION sync_project_description() RETURNS trigger AS $sync$
-          BEGIN
-            IF TG_OP = 'INSERT' THEN
-              NEW.description := COALESCE(NEW.description, NULLIF(NEW.name, NEW.slug));
-              NEW.name := COALESCE(NEW.description, NEW.slug);
-            ELSIF NEW.description IS DISTINCT FROM OLD.description THEN
-              NEW.name := COALESCE(NEW.description, NEW.slug);
-            ELSIF NEW.name IS DISTINCT FROM OLD.name THEN
-              NEW.description := NULLIF(NEW.name, NEW.slug);
-            END IF;
-            RETURN NEW;
-          END;
-          $sync$ LANGUAGE plpgsql;
-
-          CREATE TRIGGER sync_project_description
-          BEFORE INSERT OR UPDATE ON projects
-          FOR EACH ROW EXECUTE FUNCTION sync_project_description();
-
-          UPDATE projects
-          SET description = COALESCE(description, NULLIF(name, slug)),
-              name = COALESCE(description, name, slug);
-        END;
-        $migration$;
-        """
-
-        down """
-        DROP FUNCTION IF EXISTS sync_project_description() CASCADE;
-        """
-      end
-    end
   end
 
   actions do
@@ -135,9 +99,6 @@ defmodule PromptOn.Projects.Project do
     uuid_v7_primary_key :id
 
     attribute :description, :string, public?: true
-
-    # Track the legacy column for codegen, but never read it while the next release removes it.
-    attribute :legacy_name, :string, source: :name, select_by_default?: false
 
     attribute :slug, :string do
       description """
