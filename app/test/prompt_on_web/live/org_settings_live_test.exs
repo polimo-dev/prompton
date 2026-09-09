@@ -72,6 +72,38 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
                Accounts.get_organization_by_slug("promoted-co", actor: user)
     end
 
+    test "blank slug stays on the form without converting or changing the organization", %{
+      conn: conn,
+      user: user
+    } do
+      original = Fixtures.organization_for(user)
+      {:ok, view, _html} = live(conn, ~p"/personal/settings")
+
+      for slug <- ["", "   "] do
+        view
+        |> form("#org-slug-form", claim: %{"slug" => slug, "name" => "Keep this input"})
+        |> render_submit()
+
+        assert has_element?(view, "#org-slug-error", "Enter a URL key.")
+        assert has_element?(view, "#org-slug[aria-invalid='true']")
+        assert has_element?(view, "#org-slug-name[value='Keep this input']")
+
+        assert {:ok, %{personal?: true, slug: nil, name: name}} =
+                 Accounts.personal_organization_for(user.id, actor: user)
+
+        assert name == original.name
+      end
+
+      view
+      |> form("#org-slug-form", claim: %{"slug" => "corrected-team", "name" => "Keep this input"})
+      |> render_change()
+
+      refute has_element?(view, "#org-slug-error")
+
+      view |> form("#org-slug-form") |> render_submit()
+      assert_redirect(view, ~p"/corrected-team/settings?tab=general")
+    end
+
     test "a reserved word or duplicate slug is rejected and the screen stays alive", %{
       conn: conn,
       user: user
@@ -310,24 +342,54 @@ defmodule PromptOnWeb.OrgSettingsLiveTest do
                  "whichever comes first (Free plan)."
     end
 
-    test "the judge model field saves and clears", %{conn: conn, user: user} do
+    test "the evaluation model field saves and clears", %{conn: conn, user: user} do
       {:ok, view, html} = live(conn, ~p"/personal/settings")
 
       assert html =~ "openai/gpt-4o-mini"
+      assert has_element?(view, "#org-models-card label", "Evaluation model")
+      refute html =~ "Judge model"
+      refute html =~ "judge model"
 
       view
-      |> form("#org-judge-form", judge: %{"judge_model" => "openai/gpt-4.1-mini"})
+      |> form("#org-evaluation-form", evaluation: %{"evaluation_model" => "openai/gpt-4.1-mini"})
       |> render_submit()
 
-      assert render(view) =~ "Judge model saved"
+      assert render(view) =~ "Evaluation model saved"
 
       assert {:ok, %{judge_model: "openai/gpt-4.1-mini"}} =
                Accounts.personal_organization_for(user.id, actor: user)
 
-      view |> form("#org-judge-form", judge: %{"judge_model" => "  "}) |> render_submit()
+      view
+      |> form("#org-evaluation-form", evaluation: %{"evaluation_model" => "  "})
+      |> render_submit()
 
       assert {:ok, %{judge_model: nil}} =
                Accounts.personal_organization_for(user.id, actor: user)
+    end
+
+    test "the draft model setting persists independently and clears to the default", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/personal/settings")
+      assert has_element?(view, "#org-models-card label", "Draft model")
+      assert has_element?(view, "#org-draft-model[placeholder='anthropic/claude-sonnet-4']")
+
+      view
+      |> form("#org-draft-form", draft: %{"draft_model" => " openai/gpt-4.1-mini "})
+      |> render_submit()
+
+      assert render(view) =~ "Draft model saved"
+
+      assert {:ok, %{draft_model: "openai/gpt-4.1-mini", judge_model: nil}} =
+               Accounts.personal_organization_for(user.id, actor: user)
+
+      {:ok, reloaded, _html} = live(conn, ~p"/personal/settings")
+      assert has_element?(reloaded, "#org-draft-model[value='openai/gpt-4.1-mini']")
+      reloaded |> form("#org-draft-form", draft: %{"draft_model" => "  "}) |> render_submit()
+
+      assert {:ok, %{draft_model: nil}} = Accounts.personal_organization_for(user.id, actor: user)
+      assert has_element?(reloaded, "#org-draft-model[value='']")
     end
   end
 

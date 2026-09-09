@@ -107,6 +107,7 @@ defmodule PromptOnWeb.PromptEditorLive do
   import PromptOnWeb.PromptEditorComponents
 
   alias PromptOn.Accounts
+  alias PromptOn.Accounts.Organization
   alias PromptOn.Catalog
   alias PromptOn.Deployments
   alias PromptOn.Deployments.Deployment
@@ -121,7 +122,6 @@ defmodule PromptOnWeb.PromptEditorLive do
   alias PromptOnWeb.IntegrationComponents
   alias PromptOnWeb.ProviderCatalog
 
-  @ai_model "anthropic/claude-sonnet-4"
   @chat_roles ~w(system user assistant)
   @draft_option "draft"
   @prompt_changed_notice "Prompt changed — the next turns use the new prompt (history is kept)."
@@ -1511,27 +1511,36 @@ defmodule PromptOnWeb.PromptEditorLive do
   end
 
   def handle_event("ai_generate", _params, socket) do
-    case ensure_project_access(socket) do
-      :ok ->
-        case is_integer(socket.assigns.ai_index) &&
-               Enum.at(socket.assigns.messages, socket.assigns.ai_index) do
-          message when not is_map(message) ->
-            {:noreply, socket}
+    with :ok <- ensure_project_access(socket),
+         {:ok, %Organization{} = organization} <-
+           Ash.get(Organization, socket.assigns.project.organization_id,
+             actor: socket.assigns.current_user
+           ) do
+      case is_integer(socket.assigns.ai_index) &&
+             Enum.at(socket.assigns.messages, socket.assigns.ai_index) do
+        message when not is_map(message) ->
+          {:noreply, socket}
 
-          message ->
-            request = ai_request(socket.assigns, message)
-            organization_id = socket.assigns.project.organization_id
+        message ->
+          request = ai_request(socket.assigns, message, organization)
+          organization_id = organization.id
 
-            {:noreply,
-             socket
-             |> assign(ai_stage: :running, ai_result: nil, ai_error: nil)
-             |> start_async({:ai_draft, socket.assigns.ai_index}, fn ->
-               PromptOn.LLM.complete(request, organization_id: organization_id)
-             end)}
-        end
+          {:noreply,
+           socket
+           |> assign(ai_stage: :running, ai_result: nil, ai_error: nil)
+           |> start_async({:ai_draft, socket.assigns.ai_index}, fn ->
+             PromptOn.LLM.complete(request, organization_id: organization_id)
+           end)}
+      end
+    else
+      {:ok, nil} ->
+        {:noreply, put_flash(socket, :error, "Organization access is no longer available.")}
 
-      {:error, message} ->
+      {:error, message} when is_binary(message) ->
         {:noreply, put_flash(socket, :error, message)}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
     end
   end
 
@@ -2258,9 +2267,9 @@ defmodule PromptOnWeb.PromptEditorLive do
   # ---------------------------------------------------------------------------
   # AI draft meta prompt
 
-  defp ai_request(assigns, message) do
+  defp ai_request(assigns, message, organization) do
     %{
-      model: @ai_model,
+      model: Organization.effective_draft_model(organization),
       messages: [
         %{role: "system", content: ai_system_prompt()},
         %{role: "user", content: ai_user_prompt(assigns, message)}

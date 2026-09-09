@@ -139,16 +139,21 @@ defmodule PromptOn.Accounts.OrganizationTest do
       assert id == promoted.id
     end
 
-    test "renaming without a slug keeps a personal organization personal" do
+    test "claim_slug rejects missing or blank slugs and leaves a personal organization unchanged" do
       user = user_fixture()
       personal = organization_for(user)
 
-      assert {:ok, renamed} =
-               Accounts.claim_organization_slug(personal, %{name: "My Space"}, actor: user)
+      for attrs <- [%{}, %{name: "My Space"}, %{slug: nil}, %{slug: ""}, %{slug: "   "}] do
+        assert {:error, %Ash.Error.Invalid{}} =
+                 Accounts.claim_organization_slug(personal, attrs, actor: user),
+               "expected #{inspect(attrs)} to be rejected"
 
-      assert renamed.name == "My Space"
-      assert renamed.personal?
-      assert is_nil(renamed.slug)
+        unchanged = organization_for(user)
+        assert unchanged.id == personal.id
+        assert unchanged.name == personal.name
+        assert unchanged.personal?
+        assert is_nil(unchanged.slug)
+      end
     end
 
     test "claim_slug enforces format, reserved words and uniqueness" do
@@ -168,7 +173,9 @@ defmodule PromptOn.Accounts.OrganizationTest do
       team = team_org_fixture(%{user: user, slug: "keep-me"})
 
       assert {:ok, renamed} =
-               Accounts.claim_organization_slug(team, %{name: "Renamed"}, actor: user)
+               Accounts.claim_organization_slug(team, %{slug: "keep-me", name: "Renamed"},
+                 actor: user
+               )
 
       assert renamed.slug == "keep-me"
       refute renamed.personal?

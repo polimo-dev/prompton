@@ -20,7 +20,13 @@ defmodule PromptOnWeb.OrgMembersLiveTest do
     {:ok, view, html} = live(conn, ~p"/personal/members")
 
     assert html =~ to_string(user.email)
+    assert has_element?(view, "#members-heading", "Members")
     assert has_element?(view, "#members-table")
+
+    labels = table_labels(view, "#members-table")
+    assert labels =~ "email"
+    refute labels =~ "member"
+
     refute has_element?(view, "#invite-member-card")
     refute html =~ "Invitations are coming soon"
   end
@@ -49,6 +55,7 @@ defmodule PromptOnWeb.OrgMembersLiveTest do
     assert text =~ "/invitations/"
     assert html =~ "Invitation sent"
     assert html =~ invited
+    assert has_element?(view, "#pending-invitations-heading", "Pending invitations")
     assert has_element?(view, "#pending-invitations-table")
   end
 
@@ -189,6 +196,15 @@ defmodule PromptOnWeb.OrgMembersLiveTest do
     _closed = Fixtures.team_org_fixture(%{user: stranger, slug: "closed-doors"})
 
     assert {:error, {:redirect, %{to: "/personal"}}} = live(conn, ~p"/closed-doors/members")
+  end
+
+  defp table_labels(view, selector) do
+    view
+    |> element(selector)
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(".mono-label")
+    |> LazyHTML.text()
   end
 
   defp team_with_project(owner) do

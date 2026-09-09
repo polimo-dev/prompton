@@ -4,7 +4,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
   | URL | Screen |
   |---|---|
-  | `?tab=general` | plan + limits · judge model · rename · (team) slug change · (personal) convert to team organization |
+  | `?tab=general` | plan + limits · evaluation and draft models · rename · (team) slug change · (personal) convert to team organization |
   | `?tab=providers` | BYOK OpenRouter key |
   | `?tab=providers&add-provider=openrouter` | key registration modal |
   | `?tab=providers&rotate-provider=<id>` | key rotation modal |
@@ -73,7 +73,8 @@ defmodule PromptOnWeb.OrgSettingsLive do
        form: nil,
        name_form: name_form(socket.assigns.organization),
        slug_form: slug_form(socket.assigns.organization),
-       judge_form: judge_form(socket.assigns.organization),
+       evaluation_form: evaluation_form(socket.assigns.organization),
+       draft_form: draft_form(socket.assigns.organization),
        provider_key: nil,
        can_manage?: false,
        owner?: false,
@@ -114,8 +115,11 @@ defmodule PromptOnWeb.OrgSettingsLive do
   defp slug_form(organization),
     do: to_form(%{"slug" => organization.slug || "", "name" => organization.name}, as: :claim)
 
-  defp judge_form(organization),
-    do: to_form(%{"judge_model" => organization.judge_model || ""}, as: :judge)
+  defp evaluation_form(organization),
+    do: to_form(%{"evaluation_model" => organization.judge_model || ""}, as: :evaluation)
+
+  defp draft_form(organization),
+    do: to_form(%{"draft_model" => organization.draft_model || ""}, as: :draft)
 
   # ---------------------------------------------------------------------------
   # Data
@@ -211,8 +215,12 @@ defmodule PromptOnWeb.OrgSettingsLive do
     {:noreply, assign(socket, :slug_form, to_form(params, as: :claim))}
   end
 
-  def handle_event("validate_judge", %{"judge" => params}, socket) do
-    {:noreply, assign(socket, :judge_form, to_form(params, as: :judge))}
+  def handle_event("validate_evaluation", %{"evaluation" => params}, socket) do
+    {:noreply, assign(socket, :evaluation_form, to_form(params, as: :evaluation))}
+  end
+
+  def handle_event("validate_draft", %{"draft" => params}, socket) do
+    {:noreply, assign(socket, :draft_form, to_form(params, as: :draft))}
   end
 
   def handle_event("validate_form", params, socket) do
@@ -239,10 +247,9 @@ defmodule PromptOnWeb.OrgSettingsLive do
     end
   end
 
-  # The judge model is the only plan-adjacent field a member may change: the plan itself is
-  # system-actor-only (`Organization.:set_plan`), so the card above the form has no button.
-  def handle_event("save_judge_model", %{"judge" => params}, socket) do
-    attrs = %{judge_model: blank_to_nil(params["judge_model"])}
+  # Model defaults are organization settings editable by admins and owners.
+  def handle_event("save_evaluation_model", %{"evaluation" => params}, socket) do
+    attrs = %{judge_model: blank_to_nil(params["evaluation_model"])}
 
     case Accounts.set_organization_judge_model(socket.assigns.organization, attrs,
            actor: socket.assigns.current_user
@@ -250,8 +257,25 @@ defmodule PromptOnWeb.OrgSettingsLive do
       {:ok, organization} ->
         {:noreply,
          socket
-         |> assign(organization: organization, judge_form: judge_form(organization))
-         |> put_flash(:info, "Judge model saved")}
+         |> assign(organization: organization, evaluation_form: evaluation_form(organization))
+         |> put_flash(:info, "Evaluation model saved")}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+    end
+  end
+
+  def handle_event("save_draft_model", %{"draft" => params}, socket) do
+    case Accounts.set_organization_draft_model(
+           socket.assigns.organization,
+           %{draft_model: blank_to_nil(params["draft_model"])},
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, organization} ->
+        {:noreply,
+         socket
+         |> assign(organization: organization, draft_form: draft_form(organization))
+         |> put_flash(:info, "Draft model saved")}
 
       {:error, error} ->
         {:noreply, put_flash(socket, :error, ErrorText.message(error))}
@@ -262,25 +286,17 @@ defmodule PromptOnWeb.OrgSettingsLive do
   # moment (`/personal` → `/{slug}`), and a team organization moves address. Either way the links
   # are only right after re-entering at the new address.
   def handle_event("claim_slug", %{"claim" => params}, socket) do
-    attrs = %{
-      slug: String.trim(params["slug"] || ""),
-      name: String.trim(params["name"] || socket.assigns.organization.name)
-    }
-
-    case Accounts.claim_organization_slug(socket.assigns.organization, attrs,
-           actor: socket.assigns.current_user
-         ) do
-      {:ok, organization} ->
+    case blank_to_nil(params["slug"]) do
+      nil ->
         {:noreply,
          socket
-         |> put_flash(:info, "Organization is now /#{organization.slug}")
-         |> push_navigate(to: ~p"/#{organization.slug}/settings?tab=general")}
+         |> assign(
+           :slug_form,
+           to_form(params, as: :claim, errors: [slug: {"Enter a URL key.", []}])
+         )}
 
-      {:error, error} ->
-        {:noreply,
-         socket
-         |> assign(:slug_form, to_form(params, as: :claim))
-         |> put_flash(:error, ErrorText.message(error))}
+      slug ->
+        claim_slug(socket, params, slug)
     end
   end
 
@@ -381,6 +397,26 @@ defmodule PromptOnWeb.OrgSettingsLive do
   # ---------------------------------------------------------------------------
   # Helpers
 
+  defp claim_slug(socket, params, slug) do
+    attrs = %{slug: slug, name: String.trim(params["name"] || socket.assigns.organization.name)}
+
+    case Accounts.claim_organization_slug(socket.assigns.organization, attrs,
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, organization} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Organization is now /#{organization.slug}")
+         |> push_navigate(to: ~p"/#{organization.slug}/settings?tab=general")}
+
+      {:error, error} ->
+        {:noreply,
+         socket
+         |> assign(:slug_form, to_form(params, as: :claim))
+         |> put_flash(:error, ErrorText.message(error))}
+    end
+  end
+
   defp restore_form(%Phoenix.HTML.Form{name: name} = form, params) do
     case params do
       %{^name => values} when is_map(values) -> to_form(values, as: name)
@@ -430,7 +466,8 @@ defmodule PromptOnWeb.OrgSettingsLive do
           organization={@organization}
           name_form={@name_form}
           slug_form={@slug_form}
-          judge_form={@judge_form}
+          evaluation_form={@evaluation_form}
+          draft_form={@draft_form}
           can_manage?={@can_manage?}
         />
         <.providers_tab
@@ -469,7 +506,8 @@ defmodule PromptOnWeb.OrgSettingsLive do
   attr :organization, :map, required: true
   attr :name_form, :map, required: true
   attr :slug_form, :map, required: true
-  attr :judge_form, :map, required: true
+  attr :evaluation_form, :map, required: true
+  attr :draft_form, :map, required: true
   attr :can_manage?, :boolean, required: true
 
   defp general_tab(assigns) do
@@ -477,7 +515,12 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
     ~H"""
     <div id="org-settings-general">
-      <.plan_card plan={@plan} judge_form={@judge_form} can_manage?={@can_manage?} />
+      <.plan_card plan={@plan} />
+      <.models_card
+        evaluation_form={@evaluation_form}
+        draft_form={@draft_form}
+        can_manage?={@can_manage?}
+      />
 
       <SC.setting_card
         id="org-general-card"
@@ -514,8 +557,22 @@ defmodule PromptOnWeb.OrgSettingsLive do
         desc={slug_desc(@organization)}
       >
         <form id="org-slug-form" phx-submit="claim_slug" phx-change="validate_slug">
-          <div class="mono-label" style="margin-bottom:7px;">url key (slug)</div>
-          <DS.ds_input id="org-slug" field={@slug_form[:slug]} mono prefix="/" placeholder="acme" />
+          <label for="org-slug" class="mono-label" style="display:block;margin-bottom:7px;">
+            url key (slug)
+          </label>
+          <DS.ds_input
+            id="org-slug"
+            field={@slug_form[:slug]}
+            mono
+            prefix="/"
+            placeholder="acme"
+            aria-required="true"
+            aria-invalid={to_string(@slug_form[:slug].errors != [])}
+            aria-describedby={if @slug_form[:slug].errors != [], do: "org-slug-error"}
+          />
+          <div :if={@slug_form[:slug].errors != []} id="org-slug-error" role="alert">
+            <SC.field_error field={@slug_form[:slug]} />
+          </div>
           <div :if={@organization.personal?} class="mono-label" style="margin:14px 0 7px;">name</div>
           <DS.ds_input :if={@organization.personal?} id="org-slug-name" field={@slug_form[:name]} />
         </form>
@@ -536,8 +593,6 @@ defmodule PromptOnWeb.OrgSettingsLive do
   # second copy of the limits table. There is no button: plans are set by the system actor
   # (`mix prompton.set_plan`, later the admin app), so a self-serve control would be a dead one.
   attr :plan, :atom, required: true
-  attr :judge_form, :map, required: true
-  attr :can_manage?, :boolean, required: true
 
   # The plan window and the payload window are two different rules. The log **row** lives for the
   # plan's `log_retention_days`; the stored input/output inside it expires at
@@ -586,42 +641,90 @@ defmodule PromptOnWeb.OrgSettingsLive do
       </div>
 
       <SC.retention_note id="org-plan-retention" plan={@plan} />
+    </SC.setting_card>
+    """
+  end
 
-      <div class="mono-label" style="margin:16px 0 7px;">judge model</div>
-      <form id="org-judge-form" phx-submit="save_judge_model" phx-change="validate_judge">
-        <DS.ds_input
-          id="org-judge-model"
-          readonly={not @can_manage?}
-          field={@judge_form[:judge_model]}
-          mono
-          placeholder={default_judge_model()}
-        />
-      </form>
-      <div style="font-size:12px;color:var(--tx-3);margin-top:6px;line-height:1.5;">
-        Model used to score evaluations. Runs on your OpenRouter key.
-      </div>
-      <:footer>
-        <DS.btn
-          :if={@can_manage?}
-          id="save-judge-model"
-          variant="solid"
-          form="org-judge-form"
-          type="submit"
+  attr :evaluation_form, :map, required: true
+  attr :draft_form, :map, required: true
+  attr :can_manage?, :boolean, required: true
+
+  defp models_card(assigns) do
+    ~H"""
+    <SC.setting_card
+      id="org-models-card"
+      title="AI models"
+      desc="Default models for this organization's evaluations and AI draft writing. Uses your OpenRouter key."
+    >
+      <form
+        id="org-evaluation-form"
+        phx-submit="save_evaluation_model"
+        phx-change="validate_evaluation"
+      >
+        <label for="org-evaluation-model" class="mono-label" style="display:block;margin-bottom:7px;">
+          Evaluation model
+        </label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <DS.ds_input
+            id="org-evaluation-model"
+            class="flex-1 min-w-0"
+            readonly={not @can_manage?}
+            field={@evaluation_form[:evaluation_model]}
+            mono
+            placeholder={default_evaluation_model()}
+            aria-describedby="evaluation-model-help"
+          />
+          <DS.btn :if={@can_manage?} id="save-evaluation-model" variant="solid" type="submit">
+            Save
+          </DS.btn>
+        </div>
+        <div
+          id="evaluation-model-help"
+          style="font-size:12px;color:var(--tx-3);margin-top:6px;line-height:1.5;"
         >
-          Save judge model
-        </DS.btn>
-      </:footer>
+          Scores evaluations. Leave blank to use {default_evaluation_model()}.
+        </div>
+      </form>
+      <form
+        id="org-draft-form"
+        phx-submit="save_draft_model"
+        phx-change="validate_draft"
+        style="margin-top:22px;"
+      >
+        <label for="org-draft-model" class="mono-label" style="display:block;margin-bottom:7px;">
+          Draft model
+        </label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <DS.ds_input
+            id="org-draft-model"
+            class="flex-1 min-w-0"
+            readonly={not @can_manage?}
+            field={@draft_form[:draft_model]}
+            mono
+            placeholder={PromptOn.Accounts.Organization.default_draft_model()}
+            aria-describedby="draft-model-help"
+          />
+          <DS.btn :if={@can_manage?} id="save-draft-model" variant="solid" type="submit">
+            Save
+          </DS.btn>
+        </div>
+        <div
+          id="draft-model-help"
+          style="font-size:12px;color:var(--tx-3);margin-top:6px;line-height:1.5;"
+        >
+          Writes AI drafts in the prompt editor. Leave blank to use {PromptOn.Accounts.Organization.default_draft_model()}.
+        </div>
+      </form>
     </SC.setting_card>
     """
   end
 
   @doc """
-  The app-wide judge model fallback, shown as the placeholder when the organization has not set
+  The app-wide evaluation model fallback, shown as the placeholder when the organization has not set
   one (`config :prompton, :judge_model`).
   """
-  @spec default_judge_model() :: String.t()
-  def default_judge_model,
-    do: Application.get_env(:prompton, :judge_model, "openai/gpt-4o-mini")
+  @spec default_evaluation_model() :: String.t()
+  def default_evaluation_model, do: PromptOn.Evals.Judge.default_model()
 
   @doc """
   Badge tone of a plan: free is neutral, team accented, pro the success tone.

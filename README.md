@@ -121,6 +121,11 @@ claiming a URL in **Organization settings** before inviting people, transferring
 deleting it. Team organization deletion requires typing its name; ownership transfer requires an
 explicit confirmation. Existing plan limits continue to apply.
 
+Organization settings includes **AI models** for owners and admins: **Evaluation model** scores
+evaluations, while **Draft model** writes AI drafts in the prompt editor. Each setting is independent;
+leaving it blank uses the displayed application default. Draft generation reads the current setting
+on each request, including changes made while the editor is open.
+
 ## Self-hosting
 
 The container image is `ghcr.io/polimo-dev/prompton` (tags: `main`, `sha-<commit>`, and `X.Y.Z` / `X.Y` /

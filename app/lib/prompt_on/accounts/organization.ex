@@ -90,6 +90,15 @@ defmodule PromptOn.Accounts.Organization do
       accept [:judge_model]
     end
 
+    update :set_draft_model do
+      description """
+      The organization's default model for AI draft generation. `nil` falls back to
+      `config :prompton, :draft_model` and then the built-in draft default.
+      """
+
+      accept [:draft_model]
+    end
+
     update :transfer_ownership do
       description "Transfers ownership to another existing team organization member."
 
@@ -108,6 +117,7 @@ defmodule PromptOn.Accounts.Organization do
 
       require_atomic? false
       accept [:slug, :name]
+      validate present(:slug), message: "is required"
       validate PromptOn.Accounts.Organization.Validations.SlugNotReserved
       change PromptOn.Accounts.Organization.Changes.ClearPersonalWhenSlugged
     end
@@ -165,7 +175,7 @@ defmodule PromptOn.Accounts.Organization do
       forbid_if always()
     end
 
-    policy action([:rename, :claim_slug, :set_judge_model]) do
+    policy action([:rename, :claim_slug, :set_judge_model, :set_draft_model]) do
       authorize_if PromptOn.Checks.OrganizationManager
     end
 
@@ -243,6 +253,15 @@ defmodule PromptOn.Accounts.Organization do
       public? true
     end
 
+    attribute :draft_model, :string do
+      description """
+      Organization default model for AI draft generation. nil falls back to
+      `config :prompton, :draft_model` and then the built-in draft default.
+      """
+
+      public? true
+    end
+
     create_timestamp :inserted_at
     update_timestamp :updated_at
   end
@@ -263,4 +282,26 @@ defmodule PromptOn.Accounts.Organization do
       where expr(not is_nil(slug))
     end
   end
+
+  @default_draft_model "anthropic/claude-sonnet-4"
+
+  @doc "The fallback model for AI draft generation."
+  @spec default_draft_model() :: String.t()
+  def default_draft_model,
+    do: Application.get_env(:prompton, :draft_model) || @default_draft_model
+
+  @doc "Returns the organization's draft model override, or the configured default."
+  @spec effective_draft_model(t()) :: String.t()
+  def effective_draft_model(%__MODULE__{draft_model: draft_model}) do
+    blank_to_nil(draft_model) || default_draft_model()
+  end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(_value), do: nil
 end

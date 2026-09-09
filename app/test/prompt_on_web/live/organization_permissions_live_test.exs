@@ -63,9 +63,23 @@ defmodule PromptOnWeb.OrganizationPermissionsLiveTest do
     organization: organization
   } do
     {:ok, view, _html} = conn |> log_in_user(member) |> live(~p"/#{organization.slug}/settings")
+
+    assert has_element?(view, "#org-evaluation-model[readonly]")
+    assert has_element?(view, "#org-draft-model[readonly]")
+    refute has_element?(view, "#save-evaluation-model")
+    refute has_element?(view, "#save-draft-model")
+
+    render_submit(view, "save_draft_model", %{"draft" => %{"draft_model" => "unauthorized/model"}})
+
+    render_submit(view, "save_evaluation_model", %{
+      "evaluation" => %{"evaluation_model" => "unauthorized/model"}
+    })
+
+    unchanged = Ash.get!(Accounts.Organization, organization.id, actor: member)
+    assert is_nil(unchanged.draft_model)
+    assert is_nil(unchanged.judge_model)
     assert has_element?(view, "#org-name[readonly]")
     refute has_element?(view, "#save-org-name")
-    refute has_element?(view, "#save-judge-model")
     render_submit(view, "save_name", %{"organization" => %{"name" => "Forbidden rename"}})
 
     assert Accounts.get_organization_by_slug!(organization.slug, actor: member).name ==

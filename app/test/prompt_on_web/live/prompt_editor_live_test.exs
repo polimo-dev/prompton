@@ -26,6 +26,8 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   """
   use PromptOnWeb.ConnCase, async: false
 
+  alias PromptOn.Accounts
+  alias PromptOn.Accounts.Organization
   alias PromptOn.Catalog
   alias PromptOn.Deployments
   alias PromptOn.EvalsFixtures
@@ -2668,6 +2670,18 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
   end
 
   describe "AI draft modal (?ai)" do
+    setup do
+      parent = self()
+
+      PromptOn.LLM.Fake.set_response(fn request ->
+        send(parent, {:ai_draft_request, request})
+        {:ok, PromptOn.LLM.Fake.default_outcome(request)}
+      end)
+
+      on_exit(&PromptOn.LLM.Fake.reset/0)
+      :ok
+    end
+
     test "opens the modal, receives a draft and swaps the message", %{
       conn: conn,
       project: project,
@@ -2686,6 +2700,109 @@ defmodule PromptOnWeb.PromptEditorLiveTest do
       view |> element("#ai-replace") |> render_click()
 
       assert render(view) =~ "Instructions written by the AI"
+    end
+
+    test "uses the selected organization model and refreshes it after mount", %{
+      conn: conn,
+      user: user,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, organization} =
+        Accounts.set_organization_draft_model(
+          Fixtures.organization_for(user),
+          %{draft_model: "openai/o4-mini"},
+          actor: user
+        )
+
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, ai: 0))
+
+      view |> element("#ai-generate") |> render_click()
+      render_async(view)
+      assert_received {:ai_draft_request, %{model: "openai/o4-mini"}}
+
+      assert {:ok, _organization} =
+               Accounts.set_organization_draft_model(
+                 organization,
+                 %{draft_model: "anthropic/claude-opus-4"},
+                 actor: user
+               )
+
+      view |> element("#ai-regenerate") |> render_click()
+      render_async(view)
+      assert_received {:ai_draft_request, %{model: "anthropic/claude-opus-4"}}
+    end
+
+    test "clearing the model after mount restores the default for the next draft", %{
+      conn: conn,
+      user: user,
+      project: project,
+      use_case: use_case
+    } do
+      {:ok, organization} =
+        Accounts.set_organization_draft_model(
+          Fixtures.organization_for(user),
+          %{draft_model: "openai/o4-mini"},
+          actor: user
+        )
+
+      {:ok, view, _html} = live(conn, hub_path(project, use_case, ai: 0))
+
+      assert {:ok, _organization} =
+               Accounts.set_organization_draft_model(organization, %{draft_model: nil},
+                 actor: user
+               )
+
+      view |> element("#ai-generate") |> render_click()
+      render_async(view)
+
+      default_model = Organization.default_draft_model()
+      assert_received {:ai_draft_request, %{model: ^default_model}}
+    end
+
+    test "each organization uses its own model with the same user and project slug", %{
+      conn: conn,
+      user: user,
+      project: project,
+      use_case: use_case
+    } do
+      team = Fixtures.team_org_fixture(%{user: user})
+
+      team_project =
+        Fixtures.project_fixture(%{user: user, organization: team, slug: project.slug})
+
+      team_use_case = Fixtures.use_case_fixture(team_project, %{key: use_case.key})
+      Fixtures.prompt_version_fixture(team_use_case)
+
+      for {organization, model} <- [
+            {Fixtures.organization_for(user), "openai/o4-mini"},
+            {team, "anthropic/claude-opus-4"}
+          ] do
+        assert {:ok, _organization} =
+                 Accounts.set_organization_draft_model(organization, %{draft_model: model},
+                   actor: user
+                 )
+      end
+
+      {:ok, personal_view, _html} = live(conn, hub_path(project, use_case, ai: 0))
+
+      {:ok, team_view, _html} =
+        live(
+          conn,
+          ~p"/#{team.slug}/#{team_project.slug}/use-cases/#{team_use_case.key}/prompt?ai=0"
+        )
+
+      personal_view |> element("#ai-generate") |> render_click()
+      render_async(personal_view)
+      assert_received {:ai_draft_request, %{model: "openai/o4-mini"}}
+
+      team_view |> element("#ai-generate") |> render_click()
+      render_async(team_view)
+      assert_received {:ai_draft_request, %{model: "anthropic/claude-opus-4"}}
+
+      personal_view |> element("#ai-regenerate") |> render_click()
+      render_async(personal_view)
+      assert_received {:ai_draft_request, %{model: "openai/o4-mini"}}
     end
 
     # Without a BYOK key the place to go is the **organization** settings; the project settings

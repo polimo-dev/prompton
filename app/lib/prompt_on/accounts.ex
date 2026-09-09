@@ -46,6 +46,7 @@ defmodule PromptOn.Accounts do
       # member-editable organization setting.
       define :set_organization_plan, action: :set_plan
       define :set_organization_judge_model, action: :set_judge_model
+      define :set_organization_draft_model, action: :set_draft_model
 
       # Resolves `/{org_slug}`: team organizations only. Personal organizations have no slug and
       # resolve via `/personal`.

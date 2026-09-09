@@ -17,7 +17,7 @@ defmodule PromptOnWeb.OrgMembersLive do
   require Ash.Query
 
   @cols [
-    %{label: "member", w: "minmax(0,2fr)"},
+    %{label: "email", w: "minmax(0,2fr)"},
     %{label: "role", w: "155px"},
     %{label: "projects", w: "minmax(0,2fr)"},
     %{label: "joined", w: "118px", align: "right"},
@@ -255,6 +255,10 @@ defmodule PromptOnWeb.OrgMembersLive do
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <.invite_card :if={@permission.can_invite?} form={@invitation_form} permission={@permission} />
 
+        <h2 id="members-heading" style="font-size:15px;font-weight:500;margin:16px 0 8px;">
+          Members
+        </h2>
+
         <DS.table id="members-table" cols={@cols}>
           <DS.row
             :for={{membership, index} <- Enum.with_index(@members)}
@@ -443,6 +447,13 @@ defmodule PromptOnWeb.OrgMembersLive do
   defp pending_invitations(assigns) do
     ~H"""
     <div style="margin-top:14px;">
+      <h2
+        id="pending-invitations-heading"
+        style="font-size:15px;font-weight:500;margin:0 0 8px;"
+      >
+        Pending invitations
+      </h2>
+
       <DS.table id="pending-invitations-table" cols={@cols}>
         <DS.row
           :for={{invitation, index} <- Enum.with_index(@invitations)}
