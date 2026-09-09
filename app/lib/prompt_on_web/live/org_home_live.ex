@@ -40,6 +40,7 @@ defmodule PromptOnWeb.OrgHomeLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Accounts
+  alias PromptOn.Accounts.Permissions
   alias PromptOn.Prompts
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.OrgSettingsLive
@@ -50,7 +51,7 @@ defmodule PromptOnWeb.OrgHomeLive do
     {:ok,
      socket
      |> assign(
-       page_title: Layouts.org_label(socket.assigns.organization),
+       page_title: "Projects · #{Layouts.org_label(socket.assigns.organization)}",
        setup_dismissed?: false,
        setup_form: setup_form(),
        org_form: nil
@@ -86,9 +87,17 @@ defmodule PromptOnWeb.OrgHomeLive do
     assign(socket, :provider_keys, keys)
   end
 
-  @doc "Whether to draw the setup card: no key at all, and not dismissed in this session."
+  @doc "Whether to draw the setup card: no key at all, manager-only, and not dismissed."
   @spec show_setup?(map()) :: boolean()
-  def show_setup?(assigns), do: assigns.provider_keys == [] and not assigns.setup_dismissed?
+  def show_setup?(%{provider_keys: [], setup_dismissed?: false} = assigns),
+    do: provider_setup_manage?(assigns)
+
+  def show_setup?(_assigns), do: false
+
+  defp provider_setup_manage?(%{current_user: user, organization: %{id: organization_id}}),
+    do: Permissions.manage?(user, organization_id)
+
+  defp provider_setup_manage?(_assigns), do: false
 
   defp build_form(socket, params) do
     PromptOn.Projects.Project
@@ -298,10 +307,10 @@ defmodule PromptOnWeb.OrgHomeLive do
     >
       <DS.screen
         id="org-home-screen"
-        title={Layouts.org_label(@organization)}
-        sub={projects_sub(@organization)}
+        title="Projects"
         max_w={900}
       >
+        <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />
         <:actions>
           <DS.btn_link
             id="new-org-btn"
@@ -460,9 +469,6 @@ defmodule PromptOnWeb.OrgHomeLive do
     </Layouts.app>
     """
   end
-
-  # The title is already the organization name, so the subtitle only says how PromptOn is hosted.
-  defp projects_sub(_organization), do: "self-hosted"
 
   # The card that stands only when the organization has no BYOK key at all. A key entered here is
   # **organization-owned**, so every project in this organization shares it: the arena and AI

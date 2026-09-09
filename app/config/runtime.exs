@@ -78,7 +78,7 @@ config :prompton, PromptOn.Vault,
 config :prompton, :openrouter_api_key, ptn_env.("OPENROUTER_API_KEY", nil)
 
 # ---------------------------------------------------------------------------
-# Mail — sign-in code emails are all there is (ADR 0008). Sending goes through Resend
+# Mail — sign-in codes (ADR 0008) and organization invitations go through Resend
 # (`Resend.Swoosh.Adapter`).
 #   PTN_RESEND_API_KEY  Required in prod (boot fails without it). dev uses Resend when set,
 #                       `/dev/mailbox` otherwise. test always uses `Swoosh.Adapters.Test`
@@ -107,7 +107,7 @@ case config_env() do
         resend_api_key ||
           raise("""
           environment variable PTN_RESEND_API_KEY is missing.
-          Sign-in emails are sent through Resend — create an API key at https://resend.com
+          Sign-in and invitation emails use Resend — create an API key at https://resend.com
           (the sending domain prompton.ai must be verified there: SPF + DKIM).
           """)
 

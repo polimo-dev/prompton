@@ -38,6 +38,8 @@ defmodule PromptOn.Accounts do
       define :create_organization, action: :create
       define :create_personal_organization, action: :create_personal
       define :rename_organization, action: :rename
+      define :transfer_organization_ownership, action: :transfer_ownership
+      define :destroy_organization, action: :destroy
       define :claim_organization_slug, action: :claim_slug
 
       # Entitlement tier (ADR 0010). `:set_plan` is system-actor only; the judge model is a
@@ -63,6 +65,17 @@ defmodule PromptOn.Accounts do
     resource PromptOn.Accounts.Membership do
       define :add_member, action: :add
       define :list_memberships, action: :read
+      define :change_member_role, action: :change_role
+      define :assign_member_projects, action: :assign_projects
+      define :remove_member, action: :remove
+    end
+
+    resource PromptOn.Accounts.Invitation do
+      define :invite_member, action: :invite
+      define :list_invitations, action: :list
+      define :revoke_invitation, action: :revoke
+      define :preview_invitation, action: :preview, args: [:token]
+      define :accept_invitation, action: :accept, args: [:token]
     end
 
     # BYOK provider keys are **organization-owned** (2026-09-01 revision: moved up from the

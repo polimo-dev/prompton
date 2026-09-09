@@ -142,11 +142,11 @@ defmodule PromptOn.Accounts.ProviderKey do
     end
 
     policy action_type(:read) do
-      authorize_if {PromptOn.Checks.OrganizationMember, path: [:organization]}
+      authorize_if {PromptOn.Checks.OrganizationManager, path: [:organization]}
     end
 
     policy action_type([:create, :update, :destroy]) do
-      authorize_if {PromptOn.Checks.OrganizationMember, path: [:organization]}
+      authorize_if {PromptOn.Checks.OrganizationManager, path: [:organization]}
     end
   end
 

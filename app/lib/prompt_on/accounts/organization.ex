@@ -90,6 +90,14 @@ defmodule PromptOn.Accounts.Organization do
       accept [:judge_model]
     end
 
+    update :transfer_ownership do
+      description "Transfers ownership to another existing team organization member."
+
+      require_atomic? false
+      argument :user_id, :uuid, allow_nil?: false
+      change PromptOn.Accounts.Organization.Changes.TransferOwnership
+    end
+
     update :claim_slug do
       description """
       Claims a slug. This is the path by which a personal organization is promoted to a team
@@ -134,6 +142,12 @@ defmodule PromptOn.Accounts.Organization do
       prepare build(sort: [personal?: :desc, name: :asc])
       filter expr(exists(memberships, user_id == ^arg(:user_id)))
     end
+
+    destroy :destroy do
+      description "Deletes a team organization. Personal organizations are retained for /personal."
+      require_atomic? false
+      change PromptOn.Accounts.Organization.Changes.ProtectPersonalOrganization
+    end
   end
 
   policies do
@@ -152,7 +166,17 @@ defmodule PromptOn.Accounts.Organization do
     end
 
     policy action([:rename, :claim_slug, :set_judge_model]) do
-      authorize_if PromptOn.Checks.OrganizationMember
+      authorize_if PromptOn.Checks.OrganizationManager
+    end
+
+    policy action(:transfer_ownership) do
+      forbid_if expr(personal? == true)
+      authorize_if PromptOn.Checks.OrganizationOwner
+    end
+
+    policy action(:destroy) do
+      forbid_if expr(personal? == true)
+      authorize_if PromptOn.Checks.OrganizationOwner
     end
 
     policy action(:create) do

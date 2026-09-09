@@ -56,7 +56,14 @@ defmodule PromptOnWeb.OrgUsageLive do
 
   @impl Phoenix.LiveView
   def handle_params(params, _uri, socket) do
-    projects = socket.assigns.projects
+    # Grants may change while this LiveView is connected. Stats bypasses resource policies,
+    # so refresh the authorized project list before every aggregation.
+    projects =
+      PromptOnWeb.LiveProjectScope.list_projects(
+        socket.assigns.organization,
+        socket.assigns.current_user
+      )
+
     period = period_param(params)
 
     # Compute the window **once** so the project totals and the use case breakdown see the same
@@ -68,6 +75,7 @@ defmodule PromptOnWeb.OrgUsageLive do
 
     {:noreply,
      assign(socket,
+       projects: projects,
        period: period,
        open: open,
        rows: rows,
@@ -250,7 +258,6 @@ defmodule PromptOnWeb.OrgUsageLive do
       <DS.screen
         id="org-usage-screen"
         title="Usage"
-        sub={Layouts.org_label(@organization)}
         max_w={980}
       >
         <:crumb label={Layouts.org_label(@organization)} navigate={~p"/#{@org_slug}"} />

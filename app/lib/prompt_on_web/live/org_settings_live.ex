@@ -44,6 +44,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
   use PromptOnWeb, :live_view
 
   alias PromptOn.Accounts
+  alias PromptOn.Accounts.Permissions
   alias PromptOn.Entitlements
   alias PromptOnWeb.ErrorText
   alias PromptOnWeb.OrgComponents, as: OC
@@ -73,13 +74,24 @@ defmodule PromptOnWeb.OrgSettingsLive do
        name_form: name_form(socket.assigns.organization),
        slug_form: slug_form(socket.assigns.organization),
        judge_form: judge_form(socket.assigns.organization),
-       provider_key: nil
+       provider_key: nil,
+       can_manage?: false,
+       owner?: false,
+       transfer_members: []
      )}
   end
 
   @impl Phoenix.LiveView
   def handle_params(params, _uri, socket) do
     tab = tab_param(params)
+    user = socket.assigns.current_user
+    organization = socket.assigns.organization
+
+    socket =
+      assign(socket,
+        can_manage?: Permissions.manage?(user, organization.id),
+        owner?: Permissions.owner?(user, organization.id)
+      )
 
     {:noreply,
      socket
@@ -136,6 +148,29 @@ defmodule PromptOnWeb.OrgSettingsLive do
 
   # ---------------------------------------------------------------------------
   # Modal (URL target)
+
+  defp apply_modal(%{assigns: %{owner?: true}} = socket, "general", %{"transfer-owner" => "1"}) do
+    members =
+      Accounts.list_memberships!(
+        actor: socket.assigns.current_user,
+        query: [filter: [organization_id: socket.assigns.organization.id]],
+        load: [:user]
+      )
+      |> Enum.reject(&(&1.user_id == socket.assigns.current_user.id))
+
+    assign(socket,
+      modal: :transfer_owner,
+      transfer_members: members,
+      form: to_form(%{"user_id" => ""}, as: :transfer)
+    )
+  end
+
+  defp apply_modal(%{assigns: %{owner?: true}} = socket, "general", %{"delete-org" => "1"}) do
+    assign(socket, modal: :delete_organization, form: to_form(%{"name" => ""}, as: :confirm))
+  end
+
+  defp apply_modal(%{assigns: %{can_manage?: false}} = socket, _tab, _params),
+    do: assign(socket, modal: nil)
 
   # With a single provider the value of `?add-provider=` no longer selects anything: if present,
   # the modal opens.
@@ -305,6 +340,44 @@ defmodule PromptOnWeb.OrgSettingsLive do
     end
   end
 
+  def handle_event("transfer_ownership", %{"transfer" => params}, socket) do
+    case Accounts.transfer_organization_ownership(
+           socket.assigns.organization,
+           %{user_id: params["user_id"]},
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, _organization} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Ownership transferred. You are now an admin.")
+         |> push_navigate(to: settings_path(socket, "general"))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+    end
+  end
+
+  def handle_event("delete_organization", %{"confirm" => %{"name" => name}}, socket) do
+    if name == socket.assigns.organization.name do
+      case Accounts.destroy_organization(socket.assigns.organization,
+             actor: socket.assigns.current_user
+           ) do
+        :ok -> organization_deleted(socket)
+        {:ok, _organization} -> organization_deleted(socket)
+        {:error, error} -> {:noreply, put_flash(socket, :error, ErrorText.message(error))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Organization name does not match.")}
+    end
+  end
+
+  defp organization_deleted(socket) do
+    {:noreply,
+     socket
+     |> put_flash(:info, "Organization deleted")
+     |> push_navigate(to: ~p"/personal")}
+  end
+
   # ---------------------------------------------------------------------------
   # Helpers
 
@@ -347,7 +420,6 @@ defmodule PromptOnWeb.OrgSettingsLive do
       <DS.screen
         id="org-settings-screen"
         title="Organization settings"
-        sub={Layouts.org_label(@organization)}
         max_w={880}
         tabs={tabs(@org_slug)}
         active_tab={@tab}
@@ -359,11 +431,26 @@ defmodule PromptOnWeb.OrgSettingsLive do
           name_form={@name_form}
           slug_form={@slug_form}
           judge_form={@judge_form}
+          can_manage?={@can_manage?}
         />
         <.providers_tab
           :if={@tab == "providers"}
           org_slug={@org_slug}
           provider_key={@provider_key}
+          can_manage?={@can_manage?}
+        />
+        <.ownership_card
+          :if={@tab == "general" and @owner?}
+          organization={@organization}
+          org_slug={@org_slug}
+        />
+        <.ownership_modal
+          :if={@modal in [:transfer_owner, :delete_organization]}
+          modal={@modal}
+          form={@form}
+          organization={@organization}
+          org_slug={@org_slug}
+          members={@transfer_members}
         />
         <.add_provider_modal :if={@modal == :add_provider} org_slug={@org_slug} form={@form} />
         <.rotate_provider_modal
@@ -383,13 +470,14 @@ defmodule PromptOnWeb.OrgSettingsLive do
   attr :name_form, :map, required: true
   attr :slug_form, :map, required: true
   attr :judge_form, :map, required: true
+  attr :can_manage?, :boolean, required: true
 
   defp general_tab(assigns) do
     assigns = assign(assigns, :plan, Entitlements.plan(assigns.organization))
 
     ~H"""
     <div id="org-settings-general">
-      <.plan_card plan={@plan} judge_form={@judge_form} />
+      <.plan_card plan={@plan} judge_form={@judge_form} can_manage?={@can_manage?} />
 
       <SC.setting_card
         id="org-general-card"
@@ -398,7 +486,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
       >
         <form id="org-name-form" phx-submit="save_name" phx-change="validate_name">
           <div class="mono-label" style="margin-bottom:7px;">name</div>
-          <DS.ds_input id="org-name" field={@name_form[:name]} />
+          <DS.ds_input id="org-name" field={@name_form[:name]} readonly={not @can_manage?} />
         </form>
         <div style="display:flex;align-items:center;gap:7px;margin-top:12px;">
           <DSIcons.icon name="building" size={13} class="tx3" />
@@ -407,13 +495,20 @@ defmodule PromptOnWeb.OrgSettingsLive do
           </span>
         </div>
         <:footer>
-          <DS.btn id="save-org-name" variant="primary" form="org-name-form" type="submit">
+          <DS.btn
+            :if={@can_manage?}
+            id="save-org-name"
+            variant="primary"
+            form="org-name-form"
+            type="submit"
+          >
             Save
           </DS.btn>
         </:footer>
       </SC.setting_card>
 
       <SC.setting_card
+        :if={@can_manage?}
         id="org-slug-card"
         title={if @organization.personal?, do: "Convert to team organization", else: "URL"}
         desc={slug_desc(@organization)}
@@ -442,6 +537,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
   # (`mix prompton.set_plan`, later the admin app), so a self-serve control would be a dead one.
   attr :plan, :atom, required: true
   attr :judge_form, :map, required: true
+  attr :can_manage?, :boolean, required: true
 
   # The plan window and the payload window are two different rules. The log **row** lives for the
   # plan's `log_retention_days`; the stored input/output inside it expires at
@@ -495,6 +591,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
       <form id="org-judge-form" phx-submit="save_judge_model" phx-change="validate_judge">
         <DS.ds_input
           id="org-judge-model"
+          readonly={not @can_manage?}
           field={@judge_form[:judge_model]}
           mono
           placeholder={default_judge_model()}
@@ -504,7 +601,13 @@ defmodule PromptOnWeb.OrgSettingsLive do
         Model used to score evaluations. Runs on your OpenRouter key.
       </div>
       <:footer>
-        <DS.btn id="save-judge-model" variant="solid" form="org-judge-form" type="submit">
+        <DS.btn
+          :if={@can_manage?}
+          id="save-judge-model"
+          variant="solid"
+          form="org-judge-form"
+          type="submit"
+        >
           Save judge model
         </DS.btn>
       </:footer>
@@ -546,10 +649,122 @@ defmodule PromptOnWeb.OrgSettingsLive do
     do:
       "Changing the URL key moves every page in this organization. Links people already have stop working."
 
+  attr :organization, :map, required: true
+  attr :org_slug, :string, required: true
+
+  defp ownership_card(assigns) do
+    ~H"""
+    <SC.setting_card
+      id="organization-ownership-card"
+      title="Ownership"
+      desc="Only the owner can transfer ownership or delete this organization."
+    >
+      <p :if={@organization.personal?} class="text-sm text-[var(--tx-2)]">
+        Convert your personal organization to a team organization before transferring ownership or deleting it.
+      </p>
+      <div :if={not @organization.personal?} class="flex flex-wrap gap-3">
+        <DS.btn_link
+          id="transfer-organization-owner"
+          variant="outline"
+          patch={~p"/#{@org_slug}/settings?tab=general&transfer-owner=1"}
+        >
+          Transfer ownership
+        </DS.btn_link>
+        <DS.btn_link
+          id="delete-organization"
+          variant="danger"
+          patch={~p"/#{@org_slug}/settings?tab=general&delete-org=1"}
+        >
+          Delete organization
+        </DS.btn_link>
+      </div>
+    </SC.setting_card>
+    """
+  end
+
+  attr :organization, :map, required: true
+  attr :org_slug, :string, required: true
+  attr :modal, :atom, required: true
+  attr :form, :map, required: true
+  attr :members, :list, required: true
+
+  defp ownership_modal(assigns) do
+    ~H"""
+    <DS.modal
+      id="organization-ownership-modal"
+      on_close={~p"/#{@org_slug}/settings?tab=general"}
+      width={480}
+      icon="alert"
+      title={if @modal == :transfer_owner, do: "Transfer ownership", else: "Delete organization"}
+    >
+      <.form
+        :if={@modal == :transfer_owner}
+        for={@form}
+        id="transfer-ownership-form"
+        phx-submit="transfer_ownership"
+        phx-change="validate_form"
+      >
+        <p class="mb-4 text-sm text-[var(--tx-2)]">
+          Choose an existing member to become the owner. You will become an admin.
+        </p>
+        <.input
+          field={@form[:user_id]}
+          type="select"
+          label="New owner"
+          prompt="Select a member"
+          options={Enum.map(@members, &{PromptOnWeb.OrgMembersLive.member_email(&1), &1.user_id})}
+          required
+        />
+        <p :if={@members == []} class="mt-3 text-sm text-[var(--tx-2)]">
+          Invite a member and wait for them to join before transferring ownership.
+        </p>
+      </.form>
+      <.form
+        :if={@modal == :delete_organization}
+        for={@form}
+        id="delete-organization-form"
+        phx-submit="delete_organization"
+        phx-change="validate_form"
+      >
+        <p class="mb-4 text-sm text-[var(--tx-2)]">
+          This permanently deletes the organization and its projects, invitations, and memberships.
+          Type <strong>{@organization.name}</strong> to confirm.
+        </p>
+        <.input field={@form[:name]} label="Organization name" required autocomplete="off" />
+      </.form>
+      <:footer>
+        <DS.btn_link variant="ghost" patch={~p"/#{@org_slug}/settings?tab=general"}>
+          Cancel
+        </DS.btn_link>
+        <DS.btn
+          :if={@modal == :transfer_owner}
+          id="confirm-transfer-ownership"
+          variant="primary"
+          form="transfer-ownership-form"
+          type="submit"
+          disabled={@members == []}
+        >
+          Transfer ownership
+        </DS.btn>
+        <DS.btn
+          :if={@modal == :delete_organization}
+          id="confirm-delete-organization"
+          variant="danger"
+          form="delete-organization-form"
+          type="submit"
+        >
+          Delete organization
+        </DS.btn>
+      </:footer>
+    </DS.modal>
+    """
+  end
+
   # --- Provider Keys ---------------------------------------------------------
 
   attr :org_slug, :string, required: true
   attr :provider_key, :map, default: nil
+  attr :can_manage?, :boolean, required: true
 
   defp providers_tab(assigns) do
     ~H"""
@@ -586,7 +801,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
             <DS.status_dot kind={:idle} /> none
           </span>
           <DS.icon_btn
-            :if={@provider_key}
+            :if={not is_nil(@provider_key) and @can_manage?}
             id="rotate-provider-openrouter"
             name="rerun"
             size={24}
@@ -594,7 +809,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
             patch={~p"/#{@org_slug}/settings?tab=providers&rotate-provider=#{@provider_key.id}"}
           />
           <DS.icon_btn
-            :if={@provider_key}
+            :if={not is_nil(@provider_key) and @can_manage?}
             id="remove-provider-openrouter"
             name="trash"
             size={24}
@@ -606,7 +821,7 @@ defmodule PromptOnWeb.OrgSettingsLive do
         </SC.row_box>
         <:footer>
           <DS.btn_link
-            :if={is_nil(@provider_key)}
+            :if={is_nil(@provider_key) and @can_manage?}
             id="add-provider-openrouter"
             variant="primary"
             icon="plus"

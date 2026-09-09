@@ -44,9 +44,21 @@ defmodule PromptOnWeb.ProjectOverviewLive do
 
   @impl Phoenix.LiveView
   def handle_params(params, _uri, socket) do
-    period = period_param(params)
+    # Stats reads directly from the repo, so a connected screen must recheck access after a
+    # grant is revoked instead of trusting the project assigned at mount.
+    case PromptOn.Projects.get_project(socket.assigns.project.id,
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, %{archived_at: nil}} ->
+        period = period_param(params)
+        {:noreply, assign(socket, period: period, totals: totals(socket, period))}
 
-    {:noreply, assign(socket, period: period, totals: totals(socket, period))}
+      _ ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Project access is no longer available.")
+         |> push_navigate(to: ~p"/#{socket.assigns.org_slug}")}
+    end
   end
 
   # ---------------------------------------------------------------------------

@@ -128,9 +128,14 @@ defmodule PromptOn.Evals.CalibrationSetTest do
 
       {:ok, _membership} =
         PromptOn.Accounts.add_member(
-          %{organization_id: project.organization_id, user_id: user.id, role: :editor},
+          %{organization_id: project.organization_id, user_id: user.id, role: :member},
           actor: system_actor()
         )
+
+      PromptOn.Projects.grant_project_membership!(
+        %{project_id: project.id, user_id: user.id},
+        actor: system_actor()
+      )
 
       {:ok, set} =
         Evals.sample_calibration_set(%{use_case_id: use_case.id, sample_size: 5},

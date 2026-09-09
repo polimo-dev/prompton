@@ -29,6 +29,12 @@ defmodule PromptOn.Projects do
       define :archive_project, action: :archive
     end
 
+    resource PromptOn.Projects.ProjectMembership do
+      define :grant_project_membership, action: :grant
+      define :list_project_memberships, action: :read
+      define :revoke_project_membership, action: :revoke
+    end
+
     resource PromptOn.Projects.Environment do
       define :add_environment, action: :add
       define :get_environment, action: :read, get_by: [:id], not_found_error?: false

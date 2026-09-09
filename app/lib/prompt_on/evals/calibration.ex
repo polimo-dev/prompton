@@ -34,7 +34,8 @@ defmodule PromptOn.Evals.Calibration do
   """
   @spec draft(CalibrationSet.t(), keyword()) :: {:ok, Rubric.t()} | {:error, term()}
   def draft(%CalibrationSet{} = set, opts) do
-    with {:ok, context} <- context(set.use_case_id, set.project_id),
+    with :ok <- authorize_record(set, opts),
+         {:ok, context} <- context(set.use_case_id, set.project_id),
          {:ok, samples} <- scored_samples(set.id, opts),
          judge_opts = judge_opts(nil, context, opts),
          {:ok, criteria, _usage} <- Judge.draft_rubric(context.use_case, samples, judge_opts),
@@ -51,7 +52,8 @@ defmodule PromptOn.Evals.Calibration do
   """
   @spec revise(Rubric.t(), keyword()) :: {:ok, Rubric.t()} | {:error, term()}
   def revise(%Rubric{} = rubric, opts) do
-    with {:ok, set_id} <- calibration_set_id(rubric),
+    with :ok <- authorize_record(rubric, opts),
+         {:ok, set_id} <- calibration_set_id(rubric),
          {:ok, context} <- context(rubric.use_case_id, rubric.project_id),
          {:ok, samples} <- scored_samples(set_id, opts),
          judge_opts = judge_opts(rubric, context, opts),
@@ -69,7 +71,8 @@ defmodule PromptOn.Evals.Calibration do
   """
   @spec score_set(Rubric.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def score_set(%Rubric{} = rubric, opts) do
-    with {:ok, set_id} <- calibration_set_id(rubric),
+    with :ok <- authorize_record(rubric, opts),
+         {:ok, set_id} <- calibration_set_id(rubric),
          {:ok, context} <- context(rubric.use_case_id, rubric.project_id),
          {:ok, samples} <- scored_samples(set_id, opts) do
       {:ok, score_samples(rubric, context, samples, opts)}
@@ -198,6 +201,19 @@ defmodule PromptOn.Evals.Calibration do
   end
 
   defp call_opts(opts), do: Keyword.take(opts, [:tenant, :actor])
+
+  # The context and encrypted sample reads below need the system actor. Authorize the caller
+  # first, including on re-score where no later rubric write would enforce resource policies.
+  defp authorize_record(record, opts) do
+    with true <- Keyword.get(opts, :tenant) == record.project_id,
+         {:ok, %{archived_at: nil}} <-
+           PromptOn.Projects.get_project(record.project_id, actor: Keyword.get(opts, :actor)),
+         {:ok, %{} = _current} <- Ash.get(record.__struct__, record.id, call_opts(opts)) do
+      :ok
+    else
+      _ -> {:error, :forbidden}
+    end
+  end
 
   defp calibration_set_id(%Rubric{calibration_set_id: nil}),
     do: {:error, :no_calibration_set}

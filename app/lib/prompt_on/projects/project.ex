@@ -32,7 +32,9 @@ defmodule PromptOn.Projects.Project do
       accept [:organization_id, :name, :slug, :timezone, :payload_policy]
       validate PromptOn.Projects.Project.Validations.SlugNotReserved
       validate PromptOn.Projects.Project.Validations.WithinPlanLimit
+      change PromptOn.Projects.Project.Changes.SetCreator
       change PromptOn.Projects.Project.Changes.CreateDefaultEnvironments
+      change PromptOn.Projects.Project.Changes.GrantCreatorMembership
     end
 
     update :rename do
@@ -84,7 +86,11 @@ defmodule PromptOn.Projects.Project do
       authorize_if relates_to_actor_via([:organization, :memberships, :user])
     end
 
-    policy action_type(:update) do
+    policy action(:archive) do
+      authorize_if {PromptOn.Checks.OrganizationManager, path: [:organization]}
+    end
+
+    policy action([:rename, :set_payload_policy]) do
       authorize_if {PromptOn.Checks.ProjectMember, path: []}
     end
   end
@@ -116,6 +122,11 @@ defmodule PromptOn.Projects.Project do
 
     attribute :archived_at, :utc_datetime_usec, public?: true
 
+    attribute :creator_id, :uuid do
+      description "The user who created the project. Set from the actor only."
+      public? true
+    end
+
     create_timestamp :inserted_at
     update_timestamp :updated_at
   end
@@ -123,6 +134,16 @@ defmodule PromptOn.Projects.Project do
   relationships do
     belongs_to :organization, PromptOn.Accounts.Organization do
       allow_nil? false
+      public? true
+    end
+
+    belongs_to :creator, PromptOn.Accounts.User do
+      source_attribute :creator_id
+      allow_nil? true
+      public? true
+    end
+
+    has_many :project_memberships, PromptOn.Projects.ProjectMembership do
       public? true
     end
 
